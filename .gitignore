@@ -1,0 +1,8 @@
+.env.production
+.env.ngrok
+
+node_modules/
+dist/
+coverage/
+
+*.log

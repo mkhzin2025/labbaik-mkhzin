@@ -1,0 +1,26 @@
+{
+	"info": {
+		"_postman_id": "labbaik-socket-test-request",
+		"name": "Labbaik Socket.io - Test Ping",
+		"description": "WebSocket request for testing Labbaik Real-time connection with JWT Auth.",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [],
+	"event": [],
+	"variable": [],
+	"protocolProfileBehavior": {
+		"protocol": "socket.io",
+		"url": "http://localhost:3000",
+		"handshake": {
+			"auth": {
+				"token": "{{access_token}}"
+			}
+		},
+		"events": [
+			{
+				"listen": "ping",
+				"emit": "pong"
+			}
+		]
+	}
+}

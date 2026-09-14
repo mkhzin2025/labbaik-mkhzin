@@ -1,0 +1,185 @@
+{
+	"info": {
+		"_postman_id": "labbaik-ultimate-collection",
+		"name": "Labbaik AI - Ultimate API Collection",
+		"description": "Comprehensive API collection for Labbaik Chatbot and SaaS Platform - Phase 3 Final.",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "1. Authentication",
+			"item": [
+				{
+					"name": "Register New User",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"email\": \"admin@labbaik.ai\",\n    \"password\": \"password123\",\n    \"fullName\": \"Salem Alnahdi\"\n}",
+							"options": { "raw": { "language": "json" } }
+						},
+						"url": { "raw": "{{base_url}}/auth/register", "host": ["{{base_url}}"], "path": ["auth", "register"] }
+					}
+				},
+				{
+					"name": "Login User",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"var jsonData = pm.response.json();",
+									"if (jsonData.token) { pm.environment.set(\"access_token\", jsonData.token); }"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"email\": \"admin@labbaik.ai\",\n    \"password\": \"password123\"\n}",
+							"options": { "raw": { "language": "json" } }
+						},
+						"url": { "raw": "{{base_url}}/auth/login", "host": ["{{base_url}}"], "path": ["auth", "login"] }
+					}
+				}
+			]
+		},
+		{
+			"name": "2. User Profile",
+			"item": [
+				{
+					"name": "Get My Profile",
+					"request": {
+						"auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+						"method": "GET",
+						"url": { "raw": "{{base_url}}/users/me", "host": ["{{base_url}}"], "path": ["users", "me"] }
+					}
+				},
+				{
+					"name": "Update My Profile",
+					"request": {
+						"auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+						"method": "PATCH",
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"fullName\": \"Salem Updated\",\n    \"email\": \"admin@labbaik.ai\",\n    \"password\": \"newpassword123\"\n}",
+							"options": { "raw": { "language": "json" } }
+						},
+						"url": { "raw": "{{base_url}}/users/me", "host": ["{{base_url}}"], "path": ["users", "me"] }
+					}
+				}
+			]
+		},
+		{
+			"name": "3. Notifications Center",
+			"item": [
+				{
+					"name": "Get All Notifications",
+					"request": {
+						"auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+						"method": "GET",
+						"url": { "raw": "{{base_url}}/notifications", "host": ["{{base_url}}"], "path": ["notifications"] }
+					}
+				},
+				{
+					"name": "Mark Notification as Read",
+					"request": {
+						"auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+						"method": "PATCH",
+						"url": { "raw": "{{base_url}}/notifications/:id/read", "host": ["{{base_url}}"], "path": ["notifications", ":id", "read"], "variable": [{ "key": "id", "value": "NOTIF_ID" }] }
+					}
+				},
+				{
+					"name": "Mark All as Read",
+					"request": {
+						"auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+						"method": "PATCH",
+						"url": { "raw": "{{base_url}}/notifications/read-all", "host": ["{{base_url}}"], "path": ["notifications", "read-all"] }
+					}
+				}
+			]
+		},
+		{
+			"name": "4. Store Management",
+			"item": [
+				{
+					"name": "Create/Upsert Store",
+					"request": {
+						"auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+						"method": "POST",
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"متجر لبيك للأثاث المكتبي\",\n    \"description\": \"أفضل أنواع الأثاث الحديث\",\n    \"knowledgeBase\": \"قائمة الأسعار: كراسي 500 ريال. توصيل مجاني.\"\n}",
+							"options": { "raw": { "language": "json" } }
+						},
+						"url": { "raw": "{{base_url}}/stores", "host": ["{{base_url}}"], "path": ["stores"] }
+					}
+				}
+			]
+		},
+		{
+			"name": "5. Google Maps Reviews",
+			"item": [
+				{
+					"name": "Get All Reviews",
+					"request": {
+						"auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+						"method": "GET",
+						"url": { "raw": "{{base_url}}/reviews", "host": ["{{base_url}}"], "path": ["reviews"] }
+					}
+				},
+				{
+					"name": "Simulate Incoming Review",
+					"request": {
+						"auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+						"method": "POST",
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"فهد التميمي\",\n    \"rating\": 5,\n    \"comment\": \"ما شاء الله تبارك الله، الأثاث فخم جداً والتعامل راقي.\"\n}",
+							"options": { "raw": { "language": "json" } }
+						},
+						"url": { "raw": "{{base_url}}/reviews/simulate", "host": ["{{base_url}}"], "path": ["reviews", "simulate"] }
+					}
+				}
+			]
+		},
+		{
+			"name": "6. Webhooks (Simulators)",
+			"item": [
+				{
+					"name": "Simulate WhatsApp (Angry Customer)",
+					"request": {
+						"method": "POST",
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"object\": \"whatsapp_business_account\",\n    \"entry\": [{\n        \"id\": \"123456789\",\n        \"changes\": [{\n            \"value\": {\n                \"messaging_product\": \"whatsapp\",\n                \"metadata\": { \"phone_number_id\": \"123456789\" },\n                \"messages\": [{ \"from\": \"966555555555\", \"text\": { \"body\": \"تأخرتوا جداً في التوصيل وهذا غير مقبول أبداً!!\" } }]\n            },\n            \"field\": \"messages\"\n        }]\n    }]\n}",
+							"options": { "raw": { "language": "json" } }
+						},
+						"url": { "raw": "{{base_url}}/webhooks/whatsapp", "host": ["{{base_url}}"], "path": ["webhooks", "whatsapp"] }
+					}
+				},
+				{
+					"name": "Simulate WhatsApp (Happy Customer)",
+					"request": {
+						"method": "POST",
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"object\": \"whatsapp_business_account\",\n    \"entry\": [{\n        \"id\": \"123456789\",\n        \"changes\": [{\n            \"value\": {\n                \"messaging_product\": \"whatsapp\",\n                \"metadata\": { \"phone_number_id\": \"123456789\" },\n                \"messages\": [{ \"from\": \"966777777777\", \"text\": { \"body\": \"شكراً جزيلاً على الأثاث الرائع، الجودة مذهلة!\" } }]\n            },\n            \"field\": \"messages\"\n        }]\n    }]\n}",
+							"options": { "raw": { "language": "json" } }
+						},
+						"url": { "raw": "{{base_url}}/webhooks/whatsapp", "host": ["{{base_url}}"], "path": ["webhooks", "whatsapp"] }
+					}
+				}
+			]
+		}
+	],
+	"variable": [
+		{ "key": "base_url", "value": "http://localhost:3000", "type": "string" },
+		{ "key": "access_token", "value": "", "type": "string" }
+	]
+}
