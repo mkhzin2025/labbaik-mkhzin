@@ -5,6 +5,8 @@ services:
     restart: unless-stopped
     env_file:
       - .env.production
+    environment:
+      - DOCKER_API_VERSION=1.44
     command:
       - --api.dashboard=false
       - --providers.docker=true
@@ -63,6 +65,7 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3000
+      TYPEORM_SYNCHRONIZE: ${TYPEORM_SYNCHRONIZE:-true}
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
       POSTGRES_USER: ${POSTGRES_USER}
