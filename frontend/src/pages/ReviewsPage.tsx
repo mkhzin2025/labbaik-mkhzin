@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { ar } from 'date-fns/locale';
+import { toEnglishDigits } from '@/lib/utils';
 
 interface Review {
   id: string;
@@ -157,7 +158,7 @@ export default function ReviewsPage() {
                   </div>
                   <div className="flex flex-col items-end gap-2">
                     <span className="text-[10px] text-neutral-400 font-bold flex items-center gap-1">
-                      <Clock size={12} /> {format(new Date(review.createdAt), 'dd MMMM yyyy', { locale: ar })}
+                      <Clock size={12} /> {toEnglishDigits(format(new Date(review.createdAt), 'dd MMMM yyyy', { locale: ar }))}
                     </span>
                     {review.status === 'replied' ? (
                       <span className="px-3 py-1 bg-green-500/10 text-green-400 text-[10px] font-black rounded-full flex items-center gap-1">

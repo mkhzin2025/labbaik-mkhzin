@@ -39,24 +39,37 @@ const SidebarItem = ({ icon, label, path, active, isCollapsed, onNavigate }: Sid
     to={path}
     onClick={onNavigate}
     title={isCollapsed ? label : undefined}
-    className={`flex min-h-12 items-center rounded-lg transition-colors duration-200 group relative focus-visible:ring-2 focus-visible:ring-labbaik-blue ${isCollapsed ? 'justify-center p-3.5' : 'gap-4 px-4 py-3.5'
-      } ${active
-        ? 'bg-labbaik-blue text-labbaik-on-accent shadow-lg shadow-labbaik-blue/20'
-        : 'text-neutral-300 hover:bg-white/5 hover:text-white'
-      }`}
+    className={`flex min-h-12 items-center rounded-2xl transition-all duration-200 group relative border focus-visible:ring-2 focus-visible:ring-labbaik-blue ${
+      isCollapsed ? 'justify-center p-3.5' : 'gap-4 px-4 py-3.5'
+    } ${
+      active
+        ? 'bg-labbaik-blue text-white border-labbaik-blue shadow-lg shadow-labbaik-blue/25 font-bold'
+        : 'border-transparent hover:bg-purple-100/80 hover:border-purple-200 dark:hover:bg-white/10 dark:hover:border-white/15'
+    }`}
     aria-label={label}
   >
-    <div className={`${active ? 'text-labbaik-on-accent' : 'text-labbaik-blue group-hover:brightness-125 transition-[filter] duration-200'}`}>
+    <div className={`transition-transform duration-200 group-hover:scale-110 shrink-0 ${
+      active 
+        ? 'text-white' 
+        : 'text-labbaik-blue dark:text-purple-400 group-hover:text-labbaik-blue dark:group-hover:text-white'
+    }`}>
       {icon}
     </div>
 
     {!isCollapsed && (
       <>
-        <span className="font-bold text-sm whitespace-nowrap overflow-hidden">{label}</span>
-        {active && <ChevronLeft className="mr-auto h-4 w-4" />}
+        <span
+          className={`font-bold text-sm whitespace-nowrap overflow-hidden transition-colors ${
+            active
+              ? 'text-white'
+              : 'text-slate-800 dark:text-slate-200 group-hover:!text-labbaik-blue dark:group-hover:!text-white'
+          }`}
+        >
+          {label}
+        </span>
+        {active && <ChevronLeft className="mr-auto h-4 w-4 shrink-0 text-white" />}
       </>
     )}
-
   </Link>
 );
 
@@ -74,6 +87,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
+    document.documentElement.classList.toggle('dark', theme === 'dark');
     localStorage.setItem('theme', theme);
   }, [theme]);
 
@@ -114,7 +128,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   };
 
   return (
-    <div className="h-screen bg-labbaik-page flex text-white font-sans selection:bg-labbaik-blue/30 overflow-hidden" dir="rtl">
+    <div className="h-screen bg-labbaik-page flex text-neutral-900 dark:text-white font-sans selection:bg-labbaik-blue/30 overflow-hidden" dir="rtl">
       {isSidebarOpen && (
         <button
           type="button"
@@ -125,7 +139,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       )}
       {/* Sidebar */}
       <aside
-        className={`fixed inset-y-0 right-0 z-50 bg-labbaik-surface border-l border-white/5 transition-transform duration-300 ease-in-out transform shadow-2xl h-screen flex flex-col ${isCollapsed ? 'w-24' : 'w-72'
+        className={`fixed inset-y-0 right-0 z-50 bg-labbaik-surface border-l border-purple-100/60 dark:border-white/10 transition-transform duration-300 ease-in-out transform shadow-2xl h-screen flex flex-col ${isCollapsed ? 'w-24' : 'w-72'
           } ${isSidebarOpen ? 'translate-x-0' : 'translate-x-full'
           } lg:relative lg:translate-x-0`}
       >
@@ -137,7 +151,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
             <button
               onClick={() => setCollapsed(!isCollapsed)}
-              className="hidden lg:flex p-2 hover:bg-white/5 rounded-xl text-neutral-400 hover:text-labbaik-blue transition-colors"
+              className="hidden lg:flex p-2.5 hover:bg-labbaik-blue/10 dark:hover:bg-white/5 rounded-2xl text-neutral-500 dark:text-neutral-400 hover:text-labbaik-blue dark:hover:text-white transition-all hover:scale-105"
               aria-label={isCollapsed ? 'توسيع الشريط الجانبي' : 'طي الشريط الجانبي'}
               aria-expanded={!isCollapsed}
             >
@@ -157,14 +171,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             ))}
           </nav>
 
-          <div className="pt-8 border-t border-white/5 shrink-0">
+          <div className="pt-8 border-t border-purple-100/50 dark:border-white/10 shrink-0">
             <button
               onClick={handleLogout}
-              className={`w-full flex items-center text-neutral-300 hover:text-red-400 hover:bg-red-400/5 rounded-2xl transition-colors font-bold text-sm group ${isCollapsed ? 'justify-center p-3.5' : 'gap-4 px-4 py-4'
+              className={`w-full flex items-center text-neutral-600 dark:text-neutral-300 hover:text-red-500 hover:bg-red-500/10 rounded-2xl transition-all font-bold text-sm group ${isCollapsed ? 'justify-center p-3.5' : 'gap-4 px-4 py-4'
                 }`}
               aria-label="تسجيل الخروج"
             >
-              <LogOut size={22} className="text-neutral-300 group-hover:text-red-400 transition-colors" />
+              <LogOut size={22} className="text-neutral-500 dark:text-neutral-300 group-hover:text-red-500 group-hover:scale-110 transition-all" />
               {!isCollapsed && <span>تسجيل الخروج</span>}
             </button>
           </div>
@@ -173,10 +187,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden">
-        <header className="h-16 lg:h-24 bg-labbaik-surface/50 backdrop-blur-md border-b border-white/5 flex items-center justify-between px-6 lg:px-10 shrink-0 z-40">
+        <header className="h-16 lg:h-24 bg-labbaik-surface/80 backdrop-blur-md border-b border-purple-100/60 dark:border-white/10 flex items-center justify-between px-6 lg:px-10 shrink-0 z-40">
           <div className="flex items-center gap-4">
             <button
-              className="lg:hidden text-neutral-300 hover:text-white p-2"
+              className="lg:hidden text-neutral-600 dark:text-neutral-300 hover:bg-labbaik-blue/10 hover:text-labbaik-blue p-2.5 rounded-2xl transition-all"
               onClick={() => setSidebarOpen(!isSidebarOpen)}
               aria-label={isSidebarOpen ? 'إغلاق القائمة الجانبية' : 'فتح القائمة الجانبية'}
               aria-expanded={isSidebarOpen}
@@ -184,29 +198,29 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               {isSidebarOpen ? <X size={28} /> : <Menu size={28} />}
             </button>
             <div className="hidden lg:block text-right">
-              <h2 className="text-xl font-black tracking-tight leading-none">أهلاً بك، {user.fullName || 'أدمن'} 👋</h2>
-              <p className="text-xs text-neutral-300 mt-2 font-medium">نحن نراقب كل شيء من أجلك.</p>
+              <h2 className="text-xl font-black tracking-tight leading-none text-neutral-900 dark:text-white">أهلاً بك، {user.fullName || 'أدمن'} 👋</h2>
+              <p className="text-xs text-neutral-500 dark:text-neutral-300 mt-2 font-medium">نحن نراقب كل شيء من أجلك.</p>
             </div>
           </div>
 
-          <div className="flex items-center gap-4 lg:gap-8">
+          <div className="flex items-center gap-3 lg:gap-5">
             <button
               onClick={toggleTheme}
-              className="p-2 lg:p-3 bg-white/5 border border-white/10 rounded-2xl text-neutral-300 hover:text-labbaik-blue hover:border-labbaik-blue/30 transition-colors"
+              className="p-2.5 lg:p-3 bg-labbaik-surface border border-purple-100/80 dark:border-white/10 rounded-2xl text-neutral-600 hover:bg-labbaik-blue/10 hover:border-labbaik-blue/30 hover:text-labbaik-blue dark:text-neutral-300 dark:hover:bg-white/10 dark:hover:text-white transition-all shadow-sm hover:scale-105"
               aria-label={theme === 'light' ? 'تفعيل الوضع الداكن' : 'تفعيل الوضع الفاتح'}
             >
               {theme === 'light' ? <Moon size={20} /> : <Sun size={20} />}
             </button>
             <NotificationCenter socket={socket} />
-            <div className="h-10 w-px bg-white/10 hidden lg:block"></div>
+            <div className="h-10 w-px bg-purple-100 dark:bg-white/10 hidden lg:block"></div>
             <div className="flex items-center gap-4">
               <div className="text-left hidden sm:block">
-                <p className="text-sm font-black leading-none">{user.fullName}</p>
-                <p className="text-[10px] text-neutral-200 mt-1.5 uppercase tracking-widest font-bold">
+                <p className="text-sm font-black leading-none text-neutral-900 dark:text-white">{user.fullName}</p>
+                <p className="text-[10px] text-neutral-500 dark:text-neutral-300 mt-1.5 uppercase tracking-widest font-bold">
                   {user.role === 'admin' ? 'مدير النظام' : 'موظف'}
                 </p>
               </div>
-              <button className="w-10 h-10 lg:w-12 lg:h-12 bg-gradient-to-br from-labbaik-blue/30 to-labbaik-blue/5 border border-labbaik-blue/20 rounded-2xl flex items-center justify-center overflow-hidden shadow-xl shadow-labbaik-blue/10 hover:border-labbaik-blue transition-all cursor-pointer group" aria-label="ملف المستخدم">
+              <button className="w-10 h-10 lg:w-12 lg:h-12 bg-gradient-to-br from-labbaik-blue/20 to-labbaik-blue/5 border border-labbaik-blue/20 rounded-2xl flex items-center justify-center overflow-hidden shadow-md shadow-labbaik-blue/10 hover:border-labbaik-blue hover:scale-105 hover:shadow-lg transition-all cursor-pointer group" aria-label="ملف المستخدم">
                 <User size={22} className="text-labbaik-blue group-hover:scale-110 transition-transform" />
               </button>
             </div>

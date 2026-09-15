@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { ar } from 'date-fns/locale';
+import { toEnglishDigits } from '@/lib/utils';
 import { Link } from 'react-router-dom';
 
 interface Notification {
@@ -119,39 +120,39 @@ export default function NotificationCenter({ socket }: { socket: any }) {
     <div className="relative" ref={dropdownRef}>
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="relative text-gray-400 hover:text-white transition-all hover:scale-110 p-2"
+        className="relative p-2.5 lg:p-3 bg-labbaik-surface border border-purple-100/80 dark:border-white/10 rounded-2xl text-neutral-600 hover:bg-labbaik-blue/10 hover:border-labbaik-blue/30 hover:text-labbaik-blue dark:text-neutral-300 dark:hover:bg-white/10 dark:hover:text-white transition-all shadow-sm hover:scale-105"
         aria-label="مركز التنبيهات"
       >
-        <Bell size={24} />
+        <Bell size={20} />
         {unreadCount > 0 && (
-          <span className="absolute top-1 right-1 w-5 h-5 bg-labbaik-blue text-labbaik-on-accent text-[10px] font-black rounded-full flex items-center justify-center border-2 border-labbaik-page animate-bounce">
+          <span className="absolute -top-1 -right-1 w-5 h-5 bg-labbaik-blue text-labbaik-on-accent text-[10px] font-black rounded-full flex items-center justify-center border-2 border-labbaik-surface animate-bounce shadow-sm">
             {unreadCount}
           </span>
         )}
       </button>
 
       {isOpen && (
-        <div className="fixed left-4 right-4 top-24 z-[100] mt-0 flex max-h-[calc(100vh-7rem)] flex-col overflow-hidden rounded-[2rem] border border-white/10 bg-labbaik-surface shadow-3xl animate-fade-in lg:left-8 lg:right-auto lg:w-96 lg:max-w-96">
+        <div className="fixed left-4 right-4 top-24 z-[100] mt-0 flex max-h-[calc(100vh-7rem)] flex-col overflow-hidden rounded-3xl border border-purple-100/80 dark:border-white/10 bg-labbaik-surface shadow-2xl animate-fade-in lg:left-8 lg:right-auto lg:w-96 lg:max-w-96 text-neutral-900 dark:text-white">
 
           {/* Permission Prompt Header */}
           {browserPermission !== 'granted' && (
             <div className="bg-labbaik-blue/10 p-4 border-b border-labbaik-blue/20 flex items-center justify-between gap-4">
               <div className="flex items-center gap-3">
                 <Monitor className="text-labbaik-blue" size={18} />
-                <p className="text-[10px] font-black text-gray-300">إشعارات سطح المكتب معطلة</p>
+                <p className="text-[10px] font-black text-neutral-600 dark:text-neutral-300">إشعارات سطح المكتب معطلة</p>
               </div>
               <button
                 onClick={requestPermission}
-                className="bg-labbaik-blue text-labbaik-on-accent px-3 py-1.5 rounded-lg text-[9px] font-black hover:scale-105 transition-all"
+                className="bg-labbaik-blue text-labbaik-on-accent px-3 py-1.5 rounded-lg text-[9px] font-black hover:scale-105 transition-all shadow-sm"
               >
                 تفعيل الآن
               </button>
             </div>
           )}
 
-          <div className="p-6 border-b border-white/5 flex items-center justify-between">
-            <h3 className="text-sm font-black text-white">مركز التنبيهات</h3>
-            <button onClick={markAllAsRead} className="text-[10px] font-black text-gray-500 hover:text-labbaik-blue transition-colors flex items-center gap-1">
+          <div className="p-6 border-b border-purple-100/60 dark:border-white/10 flex items-center justify-between">
+            <h3 className="text-sm font-black text-neutral-900 dark:text-white">مركز التنبيهات</h3>
+            <button onClick={markAllAsRead} className="text-[10px] font-bold text-neutral-500 hover:text-labbaik-blue transition-colors flex items-center gap-1">
               <CheckCheck size={12} /> تحديد الكل كمقروء
             </button>
           </div>
@@ -160,21 +161,21 @@ export default function NotificationCenter({ socket }: { socket: any }) {
             {loading ? (
               <div className="p-10 text-center"><Loader2 size={24} className="animate-spin text-labbaik-blue mx-auto" /></div>
             ) : notifications.length === 0 ? (
-              <div className="p-10 text-center text-gray-500 text-xs font-bold italic">لا توجد تنبيهات جديدة.</div>
+              <div className="p-10 text-center text-neutral-500 text-xs font-bold italic">لا توجد تنبيهات جديدة.</div>
             ) : (
               notifications.map((notif) => (
                 <div
                   key={notif.id}
                   onClick={() => markAsRead(notif.id)}
-                  className={`p-5 border-b border-white/2 flex gap-4 transition-all hover:bg-white/2 ${!notif.isRead ? 'bg-labbaik-blue/5' : ''}`}
+                  className={`p-5 border-b border-purple-100/40 dark:border-white/5 flex gap-4 transition-all hover:bg-labbaik-blue/5 dark:hover:bg-white/5 cursor-pointer ${!notif.isRead ? 'bg-labbaik-blue/10' : ''}`}
                 >
                   <div className="mt-1">{getIcon(notif.type)}</div>
                   <div className="flex-1 space-y-1">
                     <div className="flex justify-between items-start">
-                      <h4 className={`text-xs font-black ${!notif.isRead ? 'text-white' : 'text-gray-400'}`}>{notif.title}</h4>
-                      <span className="text-[9px] text-gray-600 font-bold">{formatDistanceToNow(new Date(notif.createdAt), { addSuffix: true, locale: ar })}</span>
+                      <h4 className={`text-xs font-black ${!notif.isRead ? 'text-neutral-900 dark:text-white' : 'text-neutral-500 dark:text-neutral-400'}`}>{notif.title}</h4>
+                      <span className="text-[9px] text-neutral-400 dark:text-neutral-500 font-bold">{toEnglishDigits(formatDistanceToNow(new Date(notif.createdAt), { addSuffix: true, locale: ar }))}</span>
                     </div>
-                    <p className="text-[11px] text-gray-500 font-medium leading-relaxed">{notif.message}</p>
+                    <p className="text-[11px] text-neutral-600 dark:text-neutral-400 font-medium leading-relaxed">{notif.message}</p>
                     <Link to={notif.link} onClick={() => setIsOpen(false)} className="inline-flex items-center gap-1 text-[9px] font-black text-labbaik-blue uppercase tracking-widest pt-2 hover:underline">
                       عرض التفاصيل <ExternalLink size={10} />
                     </Link>

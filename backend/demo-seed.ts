@@ -12,6 +12,7 @@ import { Review } from './src/modules/reviews/entities/review.entity';
 import { Flow } from './src/modules/flows/entities/flow.entity';
 import { Notification } from './src/modules/notifications/entities/notification.entity';
 import { Conversation } from './src/modules/conversations/schemas/conversation.schema';
+import * as bcrypt from 'bcrypt';
 
 const DEMO_EMAIL = 'admin@labbaik.local';
 
@@ -75,8 +76,19 @@ async function seedDemo() {
     const notifications = app.get<Repository<Notification>>(getRepositoryToken(Notification));
     const conversations = app.get<Model<Conversation>>(getModelToken(Conversation.name));
 
-    const owner = await users.findOne({ where: { email: DEMO_EMAIL } });
-    if (!owner) throw new Error(`Run the base seed first; user ${DEMO_EMAIL} was not found.`);
+    let owner = await users.findOne({ where: { email: DEMO_EMAIL } });
+    if (!owner) {
+      console.log(`👤 User ${DEMO_EMAIL} not found, creating admin user...`);
+      const salt = await bcrypt.genSalt(10);
+      const hashedPassword = await bcrypt.hash('Admin123!', salt);
+      owner = users.create({
+        email: DEMO_EMAIL,
+        password: hashedPassword,
+        fullName: 'Admin',
+      });
+      owner = await users.save(owner);
+      console.log(`✅ Admin user created (${DEMO_EMAIL} / Admin123!)`);
+    }
 
     let store = await stores.findOne({ where: { owner: { id: owner.id } } });
     if (!store) store = stores.create({ owner });

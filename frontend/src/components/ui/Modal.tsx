@@ -43,13 +43,13 @@ const Modal = React.forwardRef<HTMLDivElement, ModalProps>(
 
     return (
       <div
-        className="fixed inset-0 z-50 flex items-center justify-center bg-neutral-900/80 backdrop-blur-sm"
+        className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
         onClick={handleBackdropClick}
       >
         <div
           ref={ref}
           className={cn(
-            'w-full bg-neutral-900 border border-neutral-800 rounded-lg shadow-2xl',
+            'w-full bg-labbaik-surface border border-labbaik-border rounded-3xl shadow-2xl',
             'max-h-[90vh] overflow-y-auto',
             sizeStyles[size],
             className
@@ -57,15 +57,15 @@ const Modal = React.forwardRef<HTMLDivElement, ModalProps>(
           {...props}
         >
           {(title || closeButton) && (
-            <div className="flex items-center justify-between p-6 border-b border-neutral-800">
+            <div className="flex items-center justify-between p-6 border-b border-labbaik-border">
               {title && (
-                <h2 className="text-xl font-bold text-neutral-100">{title}</h2>
+                <h2 className="text-xl font-bold text-neutral-900 dark:text-white">{title}</h2>
               )}
               {!title && <div />}
               {closeButton && (
                 <button
                   onClick={onClose}
-                  className="text-neutral-500 hover:text-neutral-300 transition-colors focus:outline-none focus:ring-2 focus:ring-primary-500/50 rounded-lg p-1"
+                  className="text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200 transition-colors focus:outline-none focus:ring-2 focus:ring-labbaik-blue/40 rounded-xl p-1.5 hover:bg-neutral-100 dark:hover:bg-white/5"
                   aria-label="Close modal"
                 >
                   <X size={20} />

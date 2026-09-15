@@ -9,6 +9,7 @@ import {
   Loader2,
 } from 'lucide-react';
 import { format } from 'date-fns';
+import { toEnglishDigits } from '@/lib/utils';
 import CustomerProfile from '../components/CustomerProfile';
 
 interface Customer {
@@ -120,7 +121,7 @@ export default function CustomersPage() {
             </div>
 
             <div className="mt-10 pt-6 border-t border-white/5 flex items-center justify-between text-[10px] font-black text-neutral-500">
-               <span className="flex items-center gap-2 uppercase tracking-widest"><Calendar size={12} className="text-labbaik-blue" /> {format(new Date(customer.createdAt), 'yyyy/MM/dd')}</span>
+               <span className="flex items-center gap-2 uppercase tracking-widest"><Calendar size={12} className="text-labbaik-blue" /> {toEnglishDigits(format(new Date(customer.createdAt), 'yyyy/MM/dd'))}</span>
                <span className="group-hover:text-labbaik-blue transition-colors">عرض التفاصيل</span>
             </div>
           </div>

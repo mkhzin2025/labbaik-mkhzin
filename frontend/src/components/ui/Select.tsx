@@ -33,7 +33,7 @@ const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
         {label && (
           <label
             htmlFor={selectId}
-            className="block text-sm font-medium text-neutral-300 mb-2"
+            className="block text-sm font-semibold text-neutral-700 dark:text-neutral-300 mb-2"
           >
             {label}
             {isRequired && <span className="text-error-500 ml-1">*</span>}
@@ -45,11 +45,11 @@ const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
             id={selectId}
             disabled={disabled}
             className={cn(
-              'w-full px-4 py-2 text-base bg-neutral-900 border rounded-lg transition-all duration-200',
-              'text-neutral-100 placeholder-neutral-500',
-              'border-neutral-700 hover:border-neutral-600',
-              'focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-700',
-              'disabled:opacity-50 disabled:cursor-not-allowed',
+              'w-full min-h-12 px-4 py-2.5 text-base bg-labbaik-surface border rounded-xl transition-all duration-200',
+              'text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 dark:placeholder-neutral-500',
+              'border-neutral-300 dark:border-neutral-700 hover:border-neutral-400 dark:hover:border-neutral-600',
+              'focus:outline-none focus:ring-2 focus:ring-labbaik-blue/40 focus:border-labbaik-blue',
+              'disabled:opacity-50 disabled:cursor-not-allowed shadow-sm',
               'appearance-none pr-10',
               error && 'border-error-500 focus:ring-error-500/50 focus:border-error-600',
               className

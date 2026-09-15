@@ -26,9 +26,9 @@ const Skeleton = React.forwardRef<HTMLDivElement, SkeletonProps>(
             key={i}
             ref={ref}
             className={cn(
-              'bg-neutral-800 animate-pulse',
+              'bg-neutral-200/80 dark:bg-neutral-800/80 animate-pulse',
               circle && 'rounded-full',
-              !circle && 'rounded-md',
+              !circle && 'rounded-xl',
               className
             )}
             style={{
@@ -57,17 +57,17 @@ const SkeletonCard: React.FC<SkeletonCardProps> = ({ count = 1, className }) => 
         <div 
           key={i}
           className={cn(
-            'bg-neutral-900 border border-neutral-800 rounded-lg p-6 space-y-4',
+            'bg-labbaik-surface border border-labbaik-border rounded-3xl p-6 space-y-4 shadow-sm',
             className
           )}
         >
           <div className="flex justify-between items-start">
-            <Skeleton width={48} height={48} className="rounded-xl" />
-            <Skeleton width={20} height={20} />
+            <Skeleton width={48} height={48} className="rounded-2xl" />
+            <Skeleton width={24} height={24} className="rounded-lg" />
           </div>
-          <div className="space-y-2">
-            <Skeleton height="0.75rem" width="60%" />
-            <Skeleton height="1.75rem" width="80%" />
+          <div className="space-y-2.5">
+            <Skeleton height="0.875rem" width="50%" className="rounded-md" />
+            <Skeleton height="2rem" width="75%" className="rounded-lg" />
           </div>
         </div>
       ))}

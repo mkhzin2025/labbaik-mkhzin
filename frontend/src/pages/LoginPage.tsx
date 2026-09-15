@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import api from '../api/client';
 import { useNavigate } from 'react-router-dom';
-import { Mail, Lock } from 'lucide-react';
+import { Mail, Lock, Eye, EyeOff } from 'lucide-react';
 import LogoImage from '../assets/logos/logo.png';
 import BackgroundImage from '../assets/login-bg.png';
 import { Button } from '../components/ui/Button';
@@ -11,6 +11,7 @@ import { Alert } from '../components/ui/Alert';
 export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const navigate = useNavigate();
@@ -89,16 +90,47 @@ export default function LoginPage() {
             />
 
             {/* Password Input */}
-            <Input
-              type="password"
-              label="كلمة المرور"
-              placeholder="أدخل كلمة المرور"
-              icon={<Lock className="h-5 w-5" />}
-              required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              disabled={loading}
-            />
+            <div className="relative">
+              <Input
+                type={showPassword ? 'text' : 'password'}
+                label="كلمة المرور"
+                placeholder="أدخل كلمة المرور"
+                icon={<Lock className="h-5 w-5" />}
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                disabled={loading}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute left-3 top-[38px] text-neutral-400 hover:text-white transition-colors"
+                title={showPassword ? 'إخفاء كلمة المرور' : 'إظهار كلمة المرور'}
+                tabIndex={-1}
+              >
+                {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+              </button>
+            </div>
+
+            {/* Demo Account Helper */}
+            <div className="rounded-lg border border-primary-500/30 bg-primary-950/40 p-3 text-xs text-primary-200 flex items-center justify-between gap-2">
+              <div className="flex flex-col gap-0.5">
+                <span className="text-gray-400 text-[11px]">بيانات الحساب التجريبي:</span>
+                <span className="font-mono text-white text-[11px]">
+                  admin@labbaik.local | Admin123!
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setEmail('admin@labbaik.local');
+                  setPassword('Admin123!');
+                }}
+                className="px-2.5 py-1.5 rounded bg-primary-600 hover:bg-primary-500 text-white text-xs font-medium transition-colors shrink-0"
+              >
+                تعبئة تلقائية
+              </button>
+            </div>
 
             {/* Submit Button */}
             <Button

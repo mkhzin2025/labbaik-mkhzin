@@ -1,5 +1,7 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *, .dark, .dark *));
+
 /* Tajarib Typeface Font Faces */
 @font-face {
   font-family: "Tajarib Typeface";
@@ -43,6 +45,9 @@
   --color-labbaik-chat: #f5f0fa;
   --color-labbaik-on-accent: #ffffff;
   --color-labbaik-blue: #643B89;
+  --color-labbaik-border: rgba(100, 59, 137, 0.08);
+  --color-labbaik-text: #1e293b;
+  --color-labbaik-text-muted: #64748b;
   
   /* Setting Tajarib Typeface as the default font */
   --font-sans: "Tajarib Typeface", "IBM Plex Sans Arabic", "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
@@ -51,29 +56,14 @@
 :root,
 :root[data-theme="light"] {
   color-scheme: light;
-  --color-labbaik-page: #f7f4fb;
+  --color-labbaik-page: #f8f6fc;
   --color-labbaik-surface: #ffffff;
-  --color-labbaik-deep: #f1ecf6;
-  --color-labbaik-chat: #f5f0fa;
+  --color-labbaik-deep: #f1ebf7;
+  --color-labbaik-chat: #f5effb;
   --color-labbaik-on-accent: #ffffff;
-  --color-labbaik-border: rgba(100, 59, 137, 0.14);
-  --color-white: #101828;
-  --color-gray-200: #344054;
-  --color-gray-300: #475467;
-  --color-gray-400: #667085;
-  --color-gray-500: #667085;
-  --color-gray-600: #98a2b3;
-  --color-gray-700: #d0d5dd;
-  --color-gray-800: #eaecf0;
-  --color-neutral-900: #101828;
-  --color-neutral-800: #f2f4f7;
-  --color-neutral-700: #d0d5dd;
-  --color-neutral-600: #667085;
-  --color-neutral-500: #475467;
-  --color-neutral-400: #667085;
-  --color-neutral-300: #344054;
-  --color-neutral-200: #1d2939;
-  --color-neutral-0: #ffffff;
+  --color-labbaik-border: rgba(100, 59, 137, 0.08);
+  --color-labbaik-text: #1e293b;
+  --color-labbaik-text-muted: #64748b;
 }
 
 :root[data-theme="dark"] {
@@ -83,29 +73,36 @@
   --color-labbaik-deep: #051124;
   --color-labbaik-chat: #1a2c45;
   --color-labbaik-on-accent: #ffffff;
-  --color-labbaik-border: rgba(255, 255, 255, 0.1);
-  --color-white: #ffffff;
-  --color-gray-200: #e5e7eb;
-  --color-gray-300: #d1d5db;
-  --color-gray-400: #9ca3af;
-  --color-gray-500: #6b7280;
-  --color-gray-600: #4b5563;
-  --color-gray-700: #374151;
-  --color-gray-800: #1f2937;
-  --color-neutral-900: #101828;
-  --color-neutral-800: #1d2939;
-  --color-neutral-700: #344054;
-  --color-neutral-600: #475467;
-  --color-neutral-500: #98a2b3;
-  --color-neutral-400: #bfc5d0;
-  --color-neutral-300: #d0d5dd;
-  --color-neutral-200: #eaecf0;
-  --color-neutral-0: #ffffff;
+  --color-labbaik-border: rgba(255, 255, 255, 0.08);
+  --color-labbaik-text: #f8fafc;
+  --color-labbaik-text-muted: #94a3b8;
+}
+
+.border-labbaik-border {
+  border-color: var(--color-labbaik-border) !important;
+}
+.border-t-labbaik-border {
+  border-top-color: var(--color-labbaik-border) !important;
+}
+.border-b-labbaik-border {
+  border-bottom-color: var(--color-labbaik-border) !important;
+}
+.border-l-labbaik-border {
+  border-left-color: var(--color-labbaik-border) !important;
+}
+.border-r-labbaik-border {
+  border-right-color: var(--color-labbaik-border) !important;
+}
+
+/* Force English (Western) digits 0-9 across all fonts and elements */
+:root, html, body, *, *::before, *::after {
+  font-feature-settings: "locl" 0;
+  font-variant-numeric: tabular-nums lining-nums;
 }
 
 body {
   background-color: var(--color-labbaik-page);
-  color: var(--color-white);
+  color: var(--color-labbaik-text);
   direction: rtl;
   /* Applying the theme font to body explicitly */
   font-family: var(--font-sans);
