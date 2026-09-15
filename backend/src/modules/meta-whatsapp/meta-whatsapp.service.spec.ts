@@ -38,13 +38,23 @@ describe('MetaWhatsAppService - Webhook Subscription Logic', () => {
   beforeEach(() => {
     jest.clearAllMocks();
 
+    const qbMock: any = {
+      addSelect: jest.fn().mockReturnThis(),
+      leftJoinAndSelect: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      getOne: jest.fn().mockResolvedValue({ ...mockConnection }),
+    };
+
     connectionRepository = {
       findOne: jest.fn().mockResolvedValue({ ...mockConnection }),
       find: jest.fn().mockResolvedValue([{ ...mockConnection }]),
       save: jest.fn().mockImplementation((conn) => Promise.resolve(conn)),
       update: jest.fn().mockResolvedValue({ affected: 1 }),
       query: jest.fn().mockResolvedValue([]),
+      createQueryBuilder: jest.fn().mockReturnValue(qbMock),
     };
+
 
     templateRepository = {
       find: jest.fn().mockResolvedValue([]),
