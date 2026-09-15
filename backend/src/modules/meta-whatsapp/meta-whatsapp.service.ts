@@ -160,7 +160,7 @@ export class MetaWhatsAppService {
     const secretConnection = await this.getConnectionWithSecrets(connection.id);
     const accessToken = this.credentialEncryption.decryptSecret(secretConnection.accessToken)!;
     const verifyToken = this.credentialEncryption.decryptSecret(secretConnection.verifyToken)!;
-    const webhookUrl = connection.webhookUrl || this.buildWebhookUrl(connection.id);
+    const webhookUrl = this.resolveWebhookUrl(connection);
     try {
       await axios.post(
         `https://graph.facebook.com/${this.getGraphVersion()}/${connection.wabaId}/subscribed_apps`,
@@ -538,7 +538,7 @@ export class MetaWhatsAppService {
       displayPhoneNumber: connection.displayPhoneNumber,
       accessToken: connection.accessToken ? '********' : '',
       verifyToken: this.credentialEncryption.decryptSecret(connection.verifyToken),
-      webhookUrl: connection.webhookUrl || this.buildWebhookUrl(connection.id),
+      webhookUrl: this.resolveWebhookUrl(connection),
       status: connection.status,
       lastError: connection.lastError,
       webhookSubscribedAt: connection.webhookSubscribedAt,
@@ -548,8 +548,22 @@ export class MetaWhatsAppService {
     };
   }
 
+  private resolveWebhookUrl(connection: MetaWhatsAppConnection): string {
+    const currentBuild = this.buildWebhookUrl(connection.id);
+    if (!connection.webhookUrl || connection.webhookUrl.includes('localhost') || connection.webhookUrl.includes('127.0.0.1')) {
+      return currentBuild;
+    }
+    return connection.webhookUrl;
+  }
+
   private buildWebhookUrl(connectionId: string) {
-    const base = (this.configService.get<string>('PUBLIC_API_URL') || this.configService.get<string>('WEBHOOK_BASE_URL') || `http://localhost:${this.configService.get<string>('PORT') || 3000}`).replace(/\/$/, '');
+    const base = (
+      this.configService.get<string>('PUBLIC_WEBHOOK_URL') ||
+      this.configService.get<string>('PUBLIC_API_URL') ||
+      this.configService.get<string>('WEBHOOK_BASE_URL') ||
+      (this.configService.get<string>('APP_DOMAIN') ? `https://${this.configService.get<string>('APP_DOMAIN')}` : '') ||
+      `http://localhost:${this.configService.get<string>('PORT') || 3000}`
+    ).trim().replace(/\/$/, '');
     return `${base}/webhooks/meta/whatsapp/${connectionId}`;
   }
 

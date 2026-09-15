@@ -111,8 +111,8 @@ export default function ReviewsPage() {
             <Star size={32} className="text-labbaik-blue" />
           </div>
           <div>
-            <h1 className="text-2xl font-black text-white">إدارة تقييمات جوجل ماب</h1>
-            <p className="text-neutral-400 text-sm mt-1 font-medium">عزز سمعة متجرك بالرد الذكي والسرير على مراجعات العملاء.</p>
+            <h1 className="text-2xl font-black text-neutral-900 dark:text-white">إدارة تقييمات جوجل ماب</h1>
+            <p className="text-neutral-500 dark:text-neutral-400 text-sm mt-1 font-medium">عزز سمعة متجرك بالرد الذكي والسرير على مراجعات العملاء.</p>
           </div>
         </div>
         <button 
@@ -148,7 +148,7 @@ export default function ReviewsPage() {
                       <User size={24} className="text-neutral-400" />
                     </div>
                     <div>
-                      <h4 className="font-black text-white">{review.reviewerName}</h4>
+                      <h4 className="font-black text-neutral-900 dark:text-white">{review.reviewerName}</h4>
                       <div className="flex items-center gap-1 mt-1">
                         {[...Array(5)].map((_, i) => (
                           <Star key={i} size={12} className={i < review.rating ? 'fill-yellow-500 text-yellow-500' : 'text-gray-700'} />
@@ -194,7 +194,7 @@ export default function ReviewsPage() {
                   <div className="p-3 bg-labbaik-blue/10 rounded-xl">
                     <MessageSquare size={20} className="text-labbaik-blue" />
                   </div>
-                  <h3 className="font-black text-white">الرد على {activeReview.reviewerName}</h3>
+                  <h3 className="font-black text-neutral-900 dark:text-white">الرد على {activeReview.reviewerName}</h3>
                 </div>
 
                 <div className="space-y-4">
@@ -213,14 +213,14 @@ export default function ReviewsPage() {
                     value={replyText}
                     onChange={(e) => setReplyText(e.target.value)}
                     placeholder="اكتب ردك هنا أو استخدم اقتراح لبيك..."
-                    className="w-full h-48 bg-white/5 border border-white/10 rounded-2xl p-6 text-sm text-white focus:outline-none focus:ring-2 focus:ring-labbaik-blue/50 transition-all font-bold resize-none placeholder:text-gray-700"
+                    className="w-full h-48 bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 rounded-2xl p-6 text-sm text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-labbaik-blue/50 transition-all font-bold resize-none placeholder:text-neutral-400"
                   />
                 </div>
 
                 <div className="flex gap-4">
                   <button 
                     onClick={() => setActiveReview(null)}
-                    className="flex-1 py-4 text-xs font-black text-neutral-400 hover:text-white transition-colors"
+                    className="flex-1 py-4 text-xs font-black text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white transition-colors"
                   >
                     إلغاء
                   </button>
@@ -241,8 +241,8 @@ export default function ReviewsPage() {
                   <Star size={24} className="text-gray-700" />
                 </div>
                 <div>
-                  <h4 className="font-black text-white text-sm">اختر تقييماً للرد عليه</h4>
-                  <p className="text-neutral-400 text-[10px] mt-2 leading-relaxed">الرد على تقييمات العملاء يحسن من ترتيبك في جوجل ماب بنسبة تصل إلى 20%.</p>
+                  <h4 className="font-black text-neutral-900 dark:text-white text-sm">اختر تقييماً للرد عليه</h4>
+                  <p className="text-neutral-500 dark:text-neutral-400 text-[10px] mt-2 leading-relaxed">الرد على تقييمات العملاء يحسن من ترتيبك في جوجل ماب بنسبة تصل إلى 20%.</p>
                 </div>
               </div>
             )}

@@ -93,10 +93,10 @@ export default function FlowsPage() {
     <div className="space-y-10 animate-fade-in" dir="rtl">
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 bg-labbaik-surface p-10 rounded-[3rem] border border-white/5 shadow-2xl">
         <div>
-          <h1 className="text-3xl font-black text-white flex items-center gap-4">
+          <h1 className="text-3xl font-black text-neutral-900 dark:text-white flex items-center gap-4">
             باني التدفقات الذكي <span className="bg-labbaik-blue/10 text-labbaik-blue text-xs px-4 py-1.5 rounded-full border border-labbaik-blue/20">BETA</span>
           </h1>
-          <p className="text-neutral-400 mt-2 font-medium text-right">ارسم مسارات الرد الآلي لعملائك بدقة متناهية وبدون تكلفة توكنز.</p>
+          <p className="text-neutral-500 dark:text-neutral-400 mt-2 font-medium text-right">ارسم مسارات الرد الآلي لعملائك بدقة متناهية وبدون تكلفة توكنز.</p>
         </div>
         <Button onClick={createNewFlow} variant="primary" size="lg">
           <Plus size={20} /> إنشاء تدفق جديد
@@ -111,7 +111,7 @@ export default function FlowsPage() {
                 <GitBranch className="text-labbaik-blue" size={24} />
               </div>
               <div className="flex items-center gap-2">
-                {flow.isDefault && <span className="px-3 py-1 bg-green-500/10 text-green-400 border border-green-500/20 rounded-lg text-[8px] font-black uppercase">الأساسي</span>}
+                {flow.isDefault && <span className="px-3 py-1 bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/20 rounded-lg text-[8px] font-black uppercase">الأساسي</span>}
                 <div onClick={() => toggleActive(flow)} className={`w-10 h-6 rounded-full p-1 cursor-pointer transition-all ${flow.isActive ? 'bg-labbaik-blue' : 'bg-gray-700'}`}>
                   <div className={`w-4 h-4 bg-white rounded-full transition-all ${flow.isActive ? 'translate-x-[-16px]' : 'translate-x-0'}`}></div>
                 </div>
@@ -119,8 +119,8 @@ export default function FlowsPage() {
             </div>
 
             <div className="space-y-2 mb-8">
-              <h3 className="text-xl font-black text-white">{flow.name}</h3>
-              <p className="text-[10px] text-neutral-500 font-bold">آخر تحديث: {new Date(flow.updatedAt).toLocaleDateString('ar-SA')}</p>
+              <h3 className="text-xl font-black text-neutral-900 dark:text-white">{flow.name}</h3>
+              <p className="text-[10px] text-neutral-500 font-bold">آخر تحديث: {new Date(flow.updatedAt).toLocaleDateString('en-GB')}</p>
             </div>
 
             <div className="flex items-center gap-3">

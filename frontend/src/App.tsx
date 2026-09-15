@@ -50,7 +50,7 @@ function App() {
                     <Route path="reviews" element={<ReviewsPage />} />
                     <Route path="billing" element={<BillingPage />} />
                     <Route path="billing-admin" element={<BillingAdminPage />} />
-                    <Route path="analytics" element={<div className="p-16 text-3xl font-black text-center text-white">التقارير المتقدمة <br /><span className="text-gray-500 text-sm font-bold block mt-4 italic opacity-50">قريباً في المرحلة الثانية</span></div>} />
+                    <Route path="analytics" element={<div className="p-16 text-3xl font-black text-center text-neutral-900 dark:text-white">التقارير المتقدمة <br /><span className="text-neutral-500 dark:text-neutral-400 text-sm font-bold block mt-4 italic opacity-80">قريباً في المرحلة الثانية</span></div>} />
                     <Route path="settings" element={<SettingsPage />} />
                   </Routes>
                 </DashboardLayout>

@@ -43,6 +43,9 @@ services:
       GROQ_API_KEY: ${GROQ_API_KEY:-}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      APP_DOMAIN: ${APP_DOMAIN:-labbaik.mkhzin-store.com}
+      PUBLIC_API_URL: ${PUBLIC_API_URL:-https://${APP_DOMAIN:-labbaik.mkhzin-store.com}}
+      PUBLIC_WEBHOOK_URL: ${PUBLIC_WEBHOOK_URL:-https://${APP_DOMAIN:-labbaik.mkhzin-store.com}}
     depends_on:
       postgres:
         condition: service_healthy

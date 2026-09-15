@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { Building2, CheckCircle2, Clipboard, Cloud, CreditCard, Loader2, Network, RefreshCw, Save, ShieldCheck, WalletCards, Webhook, XCircle } from 'lucide-react';
 import api from '../../api/client';
@@ -347,23 +347,29 @@ export default function MetaWhatsAppSettingsPanel() {
       `}</style>
     </Card>
 
-    {connection.id && (
-      <Card variant="labbaik" className="space-y-5">
-        <div>
-          <h3 className="text-lg font-black text-neutral-900 dark:text-white flex items-center gap-2">
-            <Webhook className="text-labbaik-blue" size={20} /> Webhook {scope === 'organization' ? 'المنظمة' : 'الفرع'}
-          </h3>
-          <p className="text-xs text-neutral-600 dark:text-neutral-400 mt-1">عنوان مستقل لهذا الاتصال.</p>
-        </div>
-        <ReadonlySecret label="Callback URL" value={connection.webhookUrl} onCopy={copy} />
-        <ReadonlySecret label="Verify Token" value={connection.verifyToken} onCopy={copy} />
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
-          <Info label="Graph API" value={connection.graphApiVersion || '-'} />
-          <Info label="آخر Webhook" value={connection.lastWebhookAt ? new Date(connection.lastWebhookAt).toLocaleString('ar-SA') : 'لم يصل بعد'} />
-          <Info label="آخر مزامنة" value={connection.templatesSyncedAt ? new Date(connection.templatesSyncedAt).toLocaleString('ar-SA') : 'لم تتم'} />
-        </div>
-      </Card>
-    )}
+    {connection.id && (() => {
+      const effectiveWebhookUrl = (connection.webhookUrl?.includes('localhost') || connection.webhookUrl?.includes('127.0.0.1')) && typeof window !== 'undefined' && !window.location.hostname.includes('localhost')
+        ? `${window.location.origin}/webhooks/meta/whatsapp/${connection.id}`
+        : (connection.webhookUrl || '-');
+
+      return (
+        <Card variant="labbaik" className="space-y-5">
+          <div>
+            <h3 className="text-lg font-black text-neutral-900 dark:text-white flex items-center gap-2">
+              <Webhook className="text-labbaik-blue" size={20} /> Webhook {scope === 'organization' ? 'المنظمة' : 'الفرع'}
+            </h3>
+            <p className="text-xs text-neutral-600 dark:text-neutral-400 mt-1">عنوان مستقل لهذا الاتصال.</p>
+          </div>
+          <ReadonlySecret label="Callback URL" value={effectiveWebhookUrl} onCopy={copy} />
+          <ReadonlySecret label="Verify Token" value={connection.verifyToken} onCopy={copy} />
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+            <Info label="Graph API" value={connection.graphApiVersion || '-'} />
+            <Info label="آخر Webhook" value={connection.lastWebhookAt ? new Date(connection.lastWebhookAt).toLocaleString('en-GB') : 'لم يصل بعد'} />
+            <Info label="آخر مزامنة" value={connection.templatesSyncedAt ? new Date(connection.templatesSyncedAt).toLocaleString('en-GB') : 'لم تتم'} />
+          </div>
+        </Card>
+      );
+    })()}
   </div>;
 }
 
