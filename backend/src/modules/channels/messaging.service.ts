@@ -15,7 +15,7 @@ export class MessagingService {
   async sendWhatsAppMessage(phoneNumberId: string, accessToken: string, to: string, text: string) {
     try {
       const plainAccessToken = this.credentialEncryption.decryptSecret(accessToken);
-      const url = `https://graph.facebook.com/v21.0/${phoneNumberId}/messages`;
+      const url = `https://graph.facebook.com/${this.getGraphVersion()}/${phoneNumberId}/messages`;
       const response = await axios.post(
         url,
         {
@@ -44,7 +44,7 @@ export class MessagingService {
   async sendWhatsAppButtons(phoneNumberId: string, accessToken: string, to: string, text: string, buttons: { id: string, label: string }[], imageUrl?: string) {
     try {
       const plainAccessToken = this.credentialEncryption.decryptSecret(accessToken);
-      const url = `https://graph.facebook.com/v21.0/${phoneNumberId}/messages`;
+      const url = `https://graph.facebook.com/${this.getGraphVersion()}/${phoneNumberId}/messages`;
       
       if (buttons.length > 3 || buttons.length === 0) {
         const finalMsg = text + "\n\n━━━━━━━━━━━━\n" + buttons.map((b, i) => `${i+1}. *${b.label}*`).join('\n');
@@ -93,6 +93,10 @@ export class MessagingService {
       if (phoneNumberId === '123456789') return { message_id: 'simulated_btn_' + Date.now() };
       throw error;
     }
+  }
+
+  private getGraphVersion() {
+    return this.configService.get<string>('META_GRAPH_API_VERSION') || 'v26.0';
   }
 
   async sendInstagramMessage(accessToken: string, recipientId: string, text: string) {

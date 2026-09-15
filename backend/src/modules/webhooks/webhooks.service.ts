@@ -9,6 +9,9 @@ import { CustomersService } from '../customers/customers.service';
 import { FlowsService } from '../flows/flows.service';
 import { MessagingService } from '../channels/messaging.service';
 import { WhatsAppMediaService } from '../channels/whatsapp-media.service';
+import { MetaWhatsAppService } from '../meta-whatsapp/meta-whatsapp.service';
+import { BillingService } from '../billing/billing.service';
+import { MetaUsageType } from '../billing/entities/pricing-rule.entity';
 
 type NormalizedWhatsAppMessage = {
   from: string;
@@ -33,6 +36,8 @@ export class WebhooksService {
     private readonly flowsService: FlowsService,
     private readonly messagingService: MessagingService,
     private readonly whatsAppMediaService: WhatsAppMediaService,
+    private readonly metaWhatsAppService: MetaWhatsAppService,
+    private readonly billingService: BillingService,
   ) {}
 
   verifyWhatsApp(mode: string, token: string, challenge: string) {
@@ -67,7 +72,7 @@ export class WebhooksService {
         });
 
         if (ownerId) {
-          this.eventsGateway.server.to(`store_${ownerId}`).emit('new_message', {
+          this.eventsGateway.server.to(`store_${storeId}`).emit('new_message', {
             platform, from, text, type: 'text', timestamp: Date.now(), storeId, unreadCount: (savedConv as any).unreadCount, sentiment, tags, customerId: customer.id,
           });
         }
@@ -102,12 +107,114 @@ export class WebhooksService {
         }
 
         for (const message of messages) {
+          if (message?.id && await this.conversationsService.hasWhatsAppMessage(channel.store.id, message.id)) continue;
           await this.processWhatsAppCustomerMessage(message, channel, metadata);
         }
       }
     }
 
     return { status: 'success' };
+  }
+
+  async verifyTenantWhatsApp(connectionId: string, mode: string, token: string, challenge: string) {
+    return this.metaWhatsAppService.verifyWebhook(connectionId, mode, token, challenge);
+  }
+
+  async handleTenantWhatsAppMessage(connectionId: string, payload: any, signature?: string, rawBody?: Buffer) {
+    const connection = await this.metaWhatsAppService.getWebhookConnection(connectionId);
+    this.metaWhatsAppService.verifyWebhookSignature(connection, signature, rawBody, payload);
+
+    const entries = payload.entry || [];
+    const organizationStoreIds = await this.metaWhatsAppService.getOrganizationStoreIds(connection);
+    for (const entry of entries) {
+      if (entry?.id && String(entry.id) !== String(connection.wabaId)) {
+        this.logger.warn(`Rejected webhook WABA mismatch for connection ${connectionId}`);
+        continue;
+      }
+      for (const change of entry?.changes || []) {
+        const value = change?.value || {};
+        const metadata = value?.metadata || {};
+        const phoneNumberId = metadata?.phone_number_id;
+        if (phoneNumberId && String(phoneNumberId) !== String(connection.phoneNumberId)) {
+          this.logger.warn(`Rejected webhook phone_number_id mismatch for connection ${connectionId}`);
+          continue;
+        }
+
+        for (const status of value?.statuses || []) {
+          await this.processWhatsAppStatusAcrossStores(organizationStoreIds, status);
+        }
+
+        for (const message of value?.messages || []) {
+          if (message?.id && await this.conversationsService.hasWhatsAppMessageInStores(organizationStoreIds, message.id)) {
+            this.logger.debug(`Ignoring duplicate WhatsApp message ${message.id}`);
+            continue;
+          }
+          const targetStore = await this.metaWhatsAppService.resolveInboundStore(connection, message?.from || '');
+          const channel = await this.metaWhatsAppService.findChannelForConnection(connection, targetStore.id);
+          await this.processWhatsAppCustomerMessage(message, channel, metadata, connection.id);
+        }
+      }
+    }
+
+    await this.metaWhatsAppService.touchWebhook(connectionId);
+    return { status: 'success' };
+  }
+
+  private async processWhatsAppStatusAcrossStores(storeIds: string[], status: any) {
+    if (!status?.id || !status?.status || !storeIds.length) return;
+    const timestamp = this.parseWhatsAppTimestamp(status.timestamp);
+    const conversation = await this.conversationsService.updateWhatsAppMessageStatusInStores(
+      storeIds,
+      status.id,
+      status.status,
+      timestamp,
+      status.errors,
+    );
+    if (!conversation) return;
+    if (String(status.status).toLowerCase() === 'failed') {
+      const failedMessage: any = (conversation.messages || []).find((message: any) => message?.metadata?.whatsappMessageId === status.id);
+      const walletTransactionId = failedMessage?.metadata?.walletTransactionId;
+      if (walletTransactionId) await this.billingService.refundMetaUsage(walletTransactionId, 'Meta delivery failed webhook');
+    }
+    this.eventsGateway.server.to(`store_${conversation.storeId}`).emit('message_status', {
+      storeId: conversation.storeId,
+      whatsappMessageId: status.id,
+      status: status.status,
+      timestamp,
+      errors: status.errors || [],
+    });
+  }
+
+  private async processWhatsAppStatus(storeId: string, status: any) {
+    if (!status?.id || !status?.status) return;
+    const timestamp = this.parseWhatsAppTimestamp(status.timestamp);
+    const conversation = await this.conversationsService.updateWhatsAppMessageStatus(
+      storeId,
+      status.id,
+      status.status,
+      timestamp,
+      status.errors,
+    );
+    if (conversation && String(status.status).toLowerCase() === 'failed') {
+      const failedMessage: any = (conversation.messages || []).find((message: any) => message?.metadata?.whatsappMessageId === status.id);
+      const walletTransactionId = failedMessage?.metadata?.walletTransactionId;
+      if (walletTransactionId) {
+        await this.billingService.refundMetaUsage(walletTransactionId, 'Meta delivery failed webhook');
+      }
+    }
+    if (conversation) {
+      const store = await this.channelsService.getStoreContext(storeId);
+      const ownerId = store.owner?.id || (typeof store.owner === 'string' ? store.owner : null);
+      if (ownerId) {
+        this.eventsGateway.server.to(`store_${storeId}`).emit('message_status', {
+          storeId,
+          whatsappMessageId: status.id,
+          status: status.status,
+          timestamp,
+          errors: status.errors || [],
+        });
+      }
+    }
   }
 
   private verifyMetaSignature(signature?: string, rawBody?: Buffer, payload?: any) {
@@ -125,11 +232,12 @@ export class WebhooksService {
     }
   }
 
-  private async processWhatsAppCustomerMessage(message: any, channel: any, webhookMetadata: any) {
+  private async processWhatsAppCustomerMessage(message: any, channel: any, webhookMetadata: any, metaConnectionId?: string) {
     const storeId = channel.store.id;
     const currentStore = await this.channelsService.getStoreContext(storeId);
     const ownerId = currentStore.owner?.id || (typeof currentStore.owner === 'string' ? currentStore.owner : 'global');
     const normalized = await this.normalizeWhatsAppMessage(message, channel.credentials.accessToken, webhookMetadata);
+    if (metaConnectionId) normalized.metadata.metaConnectionId = metaConnectionId;
 
     this.logger.log(`Incoming WhatsApp ${normalized.type} from ${normalized.from}: [${normalized.text}]`);
 
@@ -156,7 +264,7 @@ export class WebhooksService {
     });
 
     if (ownerId) {
-      this.eventsGateway.server.to(`store_${ownerId}`).emit('new_message', {
+      this.eventsGateway.server.to(`store_${storeId}`).emit('new_message', {
         platform: 'whatsapp',
         from: normalized.from,
         text: normalized.text,
@@ -287,7 +395,7 @@ export class WebhooksService {
 
     const aiScheduledAllowed = this.shouldAiRespond(store);
     if (aiScheduledAllowed) {
-      await this.processAiResponse(from, text, storeId, platform, store, String(ownerId));
+      await this.processAiResponse(from, text, storeId, platform, store, String(ownerId), conversation);
       return true;
     }
 
@@ -298,13 +406,33 @@ export class WebhooksService {
     const responseText = node.data.text || 'مرحباً!';
     const buttons = node.data.buttons || [];
 
-    const channel = (await this.channelsService.findAllByStore(storeId, { maskCredentials: false })).find(c => c.type === platform);
+    const availableChannels = await this.channelsService.findAllByStore(storeId, { maskCredentials: false });
+    const channel = availableChannels.find(c => c.type === platform && (!conversation?.metaConnectionId || c.credentials?.metaConnectionId === conversation.metaConnectionId))
+      || availableChannels.find(c => c.type === platform);
+    let providerResponse: any = null;
+    let walletCharge: any = null;
     if (channel) {
-      if (platform === 'whatsapp' && buttons.length > 0) {
-        const imageUrl = node.data?.imageUrl;
-        await this.messagingService.sendWhatsAppButtons(channel.credentials!.phoneNumberId, channel.credentials!.accessToken, from, responseText, buttons, imageUrl);
-      } else {
-        await this.messagingService.sendWhatsAppMessage(channel.credentials!.phoneNumberId, channel.credentials!.accessToken, from, responseText);
+      if (platform === 'whatsapp') {
+        walletCharge = await this.billingService.chargeMetaUsageForStore(
+          storeId,
+          buttons.length > 0 ? MetaUsageType.INTERACTIVE : MetaUsageType.SESSION_TEXT,
+          { referenceId: String(conversation._id), source: 'flow', flowId: flow.id, nodeId: node.id },
+        );
+      }
+      try {
+        if (platform === 'whatsapp' && buttons.length > 0) {
+          const imageUrl = node.data?.imageUrl;
+          providerResponse = await this.messagingService.sendWhatsAppButtons(channel.credentials!.phoneNumberId, channel.credentials!.accessToken, from, responseText, buttons, imageUrl);
+        } else if (platform === 'whatsapp') {
+          providerResponse = await this.messagingService.sendWhatsAppMessage(channel.credentials!.phoneNumberId, channel.credentials!.accessToken, from, responseText);
+        } else if (platform === 'instagram') {
+          providerResponse = await this.messagingService.sendInstagramMessage(channel.credentials!.accessToken, from, responseText);
+        } else if (platform === 'facebook') {
+          providerResponse = await this.messagingService.sendFacebookMessage(channel.credentials!.accessToken, from, responseText);
+        }
+      } catch (error) {
+        if (walletCharge) await this.billingService.refundMetaUsage(walletCharge.id, 'Flow WhatsApp send failed');
+        throw error;
       }
     }
 
@@ -314,12 +442,17 @@ export class WebhooksService {
       await this.conversationsService.updateFlowState(conversation._id, null, null);
     }
 
-    await this.conversationsService.addMessage(from, storeId, platform, {
+    const whatsappMessageId = platform === 'whatsapp'
+      ? (providerResponse?.messages?.[0]?.id || providerResponse?.message_id)
+      : undefined;
+    const messageData = {
       from: 'me', text: responseText, type: 'text', isManual: false, timestamp: Date.now(),
-    });
+      metadata: whatsappMessageId ? { whatsappMessageId, status: 'accepted', walletTransactionId: walletCharge?.id || null, metaConnectionId: channel?.credentials?.metaConnectionId || conversation?.metaConnectionId || null } : {},
+    };
+    await this.conversationsService.addMessage(from, storeId, platform, messageData);
 
-    this.eventsGateway.server.to(`store_${ownerId}`).emit('new_message', {
-      platform, from: 'me', customerPhone: from, text: responseText, type: 'text', timestamp: Date.now(), storeId,
+    this.eventsGateway.server.to(`store_${storeId}`).emit('new_message', {
+      ...messageData, platform, customerPhone: from, storeId,
     });
   }
 
@@ -339,15 +472,39 @@ export class WebhooksService {
     return true;
   }
 
-  private async processAiResponse(from: string, text: string, storeId: string, platform: string, store: any, ownerId: string) {
+  private async processAiResponse(from: string, text: string, storeId: string, platform: string, store: any, ownerId: string, conversation?: any) {
     const aiResponseText = await this.aiResponse(text, store);
-    const channel = (await this.channelsService.findAllByStore(storeId, { maskCredentials: false })).find(c => c.type === platform);
+    const availableChannels = await this.channelsService.findAllByStore(storeId, { maskCredentials: false });
+    const channel = availableChannels.find(c => c.type === platform && (!conversation?.metaConnectionId || c.credentials?.metaConnectionId === conversation.metaConnectionId))
+      || availableChannels.find(c => c.type === platform);
+    let providerResponse: any = null;
+    let walletCharge: any = null;
     if (channel && platform === 'whatsapp') {
-      await this.messagingService.sendWhatsAppMessage(channel.credentials!.phoneNumberId, channel.credentials!.accessToken, from, aiResponseText);
+      walletCharge = await this.billingService.chargeMetaUsageForStore(storeId, MetaUsageType.SESSION_TEXT, {
+        source: 'ai_reply',
+        customerPhone: from,
+      });
+      try {
+        providerResponse = await this.messagingService.sendWhatsAppMessage(channel.credentials!.phoneNumberId, channel.credentials!.accessToken, from, aiResponseText);
+      } catch (error) {
+        if (walletCharge) await this.billingService.refundMetaUsage(walletCharge.id, 'AI WhatsApp send failed');
+        throw error;
+      }
+    } else if (channel && platform === 'instagram') {
+      providerResponse = await this.messagingService.sendInstagramMessage(channel.credentials!.accessToken, from, aiResponseText);
+    } else if (channel && platform === 'facebook') {
+      providerResponse = await this.messagingService.sendFacebookMessage(channel.credentials!.accessToken, from, aiResponseText);
     }
 
-    await this.conversationsService.addMessage(from, storeId, platform, { from: 'me', text: aiResponseText, type: 'text', isManual: false, timestamp: Date.now() });
-    this.eventsGateway.server.to(`store_${ownerId}`).emit('new_message', { platform, from: 'me', customerPhone: from, text: aiResponseText, type: 'text', timestamp: Date.now(), storeId });
+    const whatsappMessageId = platform === 'whatsapp'
+      ? (providerResponse?.messages?.[0]?.id || providerResponse?.message_id)
+      : undefined;
+    const messageData = {
+      from: 'me', text: aiResponseText, type: 'text', isManual: false, timestamp: Date.now(),
+      metadata: whatsappMessageId ? { whatsappMessageId, status: 'accepted', walletTransactionId: walletCharge?.id || null, metaConnectionId: channel?.credentials?.metaConnectionId || conversation?.metaConnectionId || null } : {},
+    };
+    await this.conversationsService.addMessage(from, storeId, platform, messageData);
+    this.eventsGateway.server.to(`store_${storeId}`).emit('new_message', { ...messageData, platform, customerPhone: from, storeId });
   }
 
   private async aiResponse(text: string, store: any) {

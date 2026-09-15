@@ -32,6 +32,9 @@ export class Conversation extends Document {
   @Prop({ required: true })
   storeId: string;
 
+  @Prop({ nullable: true, index: true })
+  metaConnectionId: string;
+
   @Prop({ required: true, enum: ['whatsapp', 'instagram', 'facebook', 'google_maps'] })
   platform: string;
 

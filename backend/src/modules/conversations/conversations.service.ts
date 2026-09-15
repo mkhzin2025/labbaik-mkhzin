@@ -6,6 +6,8 @@ import { MessagingService } from '../channels/messaging.service';
 import { ChannelsService } from '../channels/channels.service';
 import { CustomersService } from '../customers/customers.service';
 import { EventsGateway } from '../events/events.gateway';
+import { BillingService } from '../billing/billing.service';
+import { MetaUsageType } from '../billing/entities/pricing-rule.entity';
 
 @Injectable()
 export class ConversationsService {
@@ -18,6 +20,7 @@ export class ConversationsService {
     private readonly channelsService: ChannelsService,
     private readonly customersService: CustomersService,
     private readonly eventsGateway: EventsGateway,
+    private readonly billingService: BillingService,
   ) {}
 
   async addMessage(customerPhone: string, storeId: string, platform: string, messageData: any) {
@@ -31,6 +34,7 @@ export class ConversationsService {
 
     if (messageData.sentiment) updateQuery.$set.lastSentiment = messageData.sentiment;
     if (messageData.customerId) updateQuery.$set.customerId = messageData.customerId;
+    if (messageData.metadata?.metaConnectionId) updateQuery.$set.metaConnectionId = messageData.metadata.metaConnectionId;
     if (messageData.tags && messageData.tags.length > 0) updateQuery.$addToSet = { tags: { $each: messageData.tags } };
 
     if (messageData.from !== 'me') updateQuery.$inc = { unreadCount: 1 };
@@ -42,12 +46,66 @@ export class ConversationsService {
     );
   }
 
+
+  async hasWhatsAppMessage(storeId: string, whatsappMessageId: string) {
+    if (!whatsappMessageId) return false;
+    const count = await this.conversationModel.countDocuments({
+      storeId,
+      platform: 'whatsapp',
+      'messages.metadata.whatsappMessageId': whatsappMessageId,
+    });
+    return count > 0;
+  }
+
+  async hasWhatsAppMessageInStores(storeIds: string[], whatsappMessageId: string) {
+    if (!whatsappMessageId || !storeIds.length) return false;
+    const count = await this.conversationModel.countDocuments({
+      storeId: { $in: storeIds },
+      platform: 'whatsapp',
+      'messages.metadata.whatsappMessageId': whatsappMessageId,
+    });
+    return count > 0;
+  }
+
+  async updateWhatsAppMessageStatusInStores(storeIds: string[], whatsappMessageId: string, status: string, timestamp?: number, errors?: any[]) {
+    if (!whatsappMessageId || !storeIds.length) return null;
+    const set: Record<string, any> = {
+      'messages.$.metadata.status': status,
+      'messages.$.metadata.statusUpdatedAt': timestamp || Date.now(),
+    };
+    if (errors?.length) set['messages.$.metadata.statusErrors'] = errors;
+    return this.conversationModel.findOneAndUpdate(
+      { storeId: { $in: storeIds }, platform: 'whatsapp', 'messages.metadata.whatsappMessageId': whatsappMessageId },
+      { $set: set },
+      { returnDocument: 'after' },
+    );
+  }
+
+  async updateWhatsAppMessageStatus(storeId: string, whatsappMessageId: string, status: string, timestamp?: number, errors?: any[]) {
+    if (!whatsappMessageId) return null;
+    const set: Record<string, any> = {
+      'messages.$.metadata.status': status,
+      'messages.$.metadata.statusUpdatedAt': timestamp || Date.now(),
+    };
+    if (errors?.length) set['messages.$.metadata.statusErrors'] = errors;
+    return this.conversationModel.findOneAndUpdate(
+      { storeId, platform: 'whatsapp', 'messages.metadata.whatsappMessageId': whatsappMessageId },
+      { $set: set },
+      { returnDocument: 'after' },
+    );
+  }
+
   async markAsRead(id: string) {
     return this.conversationModel.findByIdAndUpdate(id, { unreadCount: 0 }, { returnDocument: 'after' });
   }
 
   async findAllByStore(storeId: string) {
     return this.conversationModel.find({ storeId }).sort({ lastMessageAt: -1 }).exec();
+  }
+
+  async findAllByStores(storeIds: string[]) {
+    if (!storeIds.length) return [];
+    return this.conversationModel.find({ storeId: { $in: storeIds } }).sort({ lastMessageAt: -1 }).exec();
   }
 
   async findOne(id: string) {
@@ -171,28 +229,48 @@ export class ConversationsService {
     const conversation = await this.conversationModel.findOne({ _id: conversationId, storeId });
     if (!conversation) throw new NotFoundException('Conversation not found');
     const channels = await this.channelsService.findAllByStore(storeId, { maskCredentials: false });
-    const channel = channels.find(c => c.type === conversation.platform);
+    const channel = channels.find(c => c.type === conversation.platform && (!conversation.metaConnectionId || c.credentials?.metaConnectionId === conversation.metaConnectionId))
+      || channels.find(c => c.type === conversation.platform);
     if (!channel) throw new NotFoundException(`No linked ${conversation.platform} channel found.`);
 
+    let providerResponse: any = null;
+    let walletCharge: any = null;
     if (conversation.platform === 'whatsapp') {
+      walletCharge = await this.billingService.chargeMetaUsageForStore(storeId, MetaUsageType.SESSION_TEXT, {
+        referenceId: conversationId,
+        source: 'manual_agent_reply',
+      });
       try {
-        await this.messagingService.sendWhatsAppMessage(channel.credentials!.phoneNumberId, channel.credentials!.accessToken, conversation.customerPhone, text);
+        providerResponse = await this.messagingService.sendWhatsAppMessage(channel.credentials!.phoneNumberId, channel.credentials!.accessToken, conversation.customerPhone, text);
       } catch (error) {
+        if (walletCharge) await this.billingService.refundMetaUsage(walletCharge.id, 'Manual WhatsApp send failed');
         const errorText = this.getSendErrorText(error);
         await this.addSystemError(conversation.customerPhone, storeId, conversation.platform, errorText, error);
         throw new InternalServerErrorException(errorText);
       }
     } else if (conversation.platform === 'instagram') {
-      await this.messagingService.sendInstagramMessage(channel.credentials!.accessToken, conversation.customerPhone, text);
+      providerResponse = await this.messagingService.sendInstagramMessage(channel.credentials!.accessToken, conversation.customerPhone, text);
     } else if (conversation.platform === 'facebook') {
-      await this.messagingService.sendFacebookMessage(channel.credentials!.accessToken, conversation.customerPhone, text);
+      providerResponse = await this.messagingService.sendFacebookMessage(channel.credentials!.accessToken, conversation.customerPhone, text);
     }
 
-    const messageData = { from: 'me', text, type: 'text', isManual: true, timestamp: Date.now() };
+    const whatsappMessageId = conversation.platform === 'whatsapp'
+      ? (providerResponse?.messages?.[0]?.id || providerResponse?.message_id)
+      : undefined;
+    const messageData = {
+      from: 'me',
+      text,
+      type: 'text',
+      isManual: true,
+      timestamp: Date.now(),
+      metadata: whatsappMessageId ? { whatsappMessageId, status: 'accepted', walletTransactionId: walletCharge?.id || null, metaConnectionId: channel.credentials?.metaConnectionId || conversation.metaConnectionId || null } : {},
+    };
     await this.addMessage(conversation.customerPhone, storeId, conversation.platform, messageData);
     const thirtyMinutesFromNow = new Date(Date.now() + 30 * 60 * 1000);
     await this.conversationModel.findByIdAndUpdate(conversationId, { aiEnabled: false, aiDisabledUntil: thirtyMinutesFromNow });
-    this.eventsGateway.server.emit('new_message', { ...messageData, customerPhone: conversation.customerPhone, platform: conversation.platform, storeId });
+    const store = await this.channelsService.getStoreContext(storeId);
+    const ownerId = store.owner?.id || (typeof store.owner === 'string' ? store.owner : null);
+    if (ownerId) this.eventsGateway.server.to(`store_${storeId}`).emit('new_message', { ...messageData, customerPhone: conversation.customerPhone, platform: conversation.platform, storeId });
     return { status: 'sent', message: messageData };
   }
 
@@ -208,7 +286,9 @@ export class ConversationsService {
     };
 
     await this.addMessage(customerPhone, storeId, platform, messageData);
-    this.eventsGateway.server.emit('new_message', {
+    const store = await this.channelsService.getStoreContext(storeId);
+    const ownerId = store.owner?.id || (typeof store.owner === 'string' ? store.owner : null);
+    if (ownerId) this.eventsGateway.server.to(`store_${storeId}`).emit('new_message', {
       ...messageData,
       customerPhone,
       platform,

@@ -2,10 +2,12 @@ import { Module, Global } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { EventsGateway } from './events.gateway';
+import { OrganizationsModule } from '../organizations/organizations.module';
 
 @Global()
 @Module({
   imports: [
+    OrganizationsModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],

@@ -32,7 +32,7 @@ export class WhatsAppMediaService {
     }
 
     const mediaId = media.id;
-    const metadataResponse = await axios.get(`https://graph.facebook.com/v21.0/${mediaId}`, {
+    const metadataResponse = await axios.get(`https://graph.facebook.com/${this.getGraphVersion()}/${mediaId}`, {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
 
@@ -82,6 +82,11 @@ export class WhatsAppMediaService {
         downloadError: true,
       };
     }
+  }
+
+
+  private getGraphVersion() {
+    return this.configService.get<string>('META_GRAPH_API_VERSION') || 'v26.0';
   }
 
   getWhatsAppUploadRoot() {

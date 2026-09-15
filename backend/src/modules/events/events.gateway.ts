@@ -2,6 +2,7 @@ import { WebSocketGateway, WebSocketServer, OnGatewayConnection, OnGatewayDiscon
 import { Server, Socket } from 'socket.io';
 import { JwtService } from '@nestjs/jwt';
 import { UnauthorizedException, Logger } from '@nestjs/common';
+import { OrganizationsService } from '../organizations/organizations.service';
 
 @WebSocketGateway({
   cors: {
@@ -14,7 +15,10 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   private logger: Logger = new Logger('EventsGateway');
 
-  constructor(private readonly jwtService: JwtService) {}
+  constructor(
+    private readonly jwtService: JwtService,
+    private readonly organizationsService: OrganizationsService,
+  ) {}
 
   async handleConnection(client: Socket) {
     try {
@@ -30,9 +34,21 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const payload = this.jwtService.verify(token);
       client.data.user = payload;
       
-      // Join store room for specific real-time updates
-      const storeRoom = `store_${payload.sub}`;
-      client.join(storeRoom);
+      // Personal room is kept for user-specific notifications.
+      client.join(`user_${payload.sub}`);
+      // Backward-compatible room for existing notification emitters.
+      client.join(`store_${payload.sub}`);
+
+      // Join every branch in the active organization. Branch events are still isolated by store room.
+      try {
+        const { organization, stores } = await this.organizationsService.listStoresForUser(payload.sub, payload.organizationId);
+        client.join(`organization_${organization.id}`);
+        for (const store of stores) client.join(`store_${store.id}`);
+        client.data.organizationId = organization.id;
+        client.data.storeIds = stores.map((store) => store.id);
+      } catch (error) {
+        this.logger.warn(`Client ${client.id} has no accessible store room: ${error.message}`);
+      }
 
       this.logger.log(`Client connected: ${client.id} (User: ${payload.email})`);
     } catch (error) {

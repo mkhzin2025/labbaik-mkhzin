@@ -1,14 +1,17 @@
 import React, { useState } from 'react';
 import api from '../api/client';
 import { useNavigate } from 'react-router-dom';
-import { Mail, Lock, Eye, EyeOff } from 'lucide-react';
+import { Mail, Lock, Eye, EyeOff, Sun, Moon } from 'lucide-react';
 import LogoImage from '../assets/logos/logo.png';
+import LogoAltImage from '../assets/logos/logo-alt.png';
 import BackgroundImage from '../assets/login-bg.png';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { Alert } from '../components/ui/Alert';
+import { useTheme } from '../context/ThemeContext';
 
 export default function LoginPage() {
+  const { theme, toggleTheme } = useTheme();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -25,6 +28,7 @@ export default function LoginPage() {
       const { data } = await api.post('/auth/login', { email, password });
       localStorage.setItem('access_token', data.token);
       localStorage.setItem('user', JSON.stringify(data.user));
+      if (data.organization) localStorage.setItem('organization', JSON.stringify(data.organization));
       navigate('/dashboard');
     } catch (err: unknown) {
       const responseMessage = (err as { response?: { data?: { message?: string } } })
@@ -41,29 +45,57 @@ export default function LoginPage() {
 
   return (
     <div
-      className="relative min-h-screen flex items-center justify-center overflow-hidden bg-[#101828] px-4 py-8"
+      className="relative min-h-screen flex items-center justify-center overflow-hidden bg-labbaik-page text-neutral-900 dark:text-white transition-colors duration-300 px-4 py-8"
       dir="rtl"
     >
+      {/* Background Graphic */}
       <div
-        className="absolute inset-0 z-0 bg-cover bg-center opacity-15"
+        className="absolute inset-0 z-0 bg-cover bg-center transition-opacity duration-300 pointer-events-none opacity-10 dark:opacity-20 mix-blend-multiply dark:mix-blend-normal"
         style={{ backgroundImage: `url(${BackgroundImage})` }}
         aria-hidden="true"
       />
 
+      {/* Theme Toggle Button in Top Corner */}
+      <div className="absolute top-4 left-4 sm:top-6 sm:left-6 z-20">
+        <button
+          type="button"
+          onClick={toggleTheme}
+          className="flex items-center gap-2.5 px-3.5 py-2 rounded-2xl border transition-all duration-200 shadow-sm backdrop-blur-md cursor-pointer
+            bg-white/85 hover:bg-white border-purple-200/70 text-neutral-700 hover:text-neutral-900 hover:shadow-md hover:scale-[1.02] active:scale-95
+            dark:bg-white/10 dark:hover:bg-white/15 dark:border-white/15 dark:text-neutral-200 dark:hover:text-white"
+          aria-label={theme === 'light' ? 'تفعيل الوضع الداكن' : 'تفعيل الوضع الفاتح'}
+          title={theme === 'light' ? 'تفعيل الوضع الداكن' : 'تفعيل الوضع الفاتح'}
+        >
+          {theme === 'light' ? (
+            <>
+              <Moon className="w-4 h-4 text-labbaik-blue transition-transform duration-200" />
+              <span className="text-xs font-semibold select-none">الوضع الداكن</span>
+            </>
+          ) : (
+            <>
+              <Sun className="w-4 h-4 text-amber-400 transition-transform duration-200" />
+              <span className="text-xs font-semibold select-none">الوضع الفاتح</span>
+            </>
+          )}
+        </button>
+      </div>
+
       {/* Content Container */}
       <div className="relative z-10 w-full max-w-md">
-        <div className="rounded-lg border border-white/15 bg-[#18263d] p-6 shadow-2xl sm:p-8">
+        <div className="rounded-2xl border transition-all duration-300 p-6 sm:p-8 backdrop-blur-xl
+          bg-white/95 border-purple-100/90 shadow-2xl shadow-purple-900/10
+          dark:bg-[#18263d]/90 dark:border-white/15 dark:shadow-2xl">
           {/* Header */}
           <div className="mb-8 text-center">
             <div className="mb-6 inline-block">
               <img
-                src={LogoImage}
+                src={theme === 'light' ? LogoAltImage : LogoImage}
                 alt="Labbaik Logo"
-                className="h-20 w-auto object-contain"
+                className="h-20 w-auto object-contain transition-all duration-300"
               />
             </div>
-            <h1 className="text-2xl font-bold text-white mb-2">أهلاً بك في لبيك</h1>
-            <p className="text-sm text-gray-400">
+            <h1 className="text-2xl font-bold text-neutral-900 dark:text-white mb-2">أهلاً بك في لبيك</h1>
+            <p className="text-sm text-neutral-500 dark:text-neutral-400">
               نظام الرد والتواصل الذكي المتكامل
             </p>
           </div>
@@ -104,7 +136,7 @@ export default function LoginPage() {
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
-                className="absolute left-3 top-[38px] text-neutral-400 hover:text-white transition-colors"
+                className="absolute left-3 top-[38px] text-neutral-400 hover:text-neutral-700 dark:hover:text-white transition-colors"
                 title={showPassword ? 'إخفاء كلمة المرور' : 'إظهار كلمة المرور'}
                 tabIndex={-1}
               >
@@ -113,10 +145,12 @@ export default function LoginPage() {
             </div>
 
             {/* Demo Account Helper */}
-            <div className="rounded-lg border border-primary-500/30 bg-primary-950/40 p-3 text-xs text-primary-200 flex items-center justify-between gap-2">
+            <div className="rounded-xl border p-3.5 text-xs flex items-center justify-between gap-2 transition-colors
+              border-purple-200/80 bg-purple-50/70 text-purple-900
+              dark:border-primary-500/30 dark:bg-primary-950/40 dark:text-primary-200">
               <div className="flex flex-col gap-0.5">
-                <span className="text-gray-400 text-[11px]">بيانات الحساب التجريبي:</span>
-                <span className="font-mono text-white text-[11px]">
+                <span className="text-neutral-500 dark:text-neutral-400 text-[11px]">بيانات الحساب التجريبي:</span>
+                <span className="font-mono font-semibold text-purple-950 dark:text-white text-[11px]">
                   admin@labbaik.local | Admin123!
                 </span>
               </div>
@@ -126,7 +160,9 @@ export default function LoginPage() {
                   setEmail('admin@labbaik.local');
                   setPassword('Admin123!');
                 }}
-                className="px-2.5 py-1.5 rounded bg-primary-600 hover:bg-primary-500 text-white text-xs font-medium transition-colors shrink-0"
+                className="px-2.5 py-1.5 rounded-lg text-white text-xs font-medium transition-all shrink-0 cursor-pointer
+                  bg-labbaik-blue hover:opacity-90 active:scale-95
+                  dark:bg-primary-600 dark:hover:bg-primary-500"
               >
                 تعبئة تلقائية
               </button>
@@ -148,7 +184,7 @@ export default function LoginPage() {
 
           {/* Footer */}
           <div className="mt-8 text-center">
-            <p className="text-xs text-neutral-400 font-medium">
+            <p className="text-xs text-neutral-500 dark:text-neutral-400 font-medium">
               © 2026 Labbaik AI System • جميع الحقوق محفوظة
             </p>
           </div>
@@ -157,5 +193,3 @@ export default function LoginPage() {
     </div>
   );
 }
-
-

@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Query, HttpCode, HttpStatus, Logger, Headers, Req } from '@nestjs/common';
+import { Controller, Get, Post, Body, Query, HttpCode, HttpStatus, Logger, Headers, Req, Param } from '@nestjs/common';
 import { ApiBody, ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { WebhooksService } from './webhooks.service';
 import { examples } from '../../common/swagger/api-examples';
@@ -11,6 +11,28 @@ export class WebhooksController {
   constructor(
     private readonly webhooksService: WebhooksService,
   ) {}
+
+  // Tenant-scoped Meta WhatsApp webhook. Each organization receives a unique URL.
+  @Get('meta/whatsapp/:connectionId')
+  verifyTenantWhatsApp(
+    @Param('connectionId') connectionId: string,
+    @Query('hub.mode') mode: string,
+    @Query('hub.verify_token') token: string,
+    @Query('hub.challenge') challenge: string,
+  ) {
+    return this.webhooksService.verifyTenantWhatsApp(connectionId, mode, token, challenge);
+  }
+
+  @Post('meta/whatsapp/:connectionId')
+  @HttpCode(HttpStatus.OK)
+  async handleTenantWhatsApp(
+    @Param('connectionId') connectionId: string,
+    @Body() payload: any,
+    @Headers('x-hub-signature-256') signature: string,
+    @Req() req: any,
+  ) {
+    return this.webhooksService.handleTenantWhatsAppMessage(connectionId, payload, signature, req.rawBody);
+  }
 
   // 1. WhatsApp Webhooks
   @Get('whatsapp')

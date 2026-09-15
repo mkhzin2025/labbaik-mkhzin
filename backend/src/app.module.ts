@@ -20,7 +20,25 @@ import { Channel } from './modules/channels/entities/channel.entity';
 import { Review } from './modules/reviews/entities/review.entity';
 import { Notification } from './modules/notifications/entities/notification.entity';
 import { Customer } from './modules/customers/entities/customer.entity';
+import { CustomerCategory } from './modules/customers/entities/customer-category.entity';
+import { CustomerTag } from './modules/customers/entities/customer-tag.entity';
 import { Flow } from './modules/flows/entities/flow.entity';
+import { OrganizationsModule } from './modules/organizations/organizations.module';
+import { Organization } from './modules/organizations/entities/organization.entity';
+import { OrganizationMember } from './modules/organizations/entities/organization-member.entity';
+import { StoreMember } from './modules/organizations/entities/store-member.entity';
+import { MetaWhatsAppModule } from './modules/meta-whatsapp/meta-whatsapp.module';
+import { MetaWhatsAppConnection } from './modules/meta-whatsapp/entities/meta-whatsapp-connection.entity';
+import { WhatsAppTemplate } from './modules/meta-whatsapp/entities/whatsapp-template.entity';
+import { BillingModule } from './modules/billing/billing.module';
+import { BillingPlan } from './modules/billing/entities/billing-plan.entity';
+import { Subscription } from './modules/billing/entities/subscription.entity';
+import { Wallet } from './modules/billing/entities/wallet.entity';
+import { WalletTransaction } from './modules/billing/entities/wallet-transaction.entity';
+import { PaymentMethod } from './modules/billing/entities/payment-method.entity';
+import { BillingPayment } from './modules/billing/entities/billing-payment.entity';
+import { PricingRule } from './modules/billing/entities/pricing-rule.entity';
+
 
 @Module({
   imports: [
@@ -35,8 +53,8 @@ import { Flow } from './modules/flows/entities/flow.entity';
         username: configService.get<string>('POSTGRES_USER'),
         password: configService.get<string>('POSTGRES_PASSWORD'),
         database: configService.get<string>('POSTGRES_DB'),
-        entities: [User, Store, Channel, Review, Notification, Customer, Flow],
-        synchronize: true,
+        entities: [User, Store, Channel, Review, Notification, Customer, CustomerCategory, CustomerTag, Flow, Organization, OrganizationMember, StoreMember, MetaWhatsAppConnection, WhatsAppTemplate, BillingPlan, Subscription, Wallet, WalletTransaction, PaymentMethod, BillingPayment, PricingRule],
+        synchronize: configService.get<string>('TYPEORM_SYNCHRONIZE') === 'true',
       }),
     }),
     MongooseModule.forRootAsync({
@@ -46,11 +64,14 @@ import { Flow } from './modules/flows/entities/flow.entity';
         uri: configService.get<string>('MONGO_URL'),
       }),
     }),
+    OrganizationsModule,
     AuthModule,
     UsersModule,
     StoresModule,
     EventsModule,
     ChannelsModule,
+    MetaWhatsAppModule,
+    BillingModule,
     WebhooksModule,
     ConversationsModule,
     AiModule,

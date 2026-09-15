@@ -18,12 +18,17 @@ import {
   Users,
   GitBranch,
   Moon,
-  Sun
+  Sun,
+  MessageSquareText,
+  WalletCards,
+  BadgeDollarSign
 } from 'lucide-react';
 import LogoImage from '../assets/logos/logo.png';
 import LogoAltImage from '../assets/logos/logo-alt.png';
 import NotificationCenter from './NotificationCenter';
 import { getApiBaseUrl } from '../api/baseUrl';
+import api from '../api/client';
+import { useTheme } from '../context/ThemeContext';
 
 interface SidebarItemProps {
   icon: React.ReactNode;
@@ -76,20 +81,13 @@ const SidebarItem = ({ icon, label, path, active, isCollapsed, onNavigate }: Sid
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [isSidebarOpen, setSidebarOpen] = useState(false);
   const [isCollapsed, setCollapsed] = useState(false);
-  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
-    return (localStorage.getItem('theme') as 'light' | 'dark' | null) || 'dark';
-  });
+  const { theme, toggleTheme } = useTheme();
   const [socket, setSocket] = useState<Socket | null>(null);
+  const [isPlatformAdmin, setPlatformAdmin] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
   const user = JSON.parse(localStorage.getItem('user') || '{}');
   const sidebarLogo = theme === 'light' ? LogoAltImage : LogoImage;
-
-  useEffect(() => {
-    document.documentElement.dataset.theme = theme;
-    document.documentElement.classList.toggle('dark', theme === 'dark');
-    localStorage.setItem('theme', theme);
-  }, [theme]);
 
   useEffect(() => {
     if (Notification.permission === 'default') {
@@ -106,13 +104,20 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     }
   }, []);
 
+  useEffect(() => {
+    api.get('/billing/admin/me').then(() => setPlatformAdmin(true)).catch(() => setPlatformAdmin(false));
+  }, []);
+
   const menuItems = [
     { icon: <LayoutDashboard size={22} />, label: 'الرئيسية', path: '/dashboard' },
     { icon: <MessageSquare size={22} />, label: 'المحادثات', path: '/dashboard/conversations' },
     { icon: <Users size={22} />, label: 'العملاء', path: '/dashboard/customers' },
     { icon: <GitBranch size={22} />, label: 'التدفقات', path: '/dashboard/flows' },
     { icon: <Share2 size={22} />, label: 'القنوات', path: '/dashboard/channels' },
+    { icon: <MessageSquareText size={22} />, label: 'قوالب وقوائم الإرسال', path: '/dashboard/whatsapp-templates' },
     { icon: <Star size={22} />, label: 'التقييمات', path: '/dashboard/reviews' },
+    { icon: <WalletCards size={22} />, label: 'الباقات والفوترة', path: '/dashboard/billing' },
+    ...(isPlatformAdmin ? [{ icon: <BadgeDollarSign size={22} />, label: 'إدارة الاشتراكات', path: '/dashboard/billing-admin' }] : []),
     { icon: <BarChart3 size={22} />, label: 'التقارير', path: '/dashboard/analytics' },
     { icon: <Settings size={22} />, label: 'الإعدادات', path: '/dashboard/settings' },
   ];
@@ -121,10 +126,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     localStorage.removeItem('access_token');
     localStorage.removeItem('user');
     navigate('/login');
-  };
-
-  const toggleTheme = () => {
-    setTheme((currentTheme) => currentTheme === 'light' ? 'dark' : 'light');
   };
 
   return (

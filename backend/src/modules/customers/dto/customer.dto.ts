@@ -1,6 +1,8 @@
-import { IsString, IsOptional, IsEmail, IsArray, ValidateIf } from 'class-validator';
+import { IsString, IsOptional, IsEmail, IsArray, ValidateIf, IsUUID, IsHexColor, IsBoolean, IsInt, Min, IsEnum } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
 import { examples } from '../../../common/swagger/api-examples';
+import { CustomerTaxonomyScope } from '../entities/customer-category.entity';
 
 export class CreateCustomerDto {
   @ApiPropertyOptional({ example: examples.customer.item.fullName })
@@ -34,10 +36,23 @@ export class CreateCustomerDto {
   @IsOptional()
   facebookId?: string;
 
-  @ApiPropertyOptional({ example: examples.customer.update.tags, type: [String] })
+  @ApiPropertyOptional({ type: [String] })
   @IsArray()
+  @IsString({ each: true })
   @IsOptional()
   tags?: string[];
+
+  @ApiPropertyOptional({ type: [String] })
+  @IsArray()
+  @IsUUID('4', { each: true })
+  @IsOptional()
+  categoryIds?: string[];
+
+  @ApiPropertyOptional({ type: [String] })
+  @IsArray()
+  @IsUUID('4', { each: true })
+  @IsOptional()
+  tagIds?: string[];
 
   @ApiPropertyOptional({ example: examples.customer.update.notes })
   @IsString()
@@ -46,3 +61,75 @@ export class CreateCustomerDto {
 }
 
 export class UpdateCustomerDto extends CreateCustomerDto {}
+
+export class CreateCustomerCategoryDto {
+  @IsEnum(CustomerTaxonomyScope)
+  scope: CustomerTaxonomyScope = CustomerTaxonomyScope.STORE;
+
+  @IsOptional()
+  @IsUUID('4')
+  storeId?: string;
+
+  @IsString()
+  name: string;
+
+  @IsOptional()
+  @IsHexColor()
+  color?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Type(() => Number)
+  sortOrder?: number;
+}
+
+export class UpdateCustomerCategoryDto {
+  @IsOptional()
+  @IsString()
+  name?: string;
+
+  @IsOptional()
+  @IsHexColor()
+  color?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  isActive?: boolean;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Type(() => Number)
+  sortOrder?: number;
+}
+
+export class CreateCustomerTagDto {
+  @IsEnum(CustomerTaxonomyScope)
+  scope: CustomerTaxonomyScope = CustomerTaxonomyScope.STORE;
+
+  @IsOptional()
+  @IsUUID('4')
+  storeId?: string;
+
+  @IsString()
+  name: string;
+
+  @IsOptional()
+  @IsHexColor()
+  color?: string;
+}
+
+export class UpdateCustomerTagDto {
+  @IsOptional()
+  @IsString()
+  name?: string;
+
+  @IsOptional()
+  @IsHexColor()
+  color?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  isActive?: boolean;
+}

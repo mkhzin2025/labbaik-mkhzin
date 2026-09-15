@@ -67,6 +67,7 @@ interface Attachment {
 interface Conversation {
   _id: string;
   customerPhone: string;
+  storeId: string;
   platform: string;
   customerId?: string; // Link to Postgres
   lastMessage: string;
@@ -172,6 +173,8 @@ export default function ConversationsPage() {
   
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
   const [selectedPlatform, setSelectedPlatform] = useState<string | null>(null);
+  const [selectedStoreId, setSelectedStoreId] = useState<string>('all');
+  const [stores, setStores] = useState<Array<{ id: string; name: string }>>([]);
   
   const [showTagEditor, setShowTagEditor] = useState(false);
   const [showFilterDropdown, setShowFilterDropdown] = useState(false);
@@ -235,10 +238,22 @@ export default function ConversationsPage() {
 
   useEffect(() => {
     fetchConversations();
+    fetchStores();
     fetchStoreTags();
     setupSocket();
     return () => { if (socketRef.current) socketRef.current.disconnect(); };
   }, []);
+
+  const fetchStores = async () => {
+    try {
+      const { data } = await api.get('/stores');
+      setStores(Array.isArray(data) ? data : (data?.stores || []));
+    } catch (e) {
+      setStores([]);
+    }
+  };
+
+  const getStoreName = (storeId?: string) => stores.find((store) => store.id === storeId)?.name || 'فرع غير معروف';
 
   const fetchStoreTags = async () => {
     try {
@@ -249,7 +264,7 @@ export default function ConversationsPage() {
 
   const fetchConversations = async () => {
     try {
-      const { data } = await api.get('/conversations');
+      const { data } = await api.get('/conversations', { params: { scope: 'organization' } });
       setConversations(Array.isArray(data) ? data : []);
       setLoading(false);
     } catch (error) {
@@ -267,11 +282,37 @@ export default function ConversationsPage() {
     socketRef.current.on('new_message', (payload) => {
       handleIncomingRealtimeMessage(payload);
     });
+    socketRef.current.on('message_status', (payload) => {
+      handleMessageStatus(payload);
+    });
+  };
+
+  const handleMessageStatus = (payload: any) => {
+    if (!payload?.whatsappMessageId || !payload?.status) return;
+    const updateMessages = (messages: Message[] = []) => messages.map((message) => {
+      if (message.metadata?.whatsappMessageId !== payload.whatsappMessageId) return message;
+      return {
+        ...message,
+        metadata: {
+          ...(message.metadata || {}),
+          status: payload.status,
+          statusUpdatedAt: payload.timestamp || Date.now(),
+          statusErrors: payload.errors || [],
+        },
+      };
+    });
+
+    setConversations((prev) => prev.map((conversation) => ({
+      ...conversation,
+      messages: updateMessages(conversation.messages || []),
+    })));
+    setSelectedChat((current) => current ? { ...current, messages: updateMessages(current.messages || []) } : current);
   };
 
   const handleIncomingRealtimeMessage = (payload: any) => {
     if (!payload) return;
     const targetPhone = payload.from === 'me' ? payload.customerPhone : payload.from;
+    const targetStoreId = payload.storeId as string | undefined;
     if (!targetPhone) return;
 
     const newMessage: Message = {
@@ -289,8 +330,8 @@ export default function ConversationsPage() {
     }
 
     setConversations(prev => {
-      const existingIdx = prev.findIndex(c => c.customerPhone === targetPhone);
-      const isCurrentlyOpen = selectedChatRef.current?.customerPhone === targetPhone;
+      const existingIdx = prev.findIndex(c => c.customerPhone === targetPhone && (!targetStoreId || c.storeId === targetStoreId));
+      const isCurrentlyOpen = selectedChatRef.current?.customerPhone === targetPhone && (!targetStoreId || selectedChatRef.current?.storeId === targetStoreId);
 
       if (existingIdx !== -1) {
         const updatedList = [...prev];
@@ -313,6 +354,7 @@ export default function ConversationsPage() {
         const newConv: Conversation = {
           _id: `temp-${Date.now()}`,
           customerPhone: targetPhone,
+          storeId: targetStoreId || '',
           platform: payload.platform || 'whatsapp',
           customerId: payload.customerId,
           lastMessage: payload.text || `[${payload.type || 'message'}]`,
@@ -326,7 +368,7 @@ export default function ConversationsPage() {
       }
     });
 
-    if (selectedChatRef.current && selectedChatRef.current.customerPhone === targetPhone) {
+    if (selectedChatRef.current && selectedChatRef.current.customerPhone === targetPhone && (!targetStoreId || selectedChatRef.current.storeId === targetStoreId)) {
       setSelectedChat(prev => {
         if (!prev) return null;
         return { ...prev, messages: [...(prev.messages || []), newMessage] };
@@ -337,7 +379,7 @@ export default function ConversationsPage() {
   const selectConversation = async (conv: Conversation) => {
     setSelectedChat({ ...conv, unreadCount: 0 });
     setShowTagEditor(false);
-    setConversations(prev => prev.map(c => c.customerPhone === conv.customerPhone ? { ...c, unreadCount: 0 } : c));
+    setConversations(prev => prev.map(c => c._id === conv._id ? { ...c, unreadCount: 0 } : c));
     try { if (conv._id && !conv._id.startsWith('temp')) await api.patch(`/conversations/${conv._id}/read`); } catch (e) {}
   };
 
@@ -406,6 +448,16 @@ export default function ConversationsPage() {
     }
   };
 
+  const renderMessageStatus = (msg: Message) => {
+    if (msg.from !== 'me') return null;
+    const status = msg.metadata?.status;
+    if (status === 'failed') return <span title="فشل الإرسال" className="flex items-center gap-1 text-[9px] opacity-80"><AlertTriangle size={13} /> فشل</span>;
+    if (status === 'read') return <span title="تمت القراءة" className="flex items-center gap-1 text-[9px] opacity-80"><CheckCheck size={14} /> مقروءة</span>;
+    if (status === 'delivered') return <span title="تم التسليم" className="flex items-center gap-1 text-[9px] opacity-70"><CheckCheck size={14} /> وصلت</span>;
+    if (status === 'sent') return <span title="أُرسلت" className="flex items-center gap-1 text-[9px] opacity-65"><Check size={13} /> أُرسلت</span>;
+    return <span title="قُبلت للإرسال" className="flex items-center gap-1 text-[9px] opacity-55"><Check size={13} /> قيد الإرسال</span>;
+  };
+
   const getTagColor = (tag: string) => {
     const map: any = {
       'استفسار_سعر': 'bg-blue-500/10 text-blue-400 border-blue-500/20',
@@ -421,7 +473,8 @@ export default function ConversationsPage() {
   const filteredConversations = conversations.filter(c => {
     const tagMatch = !selectedTag || c.tags?.includes(selectedTag);
     const platformMatch = !selectedPlatform || c.platform === selectedPlatform;
-    return tagMatch && platformMatch;
+    const storeMatch = selectedStoreId === 'all' || c.storeId === selectedStoreId;
+    return tagMatch && platformMatch && storeMatch;
   });
 
   const allTags = Array.from(new Set([...defaultTags, ...customTags]));
@@ -434,12 +487,13 @@ export default function ConversationsPage() {
           <div className="flex items-center justify-between">
             <h2 className="text-xl font-black text-neutral-900 dark:text-white">صندوق الوارد الموحد</h2>
             <div className="relative" ref={filterRef}>
-              <Button onClick={() => setShowFilterDropdown(!showFilterDropdown)} variant={(selectedTag || selectedPlatform) ? 'primary' : 'secondary'} size="md" className="gap-2"><Filter size={20} />{(selectedTag || selectedPlatform) && <span className="w-2 h-2 bg-red-500 rounded-full"></span>}</Button>
+              <Button onClick={() => setShowFilterDropdown(!showFilterDropdown)} variant={(selectedTag || selectedPlatform || selectedStoreId !== 'all') ? 'primary' : 'secondary'} size="md" className="gap-2"><Filter size={20} />{(selectedTag || selectedPlatform || selectedStoreId !== 'all') && <span className="w-2 h-2 bg-red-500 rounded-full"></span>}</Button>
               {showFilterDropdown && (
                 <div className="absolute left-0 mt-4 w-72 bg-labbaik-surface border border-purple-100 dark:border-white/10 rounded-[2rem] shadow-3xl z-[100] overflow-hidden animate-slide-up">
-                  <div className="p-5 border-b border-purple-100 dark:border-white/5 flex justify-between items-center bg-purple-50/30 dark:bg-white/2"><span className="text-xs font-black text-neutral-600 dark:text-neutral-300">تصفية النتائج</span>{(selectedTag || selectedPlatform) && (<button onClick={() => {setSelectedTag(null); setSelectedPlatform(null); setShowFilterDropdown(false);}} className="text-[10px] font-black text-labbaik-blue hover:underline">مسح الكل</button>)}</div>
+                  <div className="p-5 border-b border-purple-100 dark:border-white/5 flex justify-between items-center bg-purple-50/30 dark:bg-white/2"><span className="text-xs font-black text-neutral-600 dark:text-neutral-300">تصفية النتائج</span>{(selectedTag || selectedPlatform || selectedStoreId !== 'all') && (<button onClick={() => {setSelectedTag(null); setSelectedPlatform(null); setSelectedStoreId('all'); setShowFilterDropdown(false);}} className="text-[10px] font-black text-labbaik-blue hover:underline">مسح الكل</button>)}</div>
                   <div className="max-h-[400px] overflow-y-auto custom-scrollbar p-4 space-y-6">
                     <div className="space-y-3"><span className="text-[9px] font-black text-neutral-500 dark:text-neutral-400 uppercase tracking-widest flex items-center gap-2"><Share2 size={12} /> القنوات</span><div className="grid grid-cols-1 gap-1">{platforms.map(p => (<Button key={p.id} onClick={() => setSelectedPlatform(selectedPlatform === p.id ? null : p.id)} variant={selectedPlatform === p.id ? 'primary' : 'secondary'} size="sm" className="w-full justify-between">{p.icon} {p.name}{selectedPlatform === p.id && <Check size={14} />}</Button>))}</div></div>
+                    <div className="space-y-3"><span className="text-[9px] font-black text-neutral-500 dark:text-neutral-400 uppercase tracking-widest flex items-center gap-2"><Layers size={12} /> الفروع</span><div className="grid grid-cols-1 gap-1"><Button onClick={() => setSelectedStoreId('all')} variant={selectedStoreId === 'all' ? 'primary' : 'secondary'} size="sm" className="w-full justify-between">جميع الفروع{selectedStoreId === 'all' && <Check size={14} />}</Button>{stores.map(store => (<Button key={store.id} onClick={() => setSelectedStoreId(store.id)} variant={selectedStoreId === store.id ? 'primary' : 'secondary'} size="sm" className="w-full justify-between">{store.name}{selectedStoreId === store.id && <Check size={14} />}</Button>))}</div></div>
                     <div className="space-y-3"><span className="text-[9px] font-black text-neutral-500 dark:text-neutral-400 uppercase tracking-widest flex items-center gap-2"><Tag size={12} /> الوسوم</span><div className="grid grid-cols-1 gap-1">{allTags.map(tag => (<Button key={tag} onClick={() => setSelectedTag(selectedTag === tag ? null : tag)} variant={selectedTag === tag ? 'primary' : 'secondary'} size="sm" className="w-full justify-between">{tag.replace('_', ' ')}{selectedTag === tag && <Check size={14} />}</Button>))}</div></div>
                   </div>
                   <div className="p-4 bg-labbaik-blue/5 text-center"><Button onClick={() => setShowFilterDropdown(false)} variant="primary" size="md" className="w-full">تطبيق</Button></div>
@@ -462,7 +516,7 @@ export default function ConversationsPage() {
             >
               <div className="flex items-start gap-4">
                 <div className="relative shrink-0"><div className={`w-14 h-14 rounded-2xl flex items-center justify-center border transition-transform group-hover:scale-105 ${selectedChat?._id === conv._id ? 'bg-labbaik-blue/20 border-labbaik-blue/30' : 'bg-purple-50/50 dark:bg-white/5 border-purple-100/60 dark:border-white/10'}`}><UserIcon size={24} className={selectedChat?._id === conv._id ? 'text-labbaik-blue' : 'text-neutral-500 dark:text-neutral-400'} /></div><div className="absolute -bottom-1 -left-1 bg-labbaik-surface p-1.5 rounded-lg border border-purple-100/60 dark:border-white/10 shadow-sm">{getPlatformIcon(conv.platform)}</div></div>
-                <div className="flex-1 min-w-0 text-right space-y-1"><div className="flex justify-between items-center"><div className="flex items-center gap-2 truncate"><h4 className={`text-sm font-bold truncate ${conv.unreadCount && conv.unreadCount > 0 ? 'text-neutral-900 dark:text-white' : 'font-black text-neutral-700 dark:text-neutral-300'}`}>{conv.customerPhone}</h4>{getSentimentEmoji(conv.lastSentiment)}</div><span className="text-[9px] text-neutral-500 font-black">{safeFormatDate(conv.lastMessageAt || Date.now(), 'HH:mm')}</span></div><p className={`text-[11px] truncate ${conv.unreadCount && conv.unreadCount > 0 ? 'text-neutral-800 dark:text-gray-200 font-bold' : 'text-neutral-500 dark:text-neutral-400 font-medium'}`}>{conv.lastMessage}</p></div>
+                <div className="flex-1 min-w-0 text-right space-y-1"><div className="flex justify-between items-center"><div className="flex items-center gap-2 truncate"><h4 className={`text-sm font-bold truncate ${conv.unreadCount && conv.unreadCount > 0 ? 'text-neutral-900 dark:text-white' : 'font-black text-neutral-700 dark:text-neutral-300'}`}>{conv.customerPhone}</h4>{getSentimentEmoji(conv.lastSentiment)}</div><span className="text-[9px] text-neutral-500 font-black">{safeFormatDate(conv.lastMessageAt || Date.now(), 'HH:mm')}</span></div><p className={`text-[11px] truncate ${conv.unreadCount && conv.unreadCount > 0 ? 'text-neutral-800 dark:text-gray-200 font-bold' : 'text-neutral-500 dark:text-neutral-400 font-medium'}`}>{conv.lastMessage}</p><span className="inline-flex mt-1 text-[8px] font-black px-2 py-0.5 rounded-md bg-labbaik-blue/10 text-labbaik-blue border border-labbaik-blue/20">{getStoreName(conv.storeId)}</span></div>
               </div>
               {conv.tags && conv.tags.length > 0 && (<div className="flex flex-wrap gap-1.5 pt-1">{conv.tags.map(tag => (<span key={tag} className={`text-[8px] font-black px-2 py-0.5 rounded-md border flex items-center gap-1 ${getTagColor(tag)}`}><Tag size={8} /> {tag.replace('_', ' ')}</span>))}</div>)}
               {Number(conv.unreadCount) > 0 && <div className="absolute left-6 top-1/2 -translate-y-1/2 w-6 h-6 bg-labbaik-blue text-labbaik-on-accent text-[10px] font-black rounded-full flex items-center justify-center shadow-lg animate-bounce-short">{conv.unreadCount}</div>}
@@ -475,7 +529,7 @@ export default function ConversationsPage() {
         {selectedChat ? (
           <>
             <div className="h-24 px-8 flex items-center justify-between border-b border-purple-100/60 dark:border-white/10 backdrop-blur-md z-40 bg-labbaik-surface/80">
-              <div className="flex items-center gap-5"><button onClick={() => setShowMobileList(true)} className="lg:hidden p-2 text-neutral-400"><ChevronRight size={28} /></button><div className="w-12 h-12 bg-labbaik-blue/10 rounded-2xl flex items-center justify-center border border-labbaik-blue/20 shadow-lg"><UserIcon size={24} className="text-labbaik-blue" /></div><div className="space-y-1"><h3 className="font-black text-sm text-neutral-900 dark:text-white">{selectedChat.customerPhone}</h3><div className="flex items-center gap-2">{selectedChat.tags?.map(tag => (<span key={tag} className={`text-[7px] font-black px-1.5 py-0.5 rounded border uppercase tracking-widest ${getTagColor(tag)}`}>{tag.replace('_', ' ')}</span>))}<button onClick={() => setShowTagEditor(true)} className="p-1 hover:bg-labbaik-blue/10 dark:hover:bg-white/5 rounded-md text-neutral-400 hover:text-labbaik-blue transition-all"><Plus size={12} /></button></div></div></div>
+              <div className="flex items-center gap-5"><button onClick={() => setShowMobileList(true)} className="lg:hidden p-2 text-neutral-400"><ChevronRight size={28} /></button><div className="w-12 h-12 bg-labbaik-blue/10 rounded-2xl flex items-center justify-center border border-labbaik-blue/20 shadow-lg"><UserIcon size={24} className="text-labbaik-blue" /></div><div className="space-y-1"><div className="flex items-center gap-2"><h3 className="font-black text-sm text-neutral-900 dark:text-white">{selectedChat.customerPhone}</h3><span className="text-[8px] font-black px-2 py-0.5 rounded-md bg-labbaik-blue/10 text-labbaik-blue border border-labbaik-blue/20">{getStoreName(selectedChat.storeId)}</span></div><div className="flex items-center gap-2">{selectedChat.tags?.map(tag => (<span key={tag} className={`text-[7px] font-black px-1.5 py-0.5 rounded border uppercase tracking-widest ${getTagColor(tag)}`}>{tag.replace('_', ' ')}</span>))}<button onClick={() => setShowTagEditor(true)} className="p-1 hover:bg-labbaik-blue/10 dark:hover:bg-white/5 rounded-md text-neutral-400 hover:text-labbaik-blue transition-all"><Plus size={12} /></button></div></div></div>
               <div className="flex items-center gap-6">
                 {selectedChat.customerId && (<Button onClick={() => setShowProfile(!showProfile)} variant={showProfile ? 'primary' : 'secondary'} size="md"><Contact size={20} /></Button>)}
                 <div onClick={toggleAi} className={`flex items-center gap-3 px-4 py-2.5 rounded-2xl cursor-pointer transition-all border group ${selectedChat.aiEnabled !== false ? 'bg-labbaik-blue/10 border-labbaik-blue/30 text-labbaik-blue' : 'bg-red-500/10 border-red-500/30 text-red-400'}`}><div className={`w-2 h-2 rounded-full ${selectedChat.aiEnabled !== false ? 'bg-labbaik-blue animate-pulse shadow-[0_0_8px_#643B89]' : 'bg-red-500'}`}></div><span className="text-[10px] font-black uppercase tracking-widest">{selectedChat.aiEnabled !== false ? 'لبيك نشط' : 'الذكاء معطل'}</span></div>
@@ -506,7 +560,7 @@ export default function ConversationsPage() {
                     <MessageExtras msg={msg} />
                     <div className={`flex items-center gap-2 mt-3 ${msg.from === 'me' ? 'justify-start' : 'justify-end'}`}>
                       <span className="text-[9px] opacity-60 font-black tabular-nums">{safeFormatDate(msg.timestamp || Date.now(), 'HH:mm')}</span>
-                      {msg.from === 'me' && <CheckCheck size={14} className="opacity-60" />}
+                      {renderMessageStatus(msg)}
                     </div>
                   </div>
                 </div>

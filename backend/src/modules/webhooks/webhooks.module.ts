@@ -8,9 +8,11 @@ import { ChannelsModule } from '../channels/channels.module';
 import { CustomersModule } from '../customers/customers.module';
 import { FlowsModule } from '../flows/flows.module';
 import { AiModule } from '../ai/ai.module';
+import { MetaWhatsAppModule } from '../meta-whatsapp/meta-whatsapp.module';
+import { BillingModule } from '../billing/billing.module';
 
 @Module({
-  imports: [ConfigModule, EventsModule, ConversationsModule, ChannelsModule, CustomersModule, FlowsModule, AiModule],
+  imports: [ConfigModule, EventsModule, ConversationsModule, ChannelsModule, CustomersModule, FlowsModule, AiModule, MetaWhatsAppModule, BillingModule],
   providers: [WebhooksService],
   controllers: [WebhooksController],
 })

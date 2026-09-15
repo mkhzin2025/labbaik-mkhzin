@@ -6,6 +6,8 @@ import { ConversationsController } from './conversations.controller';
 import { StoresModule } from '../stores/stores.module';
 import { ChannelsModule } from '../channels/channels.module';
 import { CustomersModule } from '../customers/customers.module';
+import { BillingModule } from '../billing/billing.module';
+import { OrganizationsModule } from '../organizations/organizations.module';
 
 @Module({
   imports: [
@@ -13,6 +15,8 @@ import { CustomersModule } from '../customers/customers.module';
     StoresModule,
     ChannelsModule,
     CustomersModule,
+    BillingModule,
+    OrganizationsModule,
   ],
   providers: [ConversationsService],
   controllers: [ConversationsController],

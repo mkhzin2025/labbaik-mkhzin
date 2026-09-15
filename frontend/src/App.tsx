@@ -1,4 +1,3 @@
-import { useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import LoginPage from './pages/LoginPage';
 import DashboardLayout from './components/DashboardLayout';
@@ -10,7 +9,11 @@ import ReviewsPage from './pages/ReviewsPage';
 import CustomersPage from './pages/CustomersPage';
 import FlowsPage from './pages/FlowsPage';
 import FlowEditorPage from './pages/FlowEditorPage';
+import WhatsAppTemplatesPage from './pages/WhatsAppTemplatesPage';
+import BillingPage from './pages/BillingPage';
+import BillingAdminPage from './pages/BillingAdminPage';
 import { ToastProvider } from './components/Toast';
+import { ThemeProvider } from './context/ThemeContext';
 import './index.css';
 
 // Simple Guard Component
@@ -20,13 +23,10 @@ const PrivateRoute = ({ children }: { children: React.ReactNode }) => {
 };
 
 function App() {
-  useEffect(() => {
-    const savedTheme = localStorage.getItem('theme') || 'dark';
-    document.documentElement.setAttribute('data-theme', savedTheme);
-  }, []);
   return (
-    <ToastProvider>
-      <Router>
+    <ThemeProvider>
+      <ToastProvider>
+        <Router>
         <Routes>
           {/* Public Routes */}
           <Route path="/login" element={<LoginPage />} />
@@ -44,7 +44,10 @@ function App() {
                     <Route path="flows" element={<FlowsPage />} />
                     <Route path="flows/:id" element={<FlowEditorPage />} />
                     <Route path="channels" element={<ChannelsPage />} />
+                    <Route path="whatsapp-templates" element={<WhatsAppTemplatesPage />} />
                     <Route path="reviews" element={<ReviewsPage />} />
+                    <Route path="billing" element={<BillingPage />} />
+                    <Route path="billing-admin" element={<BillingAdminPage />} />
                     <Route path="analytics" element={<div className="p-16 text-3xl font-black text-center text-white">التقارير المتقدمة <br /><span className="text-gray-500 text-sm font-bold block mt-4 italic opacity-50">قريباً في المرحلة الثانية</span></div>} />
                     <Route path="settings" element={<SettingsPage />} />
                   </Routes>
@@ -58,6 +61,7 @@ function App() {
         </Routes>
       </Router>
     </ToastProvider>
+  </ThemeProvider>
   );
 }
 

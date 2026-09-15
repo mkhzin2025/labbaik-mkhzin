@@ -3,12 +3,14 @@ import { JwtService } from '@nestjs/jwt';
 import { UsersService } from '../users/users.service';
 import { RegisterDto, LoginDto } from './dto/auth.dto';
 import * as bcrypt from 'bcrypt';
+import { OrganizationsService } from '../organizations/organizations.service';
 
 @Injectable()
 export class AuthService {
   constructor(
     private readonly usersService: UsersService,
     private readonly jwtService: JwtService,
+    private readonly organizationsService: OrganizationsService,
   ) {}
 
   async register(registerDto: RegisterDto) {
@@ -24,9 +26,9 @@ export class AuthService {
       fullName,
     });
 
-    // Generate token
-    const token = this.jwtService.sign({ sub: user.id, email: user.email, role: user.role });
-    return { user, token };
+    const organization = await this.organizationsService.ensureForUser(user.id);
+    const token = this.jwtService.sign({ sub: user.id, email: user.email, role: user.role, organizationId: organization.id });
+    return { user, organization, token };
   }
 
   async login(loginDto: LoginDto) {
@@ -37,13 +39,13 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    // Generate token
-    const token = this.jwtService.sign({ sub: user.id, email: user.email, role: user.role });
+    const organization = await this.organizationsService.ensureForUser(user.id);
+    const token = this.jwtService.sign({ sub: user.id, email: user.email, role: user.role, organizationId: organization.id });
     
     // Remove password before returning
     const userResponse: any = { ...user };
     delete userResponse.password;
 
-    return { user: userResponse, token };
+    return { user: userResponse, organization, token };
   }
 }

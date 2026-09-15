@@ -12,22 +12,21 @@ export class StoresService {
     private readonly storeRepository: Repository<Store>,
   ) {}
 
-  async create(createStoreDto: CreateStoreDto, owner: User) {
-    // Check if store already exists for this owner to perform Upsert
+  async create(createStoreDto: CreateStoreDto, owner: User, organizationId?: string) {
     const existingStore = await this.storeRepository.findOne({
       where: { owner: { id: owner.id } },
     });
 
     if (existingStore) {
-      // Update existing store
       Object.assign(existingStore, createStoreDto);
+      if (organizationId && !existingStore.organizationId) existingStore.organizationId = organizationId;
       return this.storeRepository.save(existingStore);
     }
 
-    // Create new store
     const store = this.storeRepository.create({
       ...createStoreDto,
       owner,
+      organizationId: organizationId || null,
     });
     return this.storeRepository.save(store);
   }
@@ -35,16 +34,36 @@ export class StoresService {
   async findByOwner(userId: string) {
     const store = await this.storeRepository.findOne({
       where: { owner: { id: userId } },
-      relations: ['owner'], // Ensure owner info is loaded
+      relations: ['owner'],
     });
-    if (!store) {
-      throw new NotFoundException('Store profile not found');
-    }
+    if (!store) throw new NotFoundException('Store profile not found');
     return store;
+  }
+
+  async findByIdInOrganization(storeId: string, organizationId: string) {
+    const store = await this.storeRepository.findOne({
+      where: { id: storeId, organizationId },
+      relations: ['owner'],
+    });
+    if (!store) throw new NotFoundException('Store/branch not found');
+    return store;
+  }
+
+  async findAllByOrganization(organizationId: string) {
+    return this.storeRepository.find({
+      where: { organizationId },
+      order: { createdAt: 'ASC' },
+    });
   }
 
   async update(userId: string, updateStoreDto: UpdateStoreDto) {
     const store = await this.findByOwner(userId);
+    Object.assign(store, updateStoreDto);
+    return this.storeRepository.save(store);
+  }
+
+  async updateById(storeId: string, organizationId: string, updateStoreDto: UpdateStoreDto) {
+    const store = await this.findByIdInOrganization(storeId, organizationId);
     Object.assign(store, updateStoreDto);
     return this.storeRepository.save(store);
   }

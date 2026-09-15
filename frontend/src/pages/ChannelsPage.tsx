@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
 import { getApiBaseUrl } from '../api/baseUrl';
 import { useToast } from '../components/Toast';
@@ -37,6 +38,7 @@ export default function ChannelsPage() {
   });
   const [saving, setSaving] = useState(false);
   const { showToast } = useToast();
+  const navigate = useNavigate();
 
   useEffect(() => {
     fetchChannels();
@@ -169,11 +171,11 @@ export default function ChannelsPage() {
                     >
                       <Unlink size={16} /> فك الارتباط
                     </Button>
-                    <button className="p-4 bg-white/5 text-neutral-400 rounded-2xl border border-white/5 hover:text-white transition-all"><ExternalLink size={18} /></button>
+                    <button onClick={() => platform.id === 'whatsapp' && navigate('/dashboard/settings?tab=meta')} className="p-4 bg-white/5 text-neutral-400 rounded-2xl border border-white/5 hover:text-white transition-all"><ExternalLink size={18} /></button>
                   </>
                 ) : (
                   <Button 
-                    onClick={() => { setSelectedType(platform.id); setShowModal(true); }}
+                    onClick={() => { if (platform.id === 'whatsapp') navigate('/dashboard/settings?tab=meta'); else { setSelectedType(platform.id); setShowModal(true); } }}
                     variant="primary"
                     size="md"
                   >

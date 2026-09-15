@@ -10,7 +10,10 @@ const backendTarget = process.env.VITE_DEV_PROXY_TARGET || 'http://localhost:300
 const backendPaths = [
   '/auth',
   '/users',
+  '/organizations',
   '/stores',
+  '/integrations',
+  '/billing',
   '/channels',
   '/customers',
   '/reviews',
