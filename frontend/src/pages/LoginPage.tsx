@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import api from '../api/client';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { Mail, Lock, Eye, EyeOff, Sun, Moon } from 'lucide-react';
 import LogoImage from '../assets/logos/logo.png';
 import LogoAltImage from '../assets/logos/logo-alt.png';
@@ -182,8 +182,21 @@ export default function LoginPage() {
             </Button>
           </form>
 
+          {/* Register Link */}
+          <div className="mt-7 pt-5 border-t border-purple-100 dark:border-white/10 text-center">
+            <p className="text-sm text-neutral-600 dark:text-neutral-400 font-medium">
+              ليس لديك حساب مؤسسة؟{' '}
+              <Link
+                to="/register"
+                className="font-bold text-labbaik-blue hover:underline"
+              >
+                سجّل مؤسستك الآن
+              </Link>
+            </p>
+          </div>
+
           {/* Footer */}
-          <div className="mt-8 text-center">
+          <div className="mt-6 text-center">
             <p className="text-xs text-neutral-500 dark:text-neutral-400 font-medium">
               © 2026 Labbaik AI System • جميع الحقوق محفوظة
             </p>

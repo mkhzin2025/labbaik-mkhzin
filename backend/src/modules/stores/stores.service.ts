@@ -31,6 +31,15 @@ export class StoresService {
     return this.storeRepository.save(store);
   }
 
+  async createBranch(createStoreDto: CreateStoreDto, owner: User, organizationId: string) {
+    const store = this.storeRepository.create({
+      ...createStoreDto,
+      owner,
+      organizationId,
+    });
+    return this.storeRepository.save(store);
+  }
+
   async findByOwner(userId: string) {
     const store = await this.storeRepository.findOne({
       where: { owner: { id: userId } },

@@ -52,8 +52,8 @@ export class Store {
   @JoinColumn({ name: 'organizationId' })
   organization: Organization | null;
 
-  @OneToOne(() => User)
-  @JoinColumn()
+  @ManyToOne(() => User, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'ownerId' })
   owner: User;
 
   @CreateDateColumn()

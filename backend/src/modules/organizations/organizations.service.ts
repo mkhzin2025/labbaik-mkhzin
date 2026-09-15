@@ -18,6 +18,26 @@ export class OrganizationsService {
     @InjectRepository(Store) private readonly storeRepository: Repository<Store>,
   ) {}
 
+  async createForUser(userId: string, organizationName?: string) {
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+    if (!user) throw new NotFoundException('User not found');
+
+    const orgName = organizationName?.trim() || (user.fullName ? `${user.fullName} Workspace` : 'Labbaik Workspace');
+    const base = this.slugify(orgName) || 'workspace';
+    const organization = await this.organizationRepository.save(this.organizationRepository.create({
+      name: orgName,
+      slug: `${base}-${randomBytes(3).toString('hex')}`,
+    }));
+
+    await this.memberRepository.save(this.memberRepository.create({
+      organizationId: organization.id,
+      userId: user.id,
+      role: OrganizationRole.OWNER,
+    }));
+
+    return organization;
+  }
+
   async ensureForUser(userId: string) {
     const existingMember = await this.memberRepository.findOne({
       where: { userId },

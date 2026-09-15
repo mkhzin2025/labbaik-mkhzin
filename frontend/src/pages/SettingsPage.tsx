@@ -18,12 +18,30 @@ import {
   Sparkles,
   ShieldCheck,
   Search,
-  Rocket
+  Rocket,
+  Building2,
+  Plus,
+  Phone,
+  MapPin,
+  ArrowLeft
 } from 'lucide-react';
 
+interface BranchItem {
+  id: string;
+  name: string;
+  description?: string;
+  phoneNumber?: string;
+  website?: string;
+  createdAt?: string;
+}
+
 export default function SettingsPage() {
-  const [searchParams] = useSearchParams();
-  const [activeTab, setActiveTab] = useState<'profile' | 'kb' | 'ai' | 'meta'>(() => searchParams.get('tab') === 'meta' ? 'meta' : 'profile');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [activeTab, setActiveTab] = useState<'profile' | 'branches' | 'meta' | 'kb' | 'ai'>(() => {
+    const tab = searchParams.get('tab');
+    if (tab === 'branches' || tab === 'meta' || tab === 'kb' || tab === 'ai') return tab;
+    return 'profile';
+  });
   const { showToast } = useToast();
   
   const [storeData, setStoreData] = useState<any>({ 
@@ -37,8 +55,16 @@ export default function SettingsPage() {
   });
   
   const [userData, setUserData] = useState({ fullName: '', email: '', password: '' });
+  const [branches, setBranches] = useState<BranchItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+
+  // New Branch Form State
+  const [showAddBranch, setShowAddBranch] = useState(false);
+  const [newBranchName, setNewBranchName] = useState('');
+  const [newBranchPhone, setNewBranchPhone] = useState('');
+  const [newBranchDesc, setNewBranchDesc] = useState('');
+  const [addingBranch, setAddingBranch] = useState(false);
 
   useEffect(() => {
     fetchInitialData();
@@ -46,19 +72,34 @@ export default function SettingsPage() {
 
   const fetchInitialData = async () => {
     try {
-      const [storeRes, userRes] = await Promise.all([
-        api.get('/stores/me'),
-        api.get('/users/me')
+      const [storeRes, userRes, branchesRes] = await Promise.all([
+        api.get('/stores/me').catch(() => ({ data: {} })),
+        api.get('/users/me').catch(() => ({ data: {} })),
+        api.get('/stores').catch(() => ({ data: [] })),
       ]);
-      setStoreData({
-        ...storeRes.data,
-        preferredModel: storeRes.data.preferredModel || 'groq',
-        workingHours: storeRes.data.workingHours || { start: '09:00', end: '22:00', enabledDays: [0,1,2,3,4,6] }
-      });
+
+      if (storeRes.data?.id) {
+        setStoreData({
+          ...storeRes.data,
+          preferredModel: storeRes.data.preferredModel || 'groq',
+          workingHours: storeRes.data.workingHours || { start: '09:00', end: '22:00', enabledDays: [0,1,2,3,4,6] }
+        });
+      }
+
       setUserData({ ...userRes.data, password: '' });
+      setBranches(branchesRes.data || []);
       setLoading(false);
     } catch {
       setLoading(false);
+    }
+  };
+
+  const loadBranches = async () => {
+    try {
+      const { data } = await api.get('/stores');
+      setBranches(data || []);
+    } catch (err) {
+      console.error(err);
     }
   };
 
@@ -68,6 +109,7 @@ export default function SettingsPage() {
       const { name, description, website, knowledgeBase, phoneNumber, aiMode, workingHours, preferredModel } = storeData;
       await api.patch('/stores/me', { name, description, website, knowledgeBase, phoneNumber, aiMode, workingHours, preferredModel });
       showToast('تم تحديث إعدادات المتجر بنجاح! ✅', 'success');
+      loadBranches();
     } catch {
       showToast('فشل في حفظ الإعدادات، يرجى التحقق من الاتصال ❌', 'error');
     } finally {
@@ -90,12 +132,46 @@ export default function SettingsPage() {
     }
   };
 
+  const handleCreateBranch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newBranchName.trim()) {
+      showToast('يرجى كتابة اسم الفرع.', 'error');
+      return;
+    }
+
+    setAddingBranch(true);
+    try {
+      const payload = {
+        name: newBranchName.trim(),
+        phoneNumber: newBranchPhone.trim() || undefined,
+        description: newBranchDesc.trim() || undefined,
+      };
+
+      await api.post('/stores/branch', payload);
+      showToast(`تمت إضافة فرع "${newBranchName}" بنجاح! 🏢✅`, 'success');
+      setNewBranchName('');
+      setNewBranchPhone('');
+      setNewBranchDesc('');
+      setShowAddBranch(false);
+      await loadBranches();
+    } catch (err: any) {
+      showToast(err?.response?.data?.message || 'فشل في إضافة الفرع، يرجى المحاولة لاحقاً.', 'error');
+    } finally {
+      setAddingBranch(false);
+    }
+  };
+
   const toggleDay = (day: number) => {
     const currentDays = [...storeData.workingHours.enabledDays];
     const index = currentDays.indexOf(day);
     if (index > -1) currentDays.splice(index, 1);
     else currentDays.push(day);
     setStoreData({ ...storeData, workingHours: { ...storeData.workingHours, enabledDays: currentDays } });
+  };
+
+  const handleTabChange = (tab: 'profile' | 'branches' | 'meta' | 'kb' | 'ai') => {
+    setActiveTab(tab);
+    setSearchParams({ tab });
   };
 
   if (loading) {
@@ -131,7 +207,9 @@ export default function SettingsPage() {
             </div>
             <div>
               <h1 className="text-2xl font-black text-neutral-900 dark:text-white">إعدادات المنصة المتقدمة</h1>
-              <p className="text-neutral-600 dark:text-neutral-400 text-sm mt-1 font-medium text-right">تحكم في محرك الذكاء، أوقات الرد، وبيانات المتجر.</p>
+              <p className="text-neutral-600 dark:text-neutral-400 text-sm mt-1 font-medium text-right">
+                تحكم في فروع المؤسسة، قنوات ربط واتساب، محرك الذكاء، وبيانات المتجر.
+              </p>
             </div>
           </div>
         </div>
@@ -139,7 +217,7 @@ export default function SettingsPage() {
         <div className="flex border-b border-purple-100 dark:border-white/5 gap-8 overflow-x-auto no-scrollbar">
           <button
             type="button"
-            onClick={() => setActiveTab('profile')}
+            onClick={() => handleTabChange('profile')}
             className={`pb-4 text-sm font-black transition-all relative whitespace-nowrap cursor-pointer ${
               activeTab === 'profile' ? 'text-labbaik-blue' : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white'
             }`}
@@ -147,29 +225,24 @@ export default function SettingsPage() {
             الملف الشخصي
             {activeTab === 'profile' && <div className="absolute bottom-0 left-0 right-0 h-1 bg-labbaik-blue rounded-full"></div>}
           </button>
+          
           <button
             type="button"
-            onClick={() => setActiveTab('kb')}
-            className={`pb-4 text-sm font-black transition-all relative whitespace-nowrap cursor-pointer ${
-              activeTab === 'kb' ? 'text-labbaik-blue' : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white'
+            onClick={() => handleTabChange('branches')}
+            className={`pb-4 text-sm font-black transition-all relative whitespace-nowrap cursor-pointer flex items-center gap-2 ${
+              activeTab === 'branches' ? 'text-labbaik-blue' : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white'
             }`}
           >
-            قاعدة المعرفة
-            {activeTab === 'kb' && <div className="absolute bottom-0 left-0 right-0 h-1 bg-labbaik-blue rounded-full"></div>}
+            <span>إدارة الفروع</span>
+            <span className="px-2 py-0.5 rounded-full text-xs bg-purple-100 dark:bg-white/10 text-labbaik-blue dark:text-white font-bold">
+              {branches.length}
+            </span>
+            {activeTab === 'branches' && <div className="absolute bottom-0 left-0 right-0 h-1 bg-labbaik-blue rounded-full"></div>}
           </button>
+
           <button
             type="button"
-            onClick={() => setActiveTab('ai')}
-            className={`pb-4 text-sm font-black transition-all relative whitespace-nowrap cursor-pointer ${
-              activeTab === 'ai' ? 'text-labbaik-blue' : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white'
-            }`}
-          >
-            تجهيزات الذكاء والوقت
-            {activeTab === 'ai' && <div className="absolute bottom-0 left-0 right-0 h-1 bg-labbaik-blue rounded-full"></div>}
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('meta')}
+            onClick={() => handleTabChange('meta')}
             className={`pb-4 text-sm font-black transition-all relative whitespace-nowrap cursor-pointer ${
               activeTab === 'meta' ? 'text-labbaik-blue' : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white'
             }`}
@@ -177,13 +250,207 @@ export default function SettingsPage() {
             ربط Meta / WhatsApp
             {activeTab === 'meta' && <div className="absolute bottom-0 left-0 right-0 h-1 bg-labbaik-blue rounded-full"></div>}
           </button>
+
+          <button
+            type="button"
+            onClick={() => handleTabChange('kb')}
+            className={`pb-4 text-sm font-black transition-all relative whitespace-nowrap cursor-pointer ${
+              activeTab === 'kb' ? 'text-labbaik-blue' : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white'
+            }`}
+          >
+            قاعدة المعرفة
+            {activeTab === 'kb' && <div className="absolute bottom-0 left-0 right-0 h-1 bg-labbaik-blue rounded-full"></div>}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleTabChange('ai')}
+            className={`pb-4 text-sm font-black transition-all relative whitespace-nowrap cursor-pointer ${
+              activeTab === 'ai' ? 'text-labbaik-blue' : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white'
+            }`}
+          >
+            تجهيزات الذكاء والوقت
+            {activeTab === 'ai' && <div className="absolute bottom-0 left-0 right-0 h-1 bg-labbaik-blue rounded-full"></div>}
+          </button>
         </div>
       </Card>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
         
+        {/* Meta WhatsApp Settings Tab */}
         {activeTab === 'meta' && <MetaWhatsAppSettingsPanel />}
 
+        {/* Branches Tab */}
+        {activeTab === 'branches' && (
+          <div className="lg:col-span-3 space-y-8">
+            <Card variant="labbaik" className="space-y-6">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <h3 className="text-xl font-black text-neutral-900 dark:text-white flex items-center gap-3">
+                    <Building2 className="text-labbaik-blue" size={24} />
+                    فروع المؤسسة
+                  </h3>
+                  <p className="text-xs text-neutral-600 dark:text-neutral-400 mt-1">
+                    أضف فروعاً جديدة لمؤسستك لتمكين تخصيص أرقام واتساب سحابية ومحادثات مستقلة لكل فرع.
+                  </p>
+                </div>
+                {!showAddBranch && (
+                  <Button
+                    onClick={() => setShowAddBranch(true)}
+                    variant="primary"
+                    size="md"
+                    className="gap-2 shrink-0 cursor-pointer"
+                  >
+                    <Plus size={18} />
+                    إضافة فرع جديد
+                  </Button>
+                )}
+              </div>
+
+              {/* Add Branch Inline Form */}
+              {showAddBranch && (
+                <form
+                  onSubmit={handleCreateBranch}
+                  className="rounded-3xl border border-purple-200/80 dark:border-white/10 bg-purple-50/50 dark:bg-white/5 p-6 space-y-5 animate-fade-in"
+                >
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-black text-base text-neutral-900 dark:text-white flex items-center gap-2">
+                      <Plus className="text-labbaik-blue" size={18} />
+                      بيانات الفرع الجديد
+                    </h4>
+                    <button
+                      type="button"
+                      onClick={() => setShowAddBranch(false)}
+                      className="text-xs text-neutral-500 hover:text-neutral-800 dark:hover:text-white cursor-pointer font-bold"
+                    >
+                      إلغاء
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-xs font-black text-neutral-700 dark:text-neutral-300 px-1 block">
+                        اسم الفرع <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="مثال: فرع جدة - الكورنيش"
+                        value={newBranchName}
+                        onChange={(e) => setNewBranchName(e.target.value)}
+                        required
+                        className="w-full bg-white dark:bg-neutral-900 border border-purple-200 dark:border-white/10 rounded-2xl py-3.5 px-4 text-sm font-bold text-neutral-900 dark:text-white outline-none focus:ring-2 focus:ring-labbaik-blue/40 shadow-sm"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-xs font-black text-neutral-700 dark:text-neutral-300 px-1 block">
+                        رقم هاتف الفرع (اختياري)
+                      </label>
+                      <input
+                        type="tel"
+                        placeholder="+9665xxxxxxxx"
+                        value={newBranchPhone}
+                        onChange={(e) => setNewBranchPhone(e.target.value)}
+                        dir="ltr"
+                        className="w-full bg-white dark:bg-neutral-900 border border-purple-200 dark:border-white/10 rounded-2xl py-3.5 px-4 text-sm font-bold text-neutral-900 dark:text-white outline-none focus:ring-2 focus:ring-labbaik-blue/40 shadow-sm text-right"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-xs font-black text-neutral-700 dark:text-neutral-300 px-1 block">
+                        الوصف / المدينة (اختياري)
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="مثال: المنطقة الغربية - شارع الأندلس"
+                        value={newBranchDesc}
+                        onChange={(e) => setNewBranchDesc(e.target.value)}
+                        className="w-full bg-white dark:bg-neutral-900 border border-purple-200 dark:border-white/10 rounded-2xl py-3.5 px-4 text-sm font-bold text-neutral-900 dark:text-white outline-none focus:ring-2 focus:ring-labbaik-blue/40 shadow-sm"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end gap-3 pt-2">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => setShowAddBranch(false)}
+                      disabled={addingBranch}
+                    >
+                      إلغاء
+                    </Button>
+                    <Button
+                      type="submit"
+                      variant="primary"
+                      size="sm"
+                      isLoading={addingBranch}
+                      loadingText="جاري الحفظ..."
+                      className="gap-2"
+                    >
+                      <Save size={16} />
+                      حفظ وإضافة الفرع
+                    </Button>
+                  </div>
+                </form>
+              )}
+
+              {/* Branches Grid */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                {branches.map((branch, index) => (
+                  <div
+                    key={branch.id}
+                    className="rounded-3xl border border-purple-100 dark:border-white/10 bg-neutral-50/60 dark:bg-white/5 p-5 flex flex-col justify-between gap-4 hover:border-labbaik-blue/40 transition-all shadow-sm"
+                  >
+                    <div>
+                      <div className="flex items-center justify-between gap-2 mb-2">
+                        <span className="font-black text-base text-neutral-900 dark:text-white flex items-center gap-2">
+                          <Building2 className="text-labbaik-blue shrink-0" size={18} />
+                          {branch.name}
+                        </span>
+                        {index === 0 && (
+                          <span className="text-[10px] font-black px-2.5 py-1 rounded-full bg-labbaik-blue/10 text-labbaik-blue border border-labbaik-blue/20 shrink-0">
+                            الرئيسي
+                          </span>
+                        )}
+                      </div>
+
+                      {branch.description && (
+                        <p className="text-xs text-neutral-600 dark:text-neutral-400 line-clamp-2 mt-1 flex items-start gap-1.5">
+                          <MapPin size={13} className="shrink-0 mt-0.5 text-neutral-400" />
+                          {branch.description}
+                        </p>
+                      )}
+
+                      {branch.phoneNumber && (
+                        <p className="text-xs font-mono text-neutral-700 dark:text-neutral-300 mt-2 flex items-center gap-1.5" dir="ltr">
+                          <Phone size={13} className="text-neutral-400 shrink-0" />
+                          {branch.phoneNumber}
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="pt-3 border-t border-purple-100/80 dark:border-white/5 flex items-center justify-between gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          localStorage.setItem('active_store_id', branch.id);
+                          handleTabChange('meta');
+                        }}
+                        className="text-xs font-bold text-labbaik-blue hover:underline inline-flex items-center gap-1 cursor-pointer"
+                      >
+                        ربط واتساب لهذا الفرع
+                        <ArrowLeft size={13} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          </div>
+        )}
+
+        {/* Profile Tab */}
         {activeTab === 'profile' && (
           <div className="lg:col-span-2 space-y-8">
             <Card variant="labbaik" className="space-y-8">
@@ -193,7 +460,7 @@ export default function SettingsPage() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="space-y-2">
                   <label htmlFor="store-name" className="text-xs font-black text-neutral-700 dark:text-neutral-300 uppercase px-2 block">
-                    اسم المتجر
+                    اسم المتجر / المنشأة
                   </label>
                   <input
                     id="store-name"
@@ -262,6 +529,7 @@ export default function SettingsPage() {
           </div>
         )}
 
+        {/* Knowledge Base Tab */}
         {activeTab === 'kb' && (
           <div className="lg:col-span-2">
             <Card variant="labbaik" className="space-y-0">
@@ -286,6 +554,7 @@ export default function SettingsPage() {
           </div>
         )}
 
+        {/* AI & Working Hours Tab */}
         {activeTab === 'ai' && (
           <div className="lg:col-span-2 space-y-8">
             <Card variant="labbaik" className="space-y-8">
@@ -419,7 +688,7 @@ export default function SettingsPage() {
         )}
 
         {/* Common Sidebar */}
-        {activeTab !== 'meta' && (
+        {activeTab !== 'meta' && activeTab !== 'branches' && (
           <div className="space-y-8">
             <Card variant="labbaik" className="space-y-6">
               <h4 className="flex items-center gap-2 font-black text-labbaik-blue">💡 حماية الخدمة</h4>

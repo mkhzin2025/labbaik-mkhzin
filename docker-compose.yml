@@ -51,7 +51,7 @@ services:
     restart: unless-stopped
     labels:
       - traefik.enable=true
-      - traefik.http.routers.labbaik-backend.rule=Host(`${APP_DOMAIN:-srv1607970.hstgr.cloud}`) && (PathPrefix(`/auth`) || PathPrefix(`/users`) || PathPrefix(`/stores`) || PathPrefix(`/channels`) || PathPrefix(`/customers`) || PathPrefix(`/reviews`) || PathPrefix(`/notifications`) || PathPrefix(`/flows`) || PathPrefix(`/conversations`) || PathPrefix(`/webhooks`) || PathPrefix(`/api-docs`) || Path(`/api-docs-json`) || PathPrefix(`/socket.io`))
+      - traefik.http.routers.labbaik-backend.rule=Host(`${APP_DOMAIN:-srv1607970.hstgr.cloud}`) && (PathPrefix(`/auth`) || PathPrefix(`/users`) || PathPrefix(`/organizations`) || PathPrefix(`/stores`) || PathPrefix(`/integrations`) || PathPrefix(`/billing`) || PathPrefix(`/channels`) || PathPrefix(`/customers`) || PathPrefix(`/reviews`) || PathPrefix(`/notifications`) || PathPrefix(`/flows`) || PathPrefix(`/conversations`) || PathPrefix(`/webhooks`) || PathPrefix(`/api-docs`) || Path(`/api-docs-json`) || PathPrefix(`/socket.io`))
       - traefik.http.routers.labbaik-backend.entrypoints=websecure
       - traefik.http.routers.labbaik-backend.tls.certresolver=letsencrypt
       - traefik.http.routers.labbaik-backend.priority=100

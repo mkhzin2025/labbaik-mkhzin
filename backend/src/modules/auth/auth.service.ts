@@ -4,6 +4,7 @@ import { UsersService } from '../users/users.service';
 import { RegisterDto, LoginDto } from './dto/auth.dto';
 import * as bcrypt from 'bcrypt';
 import { OrganizationsService } from '../organizations/organizations.service';
+import { StoresService } from '../stores/stores.service';
 
 @Injectable()
 export class AuthService {
@@ -11,10 +12,11 @@ export class AuthService {
     private readonly usersService: UsersService,
     private readonly jwtService: JwtService,
     private readonly organizationsService: OrganizationsService,
+    private readonly storesService: StoresService,
   ) {}
 
   async register(registerDto: RegisterDto) {
-    const { email, password, fullName } = registerDto;
+    const { email, password, fullName, organizationName, branchName, phoneNumber } = registerDto;
     
     // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
@@ -26,9 +28,31 @@ export class AuthService {
       fullName,
     });
 
-    const organization = await this.organizationsService.ensureForUser(user.id);
-    const token = this.jwtService.sign({ sub: user.id, email: user.email, role: user.role, organizationId: organization.id });
-    return { user, organization, token };
+    // Create custom organization for this new tenant
+    const organization = await this.organizationsService.createForUser(user.id, organizationName);
+
+    // Create default initial branch for the organization
+    const store = await this.storesService.createBranch(
+      {
+        name: branchName?.trim() || 'الفرع الرئيسي',
+        phoneNumber: phoneNumber?.trim() || undefined,
+        description: `الفرع الرئيسي لـ ${organization.name}`,
+      },
+      user,
+      organization.id,
+    );
+
+    const token = this.jwtService.sign({
+      sub: user.id,
+      email: user.email,
+      role: user.role,
+      organizationId: organization.id,
+    });
+
+    const userResponse: any = { ...user };
+    delete userResponse.password;
+
+    return { user: userResponse, organization, store, token };
   }
 
   async login(loginDto: LoginDto) {

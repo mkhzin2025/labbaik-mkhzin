@@ -26,6 +26,13 @@ export class StoresController {
     return this.storesService.create(createStoreDto, req.user, organization.id);
   }
 
+  @Post('branch')
+  @ApiOperation({ summary: 'Create a new branch in the active organization' })
+  async createBranch(@Body() createStoreDto: CreateStoreDto, @Request() req) {
+    const organization = await this.organizationsService.getForUser(req.user.id, req.user.organizationId);
+    return this.storesService.createBranch(createStoreDto, req.user, organization.id);
+  }
+
   @Get()
   @ApiOperation({ summary: 'List branches for the active organization' })
   async findAll(@Request() req) {
