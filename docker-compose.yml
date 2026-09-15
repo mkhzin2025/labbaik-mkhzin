@@ -1,47 +1,15 @@
 services:
-  traefik:
-    image: traefik:v3.2
-    container_name: labbaik-traefik
-    restart: unless-stopped
-    environment:
-      - DOCKER_API_VERSION=1.44
-    command:
-      - --api.dashboard=false
-      - --providers.docker=true
-      - --providers.docker.exposedbydefault=false
-      - --entrypoints.web.address=:80
-      - --entrypoints.websecure.address=:443
-      - --entrypoints.web.http.redirections.entrypoint.to=websecure
-      - --entrypoints.web.http.redirections.entrypoint.scheme=https
-      - --certificatesresolvers.letsencrypt.acme.email=${LETSENCRYPT_EMAIL:-admin@srv1607970.hstgr.cloud}
-      - --certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json
-      - --certificatesresolvers.letsencrypt.acme.httpchallenge=true
-      - --certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - traefik_letsencrypt:/letsencrypt
-    depends_on:
-      - frontend
-      - backend
-
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile.prod
       args:
-        VITE_API_URL: ${PUBLIC_API_URL:-https://srv1607970.hstgr.cloud}
-        VITE_WEBHOOK_BASE_URL: ${PUBLIC_WEBHOOK_URL:-${PUBLIC_API_URL:-https://srv1607970.hstgr.cloud}}
+        VITE_API_URL: ${PUBLIC_API_URL:-https://labbaik.mkhzin-store.com}
+        VITE_WEBHOOK_BASE_URL: ${PUBLIC_WEBHOOK_URL:-${PUBLIC_API_URL:-https://labbaik.mkhzin-store.com}}
     container_name: labbaik-frontend
     restart: unless-stopped
-    labels:
-      - traefik.enable=true
-      - traefik.http.routers.labbaik-frontend.rule=Host(`${APP_DOMAIN:-srv1607970.hstgr.cloud}`)
-      - traefik.http.routers.labbaik-frontend.entrypoints=websecure
-      - traefik.http.routers.labbaik-frontend.tls.certresolver=letsencrypt
-      - traefik.http.services.labbaik-frontend.loadbalancer.server.port=80
+    ports:
+      - "127.0.0.1:3001:80"
     depends_on:
       - backend
 
@@ -51,13 +19,8 @@ services:
       dockerfile: Dockerfile.prod
     container_name: labbaik-backend
     restart: unless-stopped
-    labels:
-      - traefik.enable=true
-      - traefik.http.routers.labbaik-backend.rule=Host(`${APP_DOMAIN:-srv1607970.hstgr.cloud}`) && (PathPrefix(`/auth`) || PathPrefix(`/users`) || PathPrefix(`/organizations`) || PathPrefix(`/stores`) || PathPrefix(`/integrations`) || PathPrefix(`/billing`) || PathPrefix(`/channels`) || PathPrefix(`/customers`) || PathPrefix(`/reviews`) || PathPrefix(`/notifications`) || PathPrefix(`/flows`) || PathPrefix(`/conversations`) || PathPrefix(`/webhooks`) || PathPrefix(`/api-docs`) || Path(`/api-docs-json`) || PathPrefix(`/socket.io`))
-      - traefik.http.routers.labbaik-backend.entrypoints=websecure
-      - traefik.http.routers.labbaik-backend.tls.certresolver=letsencrypt
-      - traefik.http.routers.labbaik-backend.priority=100
-      - traefik.http.services.labbaik-backend.loadbalancer.server.port=3000
+    ports:
+      - "127.0.0.1:3000:3000"
     environment:
       NODE_ENV: production
       PORT: 3000
@@ -152,5 +115,4 @@ volumes:
   postgres_data:
   mongo_data:
   redis_data:
-  traefik_letsencrypt:
   backend_uploads:
