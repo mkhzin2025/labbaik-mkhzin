@@ -11,6 +11,7 @@ import { ConversationsModule } from '../conversations/conversations.module';
 import { CustomersModule } from '../customers/customers.module';
 import { EventsModule } from '../events/events.module';
 import { BillingModule } from '../billing/billing.module';
+import { MetaTemplatePayloadBuilder } from './services/meta-template-payload.builder';
 
 @Module({
   imports: [
@@ -22,8 +23,9 @@ import { BillingModule } from '../billing/billing.module';
     EventsModule,
     BillingModule,
   ],
-  providers: [MetaWhatsAppService],
+  providers: [MetaWhatsAppService, MetaTemplatePayloadBuilder],
   controllers: [MetaWhatsAppController],
-  exports: [MetaWhatsAppService],
+  exports: [MetaWhatsAppService, MetaTemplatePayloadBuilder],
 })
 export class MetaWhatsAppModule {}
+

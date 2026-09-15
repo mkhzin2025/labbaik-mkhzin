@@ -30,11 +30,14 @@ export default function WhatsAppTemplatesPage() {
   const [selectedCustomers, setSelectedCustomers] = useState<string[]>([]);
   const [mode, setMode] = useState<'single' | 'list'>('list');
   const [to, setTo] = useState('');
+  const [otpCode, setOtpCode] = useState('');
   const [bodyValues, setBodyValues] = useState<string[]>([]);
   const [headerValues, setHeaderValues] = useState<string[]>([]);
+  const [buttonValues, setButtonValues] = useState<Array<{ index: number; text: string; label: string; url?: string }>>([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [sending, setSending] = useState(false);
+
 
   const connection = useMemo(() => connections.find((item) => item.id === connectionId), [connections, connectionId]);
 
@@ -93,8 +96,34 @@ export default function WhatsAppTemplatesPage() {
     finally { setSyncing(false); }
   };
 
-  const choose = (template: Template) => { setSelected(template); setBodyValues(Array(bodyPlaceholderCount(template)).fill('')); setHeaderValues(Array(headerPlaceholderCount(template)).fill('')); };
-  const validateVariables = () => { if ([...bodyValues, ...headerValues].some((value) => !value.trim())) { showToast('أكمل جميع متغيرات القالب.', 'error'); return false; } return true; };
+  const isAuth = isAuthTemplate(selected);
+
+  const choose = (template: Template) => {
+    setSelected(template);
+    setOtpCode('');
+    setBodyValues(Array(bodyPlaceholderCount(template)).fill(''));
+    setHeaderValues(Array(headerPlaceholderCount(template)).fill(''));
+    setButtonValues(getDynamicButtons(template));
+  };
+
+  const validateVariables = () => {
+    if (isAuthTemplate(selected)) {
+      if (!otpCode.trim()) {
+        showToast('أدخل رمز التحقق (OTP).', 'error');
+        return false;
+      }
+      return true;
+    }
+    if ([...bodyValues, ...headerValues].some((value) => !value.trim())) {
+      showToast('أكمل جميع متغيرات نص القالب.', 'error');
+      return false;
+    }
+    if (buttonValues.some((b) => !b.text.trim())) {
+      showToast('أكمل متغيرات الأزرار الديناميكية.', 'error');
+      return false;
+    }
+    return true;
+  };
 
   const send = async () => {
     if (!selected || !connection || !validateVariables()) return;
@@ -102,16 +131,42 @@ export default function WhatsAppTemplatesPage() {
     if (mode === 'list' && !selectedCustomers.length) return showToast('حدد عميلًا واحدًا على الأقل.', 'error');
     setSending(true);
     try {
+      const isAuthMode = isAuthTemplate(selected);
+      const basePayload: any = isAuthMode
+        ? { otpCode: otpCode.trim(), bodyParameters: [otpCode.trim()] }
+        : {
+            bodyParameters: bodyValues,
+            headerParameters: headerValues,
+            buttonParameters: buttonValues.length
+              ? buttonValues.map((b) => ({ index: b.index, text: b.text }))
+              : undefined,
+          };
+
       if (mode === 'single') {
-        await api.post(`/integrations/meta/whatsapp/templates/${selected.id}/send`, { storeId: singleStoreId || undefined, to, bodyParameters: bodyValues, headerParameters: headerValues });
-        setTo(''); showToast('تم إرسال القالب.', 'success');
+        await api.post(`/integrations/meta/whatsapp/templates/${selected.id}/send`, {
+          storeId: singleStoreId || undefined,
+          to,
+          ...basePayload,
+        });
+        setTo('');
+        if (isAuthMode) setOtpCode('');
+        showToast('تم إرسال القالب.', 'success');
       } else {
-        const { data } = await api.post(`/integrations/meta/whatsapp/templates/${selected.id}/send-bulk`, { storeId: connection.scope === 'store' ? connection.storeId : undefined, storeIds: connection.scope === 'organization' ? selectedStoreIds : undefined, customerIds: selectedCustomers, bodyParameters: bodyValues, headerParameters: headerValues });
+        const { data } = await api.post(`/integrations/meta/whatsapp/templates/${selected.id}/send-bulk`, {
+          storeId: connection.scope === 'store' ? connection.storeId : undefined,
+          storeIds: connection.scope === 'organization' ? selectedStoreIds : undefined,
+          customerIds: selectedCustomers,
+          ...basePayload,
+        });
         showToast(`الإرسال: ${data.sent} ناجح، ${data.failed} فشل، وحُذف ${data.duplicatesRemoved || 0} تكرار.`, data.failed ? 'info' : 'success');
         setSelectedCustomers([]);
+        if (isAuthMode) setOtpCode('');
       }
-    } catch (error: any) { showToast(error?.response?.data?.message || 'فشل إرسال القالب.', 'error'); }
-    finally { setSending(false); }
+    } catch (error: any) {
+      showToast(error?.response?.data?.details || error?.response?.data?.message || 'فشل إرسال القالب.', 'error');
+    } finally {
+      setSending(false);
+    }
   };
 
   const categories = useMemo(() => uniqueTaxonomy(customers.flatMap((c) => c.categories || [])), [customers]);
@@ -148,9 +203,32 @@ export default function WhatsAppTemplatesPage() {
       </div>
 
       <Card variant="labbaik" className="space-y-6 2xl:sticky 2xl:top-0"><div className="flex rounded-2xl bg-white/5 border border-white/10 p-1"><button onClick={() => setMode('list')} className={`flex-1 py-3 rounded-xl text-xs font-black ${mode === 'list' ? 'bg-labbaik-blue text-white' : 'text-neutral-500'}`}><Users size={15} className="inline ml-1" />قائمة عملاء</button><button onClick={() => setMode('single')} className={`flex-1 py-3 rounded-xl text-xs font-black ${mode === 'single' ? 'bg-labbaik-blue text-white' : 'text-neutral-500'}`}><UserRoundCheck size={15} className="inline ml-1" />رقم واحد</button></div>
-        {!selected ? <div className="py-20 text-center text-neutral-500"><MessageSquareText size={50} className="mx-auto mb-4 opacity-30" /><p className="font-black">اختر قالبًا أولاً</p></div> : <><div><h2 className="text-lg font-black" dir="ltr">{selected.name}</h2><p className="text-xs text-neutral-500 mt-1">{selected.language} • {selected.category} • {selected.status}</p></div><div className="rounded-2xl bg-green-950/30 border border-green-500/10 p-5 text-sm text-green-50 leading-7 whitespace-pre-wrap">{renderPreview(selected, bodyValues, headerValues)}</div>
+        {!selected ? <div className="py-20 text-center text-neutral-500"><MessageSquareText size={50} className="mx-auto mb-4 opacity-30" /><p className="font-black">اختر قالبًا أولاً</p></div> : <><div><h2 className="text-lg font-black" dir="ltr">{selected.name}</h2><p className="text-xs text-neutral-500 mt-1">{selected.language} • {selected.category} • {selected.status}</p></div><div className="rounded-2xl bg-green-950/30 border border-green-500/10 p-5 text-sm text-green-50 leading-7 whitespace-pre-wrap">{renderPreview(selected, bodyValues, headerValues, otpCode, buttonValues)}</div>
         {mode === 'single' ? <><div className="space-y-2"><label className="text-xs font-black text-neutral-500">رقم المستلم</label><input dir="ltr" value={to} onChange={(e) => setTo(e.target.value)} className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 px-5 text-left" placeholder="9665XXXXXXXX" /></div>{connection?.scope === 'organization' && <div className="space-y-2"><label className="text-xs font-black text-neutral-500">الفرع الذي تُسجّل عليه المحادثة</label><select value={singleStoreId} onChange={(e) => setSingleStoreId(e.target.value)} className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 px-5">{branches.map((b) => <option className="bg-neutral-900" key={b.id} value={b.id}>{b.name}</option>)}</select></div>}</> : <div className="grid grid-cols-3 gap-2"><Stat label="السجلات" value={selectedCustomers.length} /><Stat label="المكرر" value={recipientStats.duplicates} /><Stat label="المستلمون" value={recipientStats.unique} /></div>}
-        {headerValues.map((v, i) => <VariableInput key={`h${i}`} label={`HEADER {{${i + 1}}}`} value={v} onChange={(x: string) => setHeaderValues((c) => c.map((z, j) => j === i ? x : z))} />)}{bodyValues.map((v, i) => <VariableInput key={`b${i}`} label={`BODY {{${i + 1}}}`} value={v} onChange={(x: string) => setBodyValues((c) => c.map((z, j) => j === i ? x : z))} />)}{mode === 'list' && <p className="text-[11px] text-neutral-500">يدعم: <code>{'{{customer.fullName}}'}</code> <code>{'{{customer.phoneNumber}}'}</code> <code>{'{{customer.email}}'}</code> <code>{'{{customer.branchName}}'}</code></p>}<Button variant="primary" size="md" isFullWidth onClick={send} disabled={sending || String(selected.status).toUpperCase() !== 'APPROVED' || (mode === 'list' ? !selectedCustomers.length : !to.trim())}>{sending ? <Loader2 className="animate-spin" size={18} /> : <Send size={18} />} {mode === 'list' ? `إرسال إلى ${recipientStats.unique} رقم فعلي` : 'إرسال القالب'}</Button></>}
+        {isAuth ? (
+          <VariableInput label="رمز التحقق (OTP)" value={otpCode} onChange={setOtpCode} placeholder="مثال: 123456" />
+        ) : (
+          <>
+            {headerValues.map((v, i) => <VariableInput key={`h${i}`} label={`HEADER {{${i + 1}}}`} value={v} onChange={(x: string) => setHeaderValues((c) => c.map((z, j) => j === i ? x : z))} />)}
+            {bodyValues.map((v, i) => <VariableInput key={`b${i}`} label={`BODY {{${i + 1}}}`} value={v} onChange={(x: string) => setBodyValues((c) => c.map((z, j) => j === i ? x : z))} />)}
+            {buttonValues.map((btn, i) => (
+              <div key={`btn-${btn.index}`} className="space-y-1">
+                <VariableInput
+                  label={`متغير الزر: ${btn.label} (Index ${btn.index})`}
+                  value={btn.text}
+                  onChange={(val: string) => setButtonValues((curr) => curr.map((b, j) => j === i ? { ...b, text: val } : b))}
+                  placeholder="مثال: invite-code"
+                />
+                {btn.url && (
+                  <p dir="ltr" className="text-[11px] text-neutral-400 px-2 break-all text-left">
+                    رابط الزر: {btn.url.replace(/\{\{1\}\}/g, btn.text || '{{1}}')}
+                  </p>
+                )}
+              </div>
+            ))}
+          </>
+        )}
+        {mode === 'list' && <p className="text-[11px] text-neutral-500">يدعم: <code>{'{{customer.fullName}}'}</code> <code>{'{{customer.phoneNumber}}'}</code> <code>{'{{customer.email}}'}</code> <code>{'{{customer.branchName}}'}</code></p>}<Button variant="primary" size="md" isFullWidth onClick={send} disabled={sending || String(selected.status).toUpperCase() !== 'APPROVED' || (mode === 'list' ? !selectedCustomers.length : !to.trim())}>{sending ? <Loader2 className="animate-spin" size={18} /> : <Send size={18} />} {mode === 'list' ? `إرسال إلى ${recipientStats.unique} رقم فعلي` : 'إرسال القالب'}</Button></>}
       </Card>
     </div>
   </div>;
@@ -159,11 +237,71 @@ export default function WhatsAppTemplatesPage() {
 function TemplateButton({ template, selected, onClick }: any) { const approved = String(template.status).toUpperCase() === 'APPROVED'; const body = template.components?.find((c: any) => String(c.type).toUpperCase() === 'BODY')?.text || ''; return <button onClick={onClick} className={`w-full text-right rounded-2xl border p-4 ${selected ? 'border-labbaik-blue bg-labbaik-blue/10' : 'border-white/10 bg-white/5'}`}><div className="flex justify-between gap-4"><div><div className="font-black" dir="ltr">{template.name}</div><p className="text-xs text-neutral-500 mt-2 line-clamp-2">{body}</p></div><span className={`text-[10px] font-black px-3 py-1.5 rounded-full border ${approved ? 'text-green-400 border-green-500/20' : 'text-amber-300 border-amber-500/20'}`}>{approved ? <CheckCircle2 size={12} className="inline ml-1" /> : <XCircle size={12} className="inline ml-1" />}{template.status}</span></div></button>; }
 function AudienceFilters({ categories, tags, categoryFilter, setCategoryFilter, tagFilter, setTagFilter }: any) { const toggle = (list: string[], id: string) => list.includes(id) ? list.filter((x) => x !== id) : [...list, id]; return <div className="space-y-2"><div className="flex flex-wrap gap-2"><span className="text-[10px] text-neutral-500 flex items-center gap-1"><FolderOpen size={11} />فئة:</span>{categories.filter((x: any) => x.isActive).map((x: any) => <button key={x.id} onClick={() => setCategoryFilter(toggle(categoryFilter, x.id))} className={`text-[10px] px-2.5 py-1 rounded-lg border ${categoryFilter.includes(x.id) ? 'ring-1 ring-labbaik-blue' : 'opacity-65'}`} style={{ color: x.color, borderColor: `${x.color}55` }}>{x.name}</button>)}</div><div className="flex flex-wrap gap-2"><span className="text-[10px] text-neutral-500 flex items-center gap-1"><Tag size={11} />تاق:</span>{tags.filter((x: any) => x.isActive).map((x: any) => <button key={x.id} onClick={() => setTagFilter(toggle(tagFilter, x.id))} className={`text-[10px] px-2.5 py-1 rounded-lg border ${tagFilter.includes(x.id) ? 'ring-1 ring-labbaik-blue' : 'opacity-65'}`} style={{ color: x.color, borderColor: `${x.color}55` }}>{x.name}</button>)}</div></div>; }
 function CustomerRow({ customer, checked, onToggle }: any) { return <button onClick={onToggle} className={`w-full text-right rounded-2xl border p-3.5 flex items-center gap-3 ${checked ? 'border-labbaik-blue bg-labbaik-blue/10' : 'border-white/10 bg-white/5'}`}><div className={`w-5 h-5 rounded-md border ${checked ? 'bg-labbaik-blue border-labbaik-blue' : 'border-white/20'}`}>{checked && <CheckCircle2 size={14} className="text-white" />}</div><div className="flex-1 min-w-0"><div className="font-black text-sm truncate">{customer.fullName || 'عميل بدون اسم'}</div><div dir="ltr" className="text-[11px] text-neutral-500 text-right">{customer.phoneNumber || customer.whatsappId}</div></div><span className="text-[10px] text-neutral-500">{customer.store?.name}</span></button>; }
-function VariableInput({ label, value, onChange }: any) { return <div className="space-y-2"><label className="text-xs font-black text-neutral-500">{label}</label><input value={value} onChange={(e) => onChange(e.target.value)} className="w-full bg-white/5 border border-white/10 rounded-2xl py-3.5 px-5" /></div>; }
+function VariableInput({ label, value, onChange, placeholder }: any) { return <div className="space-y-2"><label className="text-xs font-black text-neutral-500">{label}</label><input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} className="w-full bg-white/5 border border-white/10 rounded-2xl py-3.5 px-5" /></div>; }
 function Stat({ label, value }: any) { return <div className="rounded-xl border border-white/10 bg-white/5 p-3 text-center"><div className="text-[10px] text-neutral-500">{label}</div><div className="text-xl font-black text-labbaik-blue mt-1">{value}</div></div>; }
 function uniqueTaxonomy(items: Taxonomy[]) { const map = new Map<string, Taxonomy>(); items.forEach((i) => map.set(i.id, i)); return [...map.values()]; }
 function dedupeStats(rows: Customer[]) { const normalized = rows.map((r) => String(r.phoneNumber || r.whatsappId || '').replace(/[^0-9]/g, '')).filter(Boolean); const unique = new Set(normalized).size; return { unique, duplicates: Math.max(0, normalized.length - unique) }; }
 function placeholderCount(text?: string) { if (!text) return 0; const matches = [...text.matchAll(/\{\{(\d+)\}\}/g)].map((m) => Number(m[1])); return matches.length ? Math.max(...matches) : 0; }
 function bodyPlaceholderCount(t: Template) { return placeholderCount(t.components?.find((c) => String(c.type).toUpperCase() === 'BODY')?.text); }
 function headerPlaceholderCount(t: Template) { const h = t.components?.find((c) => String(c.type).toUpperCase() === 'HEADER'); return String(h?.format || 'TEXT').toUpperCase() === 'TEXT' ? placeholderCount(h?.text) : 0; }
-function renderPreview(t: Template, body: string[], header: string[]) { const h = t.components?.find((c) => String(c.type).toUpperCase() === 'HEADER'); const b = t.components?.find((c) => String(c.type).toUpperCase() === 'BODY'); const f = t.components?.find((c) => String(c.type).toUpperCase() === 'FOOTER'); const fill = (text: string, values: string[]) => values.reduce((a, v, i) => a.split(`{{${i + 1}}}`).join(v || `{{${i + 1}}}`), text); return [h?.text ? fill(h.text, header) : '', b?.text ? fill(b.text, body) : t.name, f?.text || ''].filter(Boolean).join('\n\n'); }
+function isAuthTemplate(t?: Template | null) {
+  if (!t) return false;
+  if (String(t.category).toUpperCase() === 'AUTHENTICATION') return true;
+  return t.components?.some((c) => c.buttons?.some((b: any) => b.otp_type === 'COPY_CODE' || b.type === 'OTP'));
+}
+function getDynamicButtons(t?: Template | null) {
+  if (!t || isAuthTemplate(t)) return [];
+  const list: Array<{ index: number; text: string; label: string; url?: string }> = [];
+  const btnComp = t.components?.find((c) => String(c.type).toUpperCase() === 'BUTTONS');
+  if (btnComp && Array.isArray(btnComp.buttons)) {
+    btnComp.buttons.forEach((btn, idx) => {
+      if (String(btn.type).toUpperCase() === 'URL' && /\{\{\d+\}\}/.test(btn.url || '')) {
+        list.push({
+          index: idx,
+          text: '',
+          label: btn.text || `زر رابط ${idx + 1}`,
+          url: btn.url,
+        });
+      }
+    });
+  }
+  return list;
+}
+function renderPreview(t: Template, body: string[], header: string[], otp = '', buttons: Array<{ index: number; text: string; url?: string }> = []) {
+  if (isAuthTemplate(t)) {
+    const b = t.components?.find((c) => String(c.type).toUpperCase() === 'BODY');
+    const f = t.components?.find((c) => String(c.type).toUpperCase() === 'FOOTER');
+    const bodyText = (b?.text || t.name).replace(/\{\{1\}\}/g, otp || '{{1}}');
+    const parts = [bodyText];
+    if (f?.text) parts.push(f.text);
+    parts.push(`🔘 نسخ رمز التحقق (${otp || '123456'})`);
+    return parts.join('\n\n');
+  }
+
+  const h = t.components?.find((c) => String(c.type).toUpperCase() === 'HEADER');
+  const b = t.components?.find((c) => String(c.type).toUpperCase() === 'BODY');
+  const f = t.components?.find((c) => String(c.type).toUpperCase() === 'FOOTER');
+  const btnsComp = t.components?.find((c) => String(c.type).toUpperCase() === 'BUTTONS');
+
+  const fill = (text: string, values: string[]) => values.reduce((a, v, i) => a.split(`{{${i + 1}}}`).join(v || `{{${i + 1}}}`), text);
+  const parts = [
+    h?.text ? fill(h.text, header) : '',
+    b?.text ? fill(b.text, body) : t.name,
+    f?.text || '',
+  ].filter(Boolean);
+
+  if (btnsComp?.buttons?.length) {
+    const btnLines = btnsComp.buttons.map((btn: any, idx: number) => {
+      let url = btn.url || '';
+      const customVal = buttons.find((item) => item.index === idx)?.text;
+      if (customVal && url.includes('{{1}}')) {
+        url = url.replace(/\{\{1\}\}/g, customVal);
+      }
+      return `🔘 ${btn.text || 'زر'}${url ? ` (${url})` : ''}`;
+    });
+    parts.push(btnLines.join('\n'));
+  }
+
+  return parts.join('\n\n');
+}
+

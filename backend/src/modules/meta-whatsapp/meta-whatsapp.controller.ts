@@ -2,8 +2,8 @@ import { Body, Controller, Get, Param, Patch, Post, Query, Request, UseGuards } 
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { MetaWhatsAppService } from './meta-whatsapp.service';
-import { SaveMetaWhatsAppConnectionDto, SendWhatsAppTemplateBulkDto, SendWhatsAppTemplateDto, UpdateMetaWhatsAppConnectionDto } from './dto/meta-whatsapp.dto';
-import { MetaConnectionScope } from './entities/meta-whatsapp-connection.entity';
+import { SaveMetaWhatsAppConnectionDto, SendWhatsAppTemplateBulkDto, SendWhatsAppTemplateDto, SubscribeWebhookDto, UpdateMetaWhatsAppConnectionDto } from './dto/meta-whatsapp.dto';
+import { MetaConnectionScope, MetaWebhookMode } from './entities/meta-whatsapp-connection.entity';
 
 @ApiTags('Meta WhatsApp')
 @ApiBearerAuth()
@@ -43,8 +43,16 @@ export class MetaWhatsAppController {
   }
 
   @Post('subscribe-webhook')
-  subscribeWebhook(@Request() req: any, @Query('connectionId') connectionId?: string, @Query('storeId') storeId?: string, @Query('scope') scope?: MetaConnectionScope) {
-    return this.service.subscribeWebhookForUser(req.user.id, req.user.organizationId, { connectionId, storeId, scope });
+  subscribeWebhook(
+    @Request() req: any,
+    @Query('connectionId') connectionId?: string,
+    @Query('storeId') storeId?: string,
+    @Query('scope') scope?: MetaConnectionScope,
+    @Query('mode') queryMode?: MetaWebhookMode,
+    @Body() body?: SubscribeWebhookDto,
+  ) {
+    const mode = body?.mode || queryMode || MetaWebhookMode.GLOBAL;
+    return this.service.subscribeWebhookForUser(req.user.id, req.user.organizationId, { connectionId, storeId, scope, mode });
   }
 
   @Post('templates/sync')

@@ -24,13 +24,15 @@ type MetaConnection = {
   accessToken: string;
   verifyToken?: string;
   webhookUrl?: string;
-  status?: 'draft' | 'connected' | 'error';
+  status?: 'draft' | 'connected' | 'webhook_active' | 'error';
+  webhookMode?: string;
   lastError?: string;
   webhookSubscribedAt?: string;
   lastWebhookAt?: string;
   templatesSyncedAt?: string;
   graphApiVersion?: string;
 };
+
 
 const blank = (scope: ConnectionScope, storeId?: string): MetaConnection => ({
   scope,
@@ -103,23 +105,47 @@ export default function MetaWhatsAppSettingsPanel() {
     finally { setAction(null); }
   };
 
-  const runAction = async (name: 'test' | 'subscribe' | 'sync') => {
+  const [showOverrideOption, setShowOverrideOption] = useState(false);
+
+  const runAction = async (name: 'test' | 'subscribe' | 'sync', subMode: 'global' | 'override' = 'global') => {
     if (!connection.id) return showToast('احفظ الإعدادات أولاً.', 'info');
-    setAction(name);
+    const actionKey = name === 'subscribe' ? `subscribe_${subMode}` : name;
+    setAction(actionKey);
     try {
-      const params = { connectionId: connection.id };
+      const params: any = { connectionId: connection.id };
       if (name === 'test') await api.post('/integrations/meta/whatsapp/test', null, { params });
-      if (name === 'subscribe') await api.post('/integrations/meta/whatsapp/subscribe-webhook', null, { params });
+      if (name === 'subscribe') {
+        params.mode = subMode;
+        await api.post('/integrations/meta/whatsapp/subscribe-webhook', { mode: subMode }, { params });
+      }
       if (name === 'sync') await api.post('/integrations/meta/whatsapp/templates/sync', null, { params });
       await load();
-      showToast(name === 'test' ? 'الاتصال مع Meta سليم ✅' : name === 'subscribe' ? 'تم تفعيل Webhook ✅' : 'تم تحديث القوالب ✅', 'success');
-    } catch (error: any) { showToast(error?.response?.data?.message || 'فشلت العملية.', 'error'); }
-    finally { setAction(null); }
+      showToast(
+        name === 'test'
+          ? 'الاتصال مع Meta سليم ✅'
+          : name === 'subscribe'
+          ? (subMode === 'override' ? 'تم تفعيل Webhook المستقل (Override) ✅' : 'تم تفعيل Webhook بنجاح (Meta App Callback) ✅')
+          : 'تم تحديث القوالب ✅',
+        'success'
+      );
+    } catch (error: any) {
+      const errData = error?.response?.data;
+      const msg = errData?.details || errData?.message || error?.message || 'فشلت العملية.';
+      showToast(msg, 'error');
+    } finally {
+      setAction(null);
+    }
   };
 
   const copy = async (value?: string) => { if (!value) return; await navigator.clipboard.writeText(value); showToast('تم النسخ.', 'info'); };
   if (loading) return <div className="min-h-72 flex items-center justify-center"><Loader2 className="animate-spin text-labbaik-blue" size={36} /></div>;
-  const connected = connection.status === 'connected';
+
+  const isConnected = Boolean(connection.id && (connection.status === 'connected' || connection.status === 'webhook_active'));
+  const isSubscribed = Boolean(connection.webhookSubscribedAt || connection.status === 'webhook_active');
+  const isWebhookActive = connection.status === 'webhook_active';
+  const webhookModeName = (connection.webhookMode || 'GLOBAL').toUpperCase() === 'OVERRIDE'
+    ? 'WABA Override Callback'
+    : 'Meta App Callback';
 
   return <div className="lg:col-span-3 space-y-8">
     <Card variant="labbaik" className="space-y-7">
@@ -133,9 +159,34 @@ export default function MetaWhatsAppSettingsPanel() {
             <p className="text-neutral-600 dark:text-neutral-400 text-xs mt-1">يمكن ربط رقم موحد للمنظمة كلها أو رقم مستقل لفرع محدد.</p>
           </div>
         </div>
-        <div className={`flex items-center gap-2 rounded-full px-4 py-2 text-xs font-black border ${connected ? 'border-green-500/30 bg-green-500/10 text-green-600 dark:text-green-400' : connection.status === 'error' ? 'border-red-500/30 bg-red-500/10 text-red-600 dark:text-red-300' : 'border-neutral-200 dark:border-white/10 bg-neutral-100 dark:bg-white/5 text-neutral-600 dark:text-neutral-400'}`}>
-          {connected ? <CheckCircle2 size={15} /> : connection.status === 'error' ? <XCircle size={15} /> : <ShieldCheck size={15} />}
-          {connected ? 'متصل' : connection.status === 'error' ? 'خطأ في الربط' : 'غير مختبر'}
+        <div className={`flex items-center gap-2 rounded-full px-4 py-2 text-xs font-black border ${isWebhookActive ? 'border-green-500/30 bg-green-500/10 text-green-600 dark:text-green-400' : isConnected ? 'border-blue-500/30 bg-blue-500/10 text-blue-600 dark:text-blue-400' : connection.status === 'error' ? 'border-red-500/30 bg-red-500/10 text-red-600 dark:text-red-300' : 'border-neutral-200 dark:border-white/10 bg-neutral-100 dark:bg-white/5 text-neutral-600 dark:text-neutral-400'}`}>
+          {isWebhookActive || isConnected ? <CheckCircle2 size={15} /> : connection.status === 'error' ? <XCircle size={15} /> : <ShieldCheck size={15} />}
+          {isWebhookActive ? 'Webhook نشط' : isConnected ? 'متصل' : connection.status === 'error' ? 'خطأ في الربط' : 'غير مختبر'}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 p-4 rounded-2xl bg-neutral-50 dark:bg-white/5 border border-neutral-200/80 dark:border-white/10 text-xs">
+        <div>
+          <span className="text-neutral-500 font-bold block mb-1">الاتصال بـ Meta:</span>
+          <span className={`font-black flex items-center gap-1.5 ${isConnected ? 'text-emerald-600 dark:text-emerald-400' : 'text-neutral-500'}`}>
+            {isConnected ? <CheckCircle2 size={14} /> : <XCircle size={14} />} {isConnected ? 'متصل' : 'غير متصل'}
+          </span>
+        </div>
+        <div>
+          <span className="text-neutral-500 font-bold block mb-1">WABA subscription:</span>
+          <span className={`font-black flex items-center gap-1.5 ${isSubscribed ? 'text-emerald-600 dark:text-emerald-400' : 'text-neutral-500'}`}>
+            {isSubscribed ? <CheckCircle2 size={14} /> : <XCircle size={14} />} {isSubscribed ? 'مشترك' : 'غير مشترك'}
+          </span>
+        </div>
+        <div>
+          <span className="text-neutral-500 font-bold block mb-1">Webhook:</span>
+          <span className={`font-black flex items-center gap-1.5 ${isWebhookActive ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}>
+            {isWebhookActive ? <CheckCircle2 size={14} /> : <ShieldCheck size={14} />} {isWebhookActive ? 'نشط' : 'بانتظار التفعيل'}
+          </span>
+        </div>
+        <div>
+          <span className="text-neutral-500 font-bold block mb-1">طريقة Webhook:</span>
+          <span className="font-black text-labbaik-blue">{webhookModeName}</span>
         </div>
       </div>
 
@@ -306,13 +357,13 @@ export default function MetaWhatsAppSettingsPanel() {
           {action === 'save' ? <Loader2 className="animate-spin" size={17} /> : <Save size={17} />} حفظ
         </Button>
         <Button variant="secondary" size="md" onClick={() => runAction('test')} disabled={!!action}>
-          <ShieldCheck size={17} /> اختبار
+          {action === 'test' ? <Loader2 className="animate-spin" size={17} /> : <ShieldCheck size={17} />} اختبار
         </Button>
-        <Button variant="secondary" size="md" onClick={() => runAction('subscribe')} disabled={!!action}>
-          <Webhook size={17} /> Webhook
+        <Button variant="secondary" size="md" onClick={() => runAction('subscribe', 'global')} disabled={!!action}>
+          {action === 'subscribe_global' ? <Loader2 className="animate-spin" size={17} /> : <Webhook size={17} />} تفعيل Webhook
         </Button>
         <Button variant="secondary" size="md" onClick={() => runAction('sync')} disabled={!!action}>
-          <RefreshCw size={17} /> القوالب
+          {action === 'sync' ? <Loader2 className="animate-spin" size={17} /> : <RefreshCw size={17} />} القوالب
         </Button>
       </div>
 
@@ -366,6 +417,36 @@ export default function MetaWhatsAppSettingsPanel() {
             <Info label="Graph API" value={connection.graphApiVersion || '-'} />
             <Info label="آخر Webhook" value={connection.lastWebhookAt ? new Date(connection.lastWebhookAt).toLocaleString('en-GB') : 'لم يصل بعد'} />
             <Info label="آخر مزامنة" value={connection.templatesSyncedAt ? new Date(connection.templatesSyncedAt).toLocaleString('en-GB') : 'لم تتم'} />
+          </div>
+
+          {/* خيارات متقدمة: Override Callback */}
+          <div className="pt-3 border-t border-neutral-200/80 dark:border-white/10">
+            <button
+              type="button"
+              onClick={() => setShowOverrideOption(!showOverrideOption)}
+              className="text-xs font-bold text-neutral-500 hover:text-labbaik-blue flex items-center gap-1.5 transition-colors cursor-pointer"
+            >
+              <span>{showOverrideOption ? '▼' : '◀'} خيارات متقدمة: استخدام Webhook مستقل لهذا WABA (Override Callback)</span>
+            </button>
+
+            {showOverrideOption && (
+              <div className="mt-3 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/20 space-y-3 text-xs">
+                <p className="text-amber-800 dark:text-amber-300 font-semibold leading-relaxed">
+                  الوضع الافتراضي (Meta App Callback) هو الموصى به ويعمل تلقائياً. استخدم هذا الخيار فقط إذا كنت تريد من Meta إرسال إشعارات هذا الـ WABA تحديداً إلى Callback URL خاص بدلاً من عنوان التطبيق العام.
+                </p>
+                <div className="flex items-center justify-end">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => runAction('subscribe', 'override')}
+                    disabled={!!action}
+                  >
+                    {action === 'subscribe_override' ? <Loader2 className="animate-spin" size={14} /> : <Webhook size={14} />}
+                    تفعيل Webhook مستقل لهذا WABA (Override)
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
         </Card>
       );

@@ -1,6 +1,13 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ArrayMaxSize, ArrayMinSize, IsArray, IsEnum, IsNotEmpty, IsOptional, IsString, IsUUID, Matches, ValidateIf } from 'class-validator';
-import { MetaConnectionMode, MetaConnectionScope, MetaInboundRouting } from '../entities/meta-whatsapp-connection.entity';
+import { MetaConnectionMode, MetaConnectionScope, MetaInboundRouting, MetaWebhookMode } from '../entities/meta-whatsapp-connection.entity';
+
+export class SubscribeWebhookDto {
+  @ApiPropertyOptional({ enum: MetaWebhookMode, default: MetaWebhookMode.GLOBAL })
+  @IsOptional()
+  @IsEnum(MetaWebhookMode)
+  mode?: MetaWebhookMode;
+}
 
 export class SaveMetaWhatsAppConnectionDto {
   @ApiProperty({ enum: MetaConnectionScope, default: MetaConnectionScope.STORE })
@@ -125,6 +132,11 @@ export class SendWhatsAppTemplateDto {
   @Matches(/^\+?[0-9]{7,20}$/)
   to: string;
 
+  @ApiPropertyOptional({ description: 'Unified OTP code for AUTHENTICATION templates' })
+  @IsOptional()
+  @IsString()
+  otpCode?: string;
+
   @ApiPropertyOptional({ type: [String], description: 'Values for BODY {{1}}, {{2}}, ...' })
   @IsOptional()
   @IsArray()
@@ -136,6 +148,15 @@ export class SendWhatsAppTemplateDto {
   @IsArray()
   @IsString({ each: true })
   headerParameters?: string[];
+
+  @ApiPropertyOptional({ description: 'Values for dynamic buttons (e.g. dynamic URL parameters or quick reply payloads)' })
+  @IsOptional()
+  @IsArray()
+  buttonParameters?: any[];
+
+  @ApiPropertyOptional({ description: 'Header media object (e.g. { link: string } or { id: string })' })
+  @IsOptional()
+  headerMedia?: Record<string, any>;
 
   @ApiPropertyOptional({ description: 'Optional raw Meta template components for advanced/dynamic buttons or media headers.' })
   @IsOptional()
@@ -163,6 +184,11 @@ export class SendWhatsAppTemplateBulkDto {
   @IsUUID('4', { each: true })
   customerIds: string[];
 
+  @ApiPropertyOptional({ description: 'Unified OTP code for AUTHENTICATION templates' })
+  @IsOptional()
+  @IsString()
+  otpCode?: string;
+
   @ApiPropertyOptional({ type: [String] })
   @IsOptional()
   @IsArray()
@@ -175,8 +201,18 @@ export class SendWhatsAppTemplateBulkDto {
   @IsString({ each: true })
   headerParameters?: string[];
 
+  @ApiPropertyOptional({ description: 'Values for dynamic buttons' })
+  @IsOptional()
+  @IsArray()
+  buttonParameters?: any[];
+
+  @ApiPropertyOptional({ description: 'Header media object' })
+  @IsOptional()
+  headerMedia?: Record<string, any>;
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsArray()
   components?: Record<string, any>[];
 }
+

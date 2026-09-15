@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Logger, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException, OnModuleInit, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
@@ -9,6 +9,7 @@ import {
   MetaConnectionScope,
   MetaConnectionStatus,
   MetaInboundRouting,
+  MetaWebhookMode,
   MetaWhatsAppConnection,
 } from './entities/meta-whatsapp-connection.entity';
 import { WhatsAppTemplate } from './entities/whatsapp-template.entity';
@@ -21,9 +22,10 @@ import { CustomersService } from '../customers/customers.service';
 import { EventsGateway } from '../events/events.gateway';
 import { BillingService } from '../billing/billing.service';
 import { Store } from '../stores/entities/store.entity';
+import { MetaTemplatePayloadBuilder } from './services/meta-template-payload.builder';
 
 @Injectable()
-export class MetaWhatsAppService {
+export class MetaWhatsAppService implements OnModuleInit {
   private readonly logger = new Logger(MetaWhatsAppService.name);
 
   constructor(
@@ -37,7 +39,20 @@ export class MetaWhatsAppService {
     private readonly customersService: CustomersService,
     private readonly eventsGateway: EventsGateway,
     private readonly billingService: BillingService,
+    private readonly templatePayloadBuilder: MetaTemplatePayloadBuilder,
   ) {}
+
+
+  async onModuleInit() {
+    try {
+      await this.connectionRepository.query(`
+        ALTER TABLE meta_whatsapp_connections 
+        ADD COLUMN IF NOT EXISTS "webhookMode" varchar NOT NULL DEFAULT 'global';
+      `);
+    } catch (e: any) {
+      this.logger.warn(`Auto-migration for webhookMode skipped or failed: ${e.message}`);
+    }
+  }
 
   async listConnectionsForUser(userId: string, organizationId?: string) {
     const { organization } = await this.organizationsService.assertCanManageIntegrations(userId, organizationId);
@@ -140,12 +155,34 @@ export class MetaWhatsAppService {
       const phone = (data?.data || []).find((item: any) => String(item.id) === String(connection.phoneNumberId));
       if (!phone) throw new BadRequestException('Phone Number ID does not belong to the configured WABA or is not visible to this token');
       connection.displayPhoneNumber = phone.display_phone_number || connection.displayPhoneNumber;
-      connection.status = MetaConnectionStatus.CONNECTED;
+
+      // Auto-heal / verify if WABA is already subscribed to an app
+      let isSubscribed = false;
+      try {
+        const subRes = await axios.get(`https://graph.facebook.com/${version}/${connection.wabaId}/subscribed_apps`, {
+          headers: { Authorization: `Bearer ${token}` },
+          timeout: 10000,
+        });
+        const subscribedApps: any[] = subRes.data?.data || [];
+        isSubscribed = subscribedApps.some((item: any) => {
+          if (connection.appId) return String(item.id || item.whatsapp_business_api_data?.id) === String(connection.appId);
+          return !!(item.whatsapp_business_api_data || item.id);
+        });
+        if (isSubscribed && !connection.appId && subscribedApps.length > 0) {
+          connection.appId = String(subscribedApps[0].whatsapp_business_api_data?.id || subscribedApps[0].id || '');
+        }
+      } catch {}
+
+      connection.status = isSubscribed ? MetaConnectionStatus.WEBHOOK_ACTIVE : MetaConnectionStatus.CONNECTED;
       connection.lastError = null;
+      if (isSubscribed && !connection.webhookSubscribedAt) {
+        connection.webhookSubscribedAt = new Date();
+      }
       await this.connectionRepository.save(connection);
       await this.syncWhatsAppChannels(connection, userId);
-      return { success: true, connectionId: connection.id, scope: connection.scope, storeId: connection.storeId, phoneNumber: phone };
+      return { success: true, connectionId: connection.id, scope: connection.scope, storeId: connection.storeId, phoneNumber: phone, status: connection.status };
     } catch (error: any) {
+      if (error instanceof BadRequestException) throw error;
       const message = this.metaErrorMessage(error);
       connection.status = MetaConnectionStatus.ERROR;
       connection.lastError = message;
@@ -154,31 +191,130 @@ export class MetaWhatsAppService {
     }
   }
 
-  async subscribeWebhookForUser(userId: string, organizationId?: string, options: { connectionId?: string; storeId?: string; scope?: MetaConnectionScope } = {}) {
+  async subscribeWebhookForUser(
+    userId: string,
+    organizationId?: string,
+    options: { connectionId?: string; storeId?: string; scope?: MetaConnectionScope; mode?: MetaWebhookMode } = {},
+  ) {
     await this.organizationsService.assertCanManageIntegrations(userId, organizationId);
     const connection = await this.findForUser(userId, organizationId, { ...options, required: true }) as MetaWhatsAppConnection;
     const secretConnection = await this.getConnectionWithSecrets(connection.id);
     const accessToken = this.credentialEncryption.decryptSecret(secretConnection.accessToken)!;
     const verifyToken = this.credentialEncryption.decryptSecret(secretConnection.verifyToken)!;
     const webhookUrl = this.resolveWebhookUrl(connection);
+    const version = this.getGraphVersion();
+    const mode = options.mode || MetaWebhookMode.GLOBAL;
+
     try {
-      await axios.post(
-        `https://graph.facebook.com/${this.getGraphVersion()}/${connection.wabaId}/subscribed_apps`,
-        { override_callback_uri: webhookUrl, verify_token: verifyToken },
-        { headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' }, timeout: 15000 },
-      );
-      connection.webhookUrl = webhookUrl;
+      if (mode === MetaWebhookMode.OVERRIDE) {
+        // OVERRIDE MODE: Explicit override callback requested by user
+        await axios.post(
+          `https://graph.facebook.com/${version}/${connection.wabaId}/subscribed_apps`,
+          { override_callback_uri: webhookUrl, verify_token: verifyToken },
+          { headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' }, timeout: 15000 },
+        );
+        connection.webhookUrl = webhookUrl;
+        connection.webhookMode = MetaWebhookMode.OVERRIDE;
+      } else {
+        // GLOBAL / APP CALLBACK MODE (DEFAULT):
+        // 1. Post to subscribed_apps WITHOUT body
+        await axios.post(
+          `https://graph.facebook.com/${version}/${connection.wabaId}/subscribed_apps`,
+          {},
+          { headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' }, timeout: 15000 },
+        ).catch((err) => {
+          this.logger.log(`POST subscribed_apps notice: ${err?.response?.data?.error?.message || err.message}`);
+        });
+
+        // 2. Verify via GET subscribed_apps
+        const getRes = await axios.get(
+          `https://graph.facebook.com/${version}/${connection.wabaId}/subscribed_apps`,
+          { headers: { Authorization: `Bearer ${accessToken}` }, timeout: 15000 },
+        );
+
+        const subscribedApps: any[] = getRes.data?.data || [];
+
+        // 3. Resolve expected App ID
+        let expectedAppId = connection.appId;
+        if (!expectedAppId) {
+          try {
+            const appRes = await axios.get(`https://graph.facebook.com/${version}/app`, {
+              headers: { Authorization: `Bearer ${accessToken}` },
+              timeout: 10000,
+            });
+            if (appRes.data?.id) {
+              expectedAppId = String(appRes.data.id);
+              connection.appId = expectedAppId;
+            }
+          } catch {
+            expectedAppId = this.configService.get<string>('META_APP_ID') || null;
+          }
+        }
+
+        // 4. Verify that the app is in subscribed_apps
+        const matchedApp = subscribedApps.find((item: any) => {
+          const itemId = String(item.whatsapp_business_api_data?.id || item.id || '');
+          if (expectedAppId) return itemId === String(expectedAppId);
+          return !!(item.whatsapp_business_api_data || item.id);
+        });
+
+        if (!matchedApp) {
+          throw new BadRequestException({
+            code: 'META_APP_NOT_SUBSCRIBED',
+            message: `التطبيق (${expectedAppId ? `App ID: ${expectedAppId}` : 'المطلوب'}) غير مشترك في هذا الـ WABA (${connection.wabaId}). يرجى التحقق من اشتراك التطبيق في حساب واتساب للأعمال من Meta Dashboard.`,
+            wabaId: connection.wabaId,
+            appId: expectedAppId,
+            subscribedAppsCount: subscribedApps.length,
+          });
+        }
+
+        if (!connection.appId && matchedApp) {
+          connection.appId = String(matchedApp.whatsapp_business_api_data?.id || matchedApp.id);
+        }
+
+        connection.webhookMode = MetaWebhookMode.GLOBAL;
+
+      }
+
+      connection.status = MetaConnectionStatus.WEBHOOK_ACTIVE;
       connection.webhookSubscribedAt = new Date();
-      connection.status = MetaConnectionStatus.CONNECTED;
       connection.lastError = null;
       await this.connectionRepository.save(connection);
-      return { success: true, connectionId: connection.id, scope: connection.scope, storeId: connection.storeId, webhookUrl, verifyToken };
+
+      return {
+        success: true,
+        connectionId: connection.id,
+        wabaId: connection.wabaId,
+        appId: connection.appId || '',
+        subscriptionVerified: true,
+        webhookMode: (connection.webhookMode || MetaWebhookMode.GLOBAL).toUpperCase(),
+        status: connection.status,
+      };
     } catch (error: any) {
-      const message = this.metaErrorMessage(error);
-      connection.lastError = message;
+      if (error instanceof BadRequestException && (error.getResponse() as any)?.code) {
+        throw error;
+      }
+
+      const meta = error?.response?.data?.error;
+      const metaCode = meta?.code;
+      const metaSubcode = meta?.error_subcode;
+      const details = meta?.error_data?.details || meta?.message || error?.message || 'فشلت عملية الاشتراك في Webhook';
+      const fbtraceId = meta?.fbtrace_id;
+
+      connection.lastError = `Meta: ${details}${metaCode ? ` (code ${metaCode})` : ''}${metaSubcode ? ` (subcode ${metaSubcode})` : ''}`;
       connection.status = MetaConnectionStatus.ERROR;
       await this.connectionRepository.save(connection);
-      throw new BadRequestException(message);
+
+      this.logger.error(`Webhook subscription failed for connection ${connection.id}: ${connection.lastError}`);
+
+      throw new BadRequestException({
+        code: 'META_WEBHOOK_SUBSCRIBE_FAILED',
+        message: connection.lastError,
+        metaCode,
+        metaSubcode,
+        details,
+        fbtraceId,
+      });
     }
   }
 
@@ -299,11 +435,12 @@ export class MetaWhatsAppService {
     connection: MetaWhatsAppConnection,
     template: WhatsAppTemplate,
     to: string,
-    dto: Pick<SendWhatsAppTemplateDto, 'bodyParameters' | 'headerParameters' | 'components'>,
+    dto: Partial<SendWhatsAppTemplateDto>,
   ) {
     const secretConnection = await this.getConnectionWithSecrets(connection.id);
     const accessToken = this.credentialEncryption.decryptSecret(secretConnection.accessToken)!;
-    const components = dto.components?.length ? dto.components : this.buildTemplateComponents(dto as SendWhatsAppTemplateDto);
+    const buildResult = this.templatePayloadBuilder.validateAndBuild(template, dto);
+    const components = buildResult.components;
     const normalizedTo = this.normalizePhone(to);
     if (!normalizedTo) throw new BadRequestException('Invalid WhatsApp phone number');
 
@@ -335,7 +472,7 @@ export class MetaWhatsAppService {
       }, 'whatsapp');
       const messageData = {
         from: 'me',
-        text: this.renderTemplatePreview(template, dto as SendWhatsAppTemplateDto),
+        text: buildResult.renderedPreview,
         type: 'template',
         isManual: true,
         timestamp: Date.now(),
@@ -346,7 +483,12 @@ export class MetaWhatsAppService {
           templateId: template.id,
           templateName: template.name,
           templateLanguage: template.language,
-          templateParameters: { body: dto.bodyParameters || [], header: dto.headerParameters || [] },
+          templateParameters: {
+            body: dto.bodyParameters || [],
+            header: dto.headerParameters || [],
+            button: dto.buttonParameters || [],
+            otp: dto.otpCode || null,
+          },
           status: 'accepted',
           walletTransactionId: walletCharge?.id || null,
         },
@@ -367,12 +509,29 @@ export class MetaWhatsAppService {
       .replace(/\{\{customer\.phoneNumber\}\}/g, customer.phoneNumber || customer.whatsappId || '')
       .replace(/\{\{customer\.email\}\}/g, customer.email || '')
       .replace(/\{\{customer\.branchName\}\}/g, customer.store?.name || '');
+
+    const personalizeButton = (btn: any) => {
+      if (typeof btn === 'string') return replace(btn);
+      if (typeof btn === 'object' && btn) {
+        return {
+          ...btn,
+          text: btn.text ? replace(btn.text) : undefined,
+          payload: btn.payload ? replace(btn.payload) : undefined,
+        };
+      }
+      return btn;
+    };
+
     return {
+      otpCode: dto.otpCode ? replace(dto.otpCode) : undefined,
       bodyParameters: (dto.bodyParameters || []).map(replace),
       headerParameters: (dto.headerParameters || []).map(replace),
+      buttonParameters: (dto.buttonParameters || []).map(personalizeButton),
+      headerMedia: dto.headerMedia,
       components: dto.components,
     };
   }
+
 
   async getWebhookConnection(connectionId: string) {
     return this.getConnectionWithSecrets(connectionId);
@@ -540,6 +699,7 @@ export class MetaWhatsAppService {
       verifyToken: this.credentialEncryption.decryptSecret(connection.verifyToken),
       webhookUrl: this.resolveWebhookUrl(connection),
       status: connection.status,
+      webhookMode: (connection.webhookMode || MetaWebhookMode.GLOBAL).toUpperCase(),
       lastError: connection.lastError,
       webhookSubscribedAt: connection.webhookSubscribedAt,
       lastWebhookAt: connection.lastWebhookAt,
@@ -571,27 +731,16 @@ export class MetaWhatsAppService {
     return this.configService.get<string>('META_GRAPH_API_VERSION') || 'v26.0';
   }
 
-  private buildTemplateComponents(dto: SendWhatsAppTemplateDto) {
-    const components: any[] = [];
-    if (dto.headerParameters?.length) components.push({ type: 'header', parameters: dto.headerParameters.map((text) => ({ type: 'text', text })) });
-    if (dto.bodyParameters?.length) components.push({ type: 'body', parameters: dto.bodyParameters.map((text) => ({ type: 'text', text })) });
-    return components;
-  }
-
-  private renderTemplatePreview(template: WhatsAppTemplate, dto: SendWhatsAppTemplateDto) {
-    const body = template.components.find((component: any) => String(component.type).toUpperCase() === 'BODY')?.text || template.name;
-    let rendered = body;
-    (dto.bodyParameters || []).forEach((value, index) => { rendered = rendered.split(`{{${index + 1}}}`).join(value); });
-    return rendered;
-  }
-
   private normalizePhone(value: string) {
     return String(value || '').replace(/[^0-9]/g, '');
   }
 
   private metaErrorMessage(error: any) {
     const meta = error?.response?.data?.error;
-    if (meta?.message) return `Meta: ${meta.message}${meta.code ? ` (code ${meta.code})` : ''}${meta.error_subcode ? ` (subcode ${meta.error_subcode})` : ''}`;
+    if (meta) {
+      const details = meta.error_data?.details || meta.message || 'Meta request failed';
+      return `Meta: ${details}${meta.code ? ` (code ${meta.code})` : ''}${meta.error_subcode ? ` (subcode ${meta.error_subcode})` : ''}${meta.fbtrace_id ? ` [fbtrace_id: ${meta.fbtrace_id}]` : ''}`;
+    }
     return error?.message || 'Meta request failed';
   }
 

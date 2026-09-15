@@ -10,7 +10,13 @@ export enum MetaConnectionMode {
 export enum MetaConnectionStatus {
   DRAFT = 'draft',
   CONNECTED = 'connected',
+  WEBHOOK_ACTIVE = 'webhook_active',
   ERROR = 'error',
+}
+
+export enum MetaWebhookMode {
+  GLOBAL = 'global',
+  OVERRIDE = 'override',
 }
 
 export enum MetaConnectionScope {
@@ -86,6 +92,9 @@ export class MetaWhatsAppConnection {
 
   @Column({ type: 'enum', enum: MetaConnectionStatus, default: MetaConnectionStatus.DRAFT })
   status: MetaConnectionStatus;
+
+  @Column({ type: 'varchar', default: MetaWebhookMode.GLOBAL })
+  webhookMode: MetaWebhookMode;
 
   @Column({ type: 'varchar', nullable: true })
   lastError: string | null;
