@@ -18,10 +18,26 @@ import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { useToast } from '../components/Toast';
 
+import { toEnglishDigits } from '../lib/utils';
+
 type Summary = any;
 
 const formatSar = (value: number | string | null | undefined, digits = 2) =>
-  `${Number(value || 0).toLocaleString('ar-SA', { minimumFractionDigits: digits, maximumFractionDigits: Math.max(digits, 6) })} ر.س`;
+  `${toEnglishDigits(Number(value || 0).toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: Math.max(digits, 6) }))} ر.س`;
+
+const formatDate = (dateStr: string | Date | null | undefined) => {
+  if (!dateStr) return '-';
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return '-';
+  return toEnglishDigits(d.toLocaleDateString('en-GB'));
+};
+
+const formatDateTime = (dateStr: string | Date | null | undefined) => {
+  if (!dateStr) return '-';
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return '-';
+  return toEnglishDigits(d.toLocaleString('en-GB', { hour12: true }));
+};
 
 const paymentStatusLabel: Record<string, string> = {
   created: 'جديد', initiated: 'بانتظار الإكمال', paid: 'مدفوع', failed: 'فشل', refunded: 'مسترجع',
@@ -223,14 +239,14 @@ export default function BillingPage() {
           <p className="text-xs font-black text-neutral-500">الباقة الحالية</p>
           <div className="mt-3 flex items-center gap-2"><ShieldCheck className="text-emerald-500"/><span className="text-2xl font-black text-neutral-900 dark:text-white">{currentPlan?.nameAr || '-'}</span></div>
           <p className="text-xs text-neutral-500 mt-4">الحالة: <span className="font-black">{summary.subscription?.status}</span></p>
-          <p className="text-xs text-neutral-500 mt-1">نهاية الفترة: {summary.subscription?.currentPeriodEnd ? new Date(summary.subscription.currentPeriodEnd).toLocaleDateString('ar-SA') : '-'}</p>
+          <p className="text-xs text-neutral-500 mt-1">نهاية الفترة: {formatDate(summary.subscription?.currentPeriodEnd)}</p>
         </Card>
         <Card variant="labbaik">
           <p className="text-xs font-black text-neutral-500">وسيلة الدفع الافتراضية</p>
           {defaultMethod ? (
             <div className="mt-4">
-              <div className="flex items-center gap-3 text-xl font-black"><CreditCard className="text-labbaik-blue"/> {String(defaultMethod.brand || 'CARD').toUpperCase()} •••• {defaultMethod.lastFour}</div>
-              <p className="text-xs text-neutral-500 mt-3">{defaultMethod.expiryMonth}/{defaultMethod.expiryYear}</p>
+              <div className="flex items-center gap-3 text-xl font-black"><CreditCard className="text-labbaik-blue"/> {String(defaultMethod.brand || 'CARD').toUpperCase()} •••• {toEnglishDigits(defaultMethod.lastFour)}</div>
+              <p className="text-xs text-neutral-500 mt-3">{toEnglishDigits(defaultMethod.expiryMonth)}/{toEnglishDigits(defaultMethod.expiryYear)}</p>
             </div>
           ) : <p className="mt-4 text-sm text-amber-500 font-bold">لا توجد بطاقة محفوظة</p>}
         </Card>
@@ -256,7 +272,7 @@ export default function BillingPage() {
             <div className="rounded-2xl border border-purple-100/70 dark:border-white/10 p-4 space-y-4">
               <div className="font-black text-sm">شحن سريع من البطاقة المحفوظة</div>
               <div className="flex gap-3">
-                <input type="number" min="1" value={savedCardAmount} onChange={(e) => setSavedCardAmount(Number(e.target.value))} className="flex-1 bg-transparent border border-white/10 rounded-xl px-4 py-3"/>
+                <input type="number" dir="ltr" min="1" value={savedCardAmount} onChange={(e) => setSavedCardAmount(Number(e.target.value))} className="flex-1 bg-transparent border border-white/10 rounded-xl px-4 py-3 font-mono"/>
                 <Button onClick={topupSavedCard} disabled={busy}>شحن {formatSar(savedCardAmount)}</Button>
               </div>
             </div>
@@ -266,14 +282,14 @@ export default function BillingPage() {
             <div className="space-y-4 rounded-2xl bg-black/5 dark:bg-white/5 p-5">
               <div className="flex items-center gap-2 text-xs text-emerald-500 font-bold"><ShieldCheck size={15}/> بيانات البطاقة تُرسل مباشرة إلى ميسر ولا تمر على خادم لبيك.</div>
               <input placeholder="اسم حامل البطاقة" value={card.name} onChange={(e)=>setCard({...card,name:e.target.value})} className="w-full bg-transparent border border-white/10 rounded-xl px-4 py-3"/>
-              <input inputMode="numeric" placeholder="رقم البطاقة" value={card.number} onChange={(e)=>setCard({...card,number:e.target.value})} className="w-full bg-transparent border border-white/10 rounded-xl px-4 py-3"/>
+              <input dir="ltr" inputMode="numeric" placeholder="رقم البطاقة" value={card.number} onChange={(e)=>setCard({...card,number:toEnglishDigits(e.target.value)})} className="w-full bg-transparent border border-white/10 rounded-xl px-4 py-3 font-mono"/>
               <div className="grid grid-cols-3 gap-3">
-                <input inputMode="numeric" placeholder="الشهر MM" value={card.month} onChange={(e)=>setCard({...card,month:e.target.value})} className="bg-transparent border border-white/10 rounded-xl px-4 py-3"/>
-                <input inputMode="numeric" placeholder="السنة YY" value={card.year} onChange={(e)=>setCard({...card,year:e.target.value})} className="bg-transparent border border-white/10 rounded-xl px-4 py-3"/>
-                <input inputMode="numeric" type="password" placeholder="CVC" value={card.cvc} onChange={(e)=>setCard({...card,cvc:e.target.value})} className="bg-transparent border border-white/10 rounded-xl px-4 py-3"/>
+                <input dir="ltr" inputMode="numeric" placeholder="الشهر MM" value={card.month} onChange={(e)=>setCard({...card,month:toEnglishDigits(e.target.value)})} className="bg-transparent border border-white/10 rounded-xl px-4 py-3 font-mono"/>
+                <input dir="ltr" inputMode="numeric" placeholder="السنة YY" value={card.year} onChange={(e)=>setCard({...card,year:toEnglishDigits(e.target.value)})} className="bg-transparent border border-white/10 rounded-xl px-4 py-3 font-mono"/>
+                <input dir="ltr" inputMode="numeric" type="password" placeholder="CVC" value={card.cvc} onChange={(e)=>setCard({...card,cvc:toEnglishDigits(e.target.value)})} className="bg-transparent border border-white/10 rounded-xl px-4 py-3 font-mono"/>
               </div>
               <div className="flex gap-3 items-center">
-                <input type="number" min="1" value={topupAmount} onChange={(e)=>setTopupAmount(Number(e.target.value))} className="w-32 bg-transparent border border-white/10 rounded-xl px-4 py-3"/>
+                <input type="number" dir="ltr" min="1" value={topupAmount} onChange={(e)=>setTopupAmount(Number(e.target.value))} className="w-32 bg-transparent border border-white/10 rounded-xl px-4 py-3 font-mono"/>
                 <Button onClick={beginNewCardTopup} disabled={busy}>دفع وشحن {formatSar(topupAmount)}</Button>
               </div>
             </div>
@@ -288,13 +304,13 @@ export default function BillingPage() {
           </label>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <label className="text-xs font-bold text-neutral-500">الشحن عند وصول الرصيد
-              <input type="number" value={walletSettings.autoRechargeThresholdSar} onChange={(e)=>setWalletSettings({...walletSettings,autoRechargeThresholdSar:Number(e.target.value)})} className="mt-2 w-full bg-transparent border border-white/10 rounded-xl px-3 py-3 text-neutral-900 dark:text-white"/>
+              <input type="number" dir="ltr" value={walletSettings.autoRechargeThresholdSar} onChange={(e)=>setWalletSettings({...walletSettings,autoRechargeThresholdSar:Number(e.target.value)})} className="mt-2 w-full bg-transparent border border-white/10 rounded-xl px-3 py-3 text-neutral-900 dark:text-white font-mono"/>
             </label>
             <label className="text-xs font-bold text-neutral-500">مبلغ الشحن التلقائي
-              <input type="number" value={walletSettings.autoRechargeAmountSar} onChange={(e)=>setWalletSettings({...walletSettings,autoRechargeAmountSar:Number(e.target.value)})} className="mt-2 w-full bg-transparent border border-white/10 rounded-xl px-3 py-3 text-neutral-900 dark:text-white"/>
+              <input type="number" dir="ltr" value={walletSettings.autoRechargeAmountSar} onChange={(e)=>setWalletSettings({...walletSettings,autoRechargeAmountSar:Number(e.target.value)})} className="mt-2 w-full bg-transparent border border-white/10 rounded-xl px-3 py-3 text-neutral-900 dark:text-white font-mono"/>
             </label>
             <label className="text-xs font-bold text-neutral-500">تنبيه انخفاض الرصيد
-              <input type="number" value={walletSettings.lowBalanceThresholdSar} onChange={(e)=>setWalletSettings({...walletSettings,lowBalanceThresholdSar:Number(e.target.value)})} className="mt-2 w-full bg-transparent border border-white/10 rounded-xl px-3 py-3 text-neutral-900 dark:text-white"/>
+              <input type="number" dir="ltr" value={walletSettings.lowBalanceThresholdSar} onChange={(e)=>setWalletSettings({...walletSettings,lowBalanceThresholdSar:Number(e.target.value)})} className="mt-2 w-full bg-transparent border border-white/10 rounded-xl px-3 py-3 text-neutral-900 dark:text-white font-mono"/>
             </label>
           </div>
           <Button onClick={saveWalletSettings} disabled={busy}>حفظ إعدادات المحفظة</Button>
@@ -314,7 +330,7 @@ export default function BillingPage() {
                 <div>Meta لبيك: {plan.features?.metaLabbaik ? '✅' : '—'}</div>
                 <div>الذكاء الاصطناعي: {plan.features?.ai ? '✅' : '—'}</div>
                 <div>التدفقات: {plan.features?.flows ? '✅' : '—'}</div>
-                <div>الرسائل الشهرية: {plan.limits?.monthlyMessages ?? 'غير محدود'}</div>
+                <div>الرسائل الشهرية: {plan.limits?.monthlyMessages != null ? toEnglishDigits(Number(plan.limits.monthlyMessages).toLocaleString('en-US')) : 'غير محدود'}</div>
               </div>
               <Button isFullWidth disabled={active || busy} variant={active ? 'secondary' : 'primary'} onClick={()=>subscribe(plan.id, plan.monthlyPriceMinor)}>{active ? 'الباقة الحالية' : 'اختيار الباقة'}</Button>
             </Card>;
@@ -333,7 +349,7 @@ export default function BillingPage() {
       <Card variant="labbaik" className="space-y-4">
         <h2 className="text-xl font-black flex items-center gap-2"><CreditCard/> طرق الدفع المحفوظة</h2>
         {summary.paymentMethods?.length ? summary.paymentMethods.map((method:any)=><div key={method.id} className="flex flex-wrap items-center justify-between gap-4 p-4 border border-purple-100/70 dark:border-white/10 rounded-2xl">
-          <div><div className="font-black">{String(method.brand || 'CARD').toUpperCase()} •••• {method.lastFour}</div><div className="text-xs text-neutral-500 mt-1">انتهاء {method.expiryMonth}/{method.expiryYear} · {method.status}</div></div>
+          <div><div className="font-black">{String(method.brand || 'CARD').toUpperCase()} •••• {toEnglishDigits(method.lastFour)}</div><div className="text-xs text-neutral-500 mt-1">انتهاء {toEnglishDigits(method.expiryMonth)}/{toEnglishDigits(method.expiryYear)} · {method.status}</div></div>
           <div className="flex gap-2">{method.status === 'active' && !method.isDefault && <Button size="sm" variant="secondary" onClick={()=>makeDefault(method.id)}><Star size={14}/> افتراضية</Button>}<Button size="sm" variant="danger" onClick={()=>removeMethod(method.id)}><Trash2 size={14}/> حذف</Button></div>
         </div>) : <p className="text-sm text-neutral-500">لا توجد طرق دفع محفوظة بعد.</p>}
       </Card>
@@ -342,13 +358,13 @@ export default function BillingPage() {
         <h2 className="text-xl font-black mb-5 flex items-center gap-2"><ReceiptText/> حركة المحفظة</h2>
         <table className="w-full text-sm min-w-[760px]">
           <thead className="text-neutral-500 text-xs"><tr><th className="text-right py-3">التاريخ</th><th className="text-right">النوع</th><th className="text-right">التصنيف</th><th className="text-right">المبلغ</th><th className="text-right">الرصيد بعد العملية</th></tr></thead>
-          <tbody>{summary.transactions?.map((tx:any)=><tr key={tx.id} className="border-t border-purple-100/60 dark:border-white/10"><td className="py-4">{new Date(tx.createdAt).toLocaleString('ar-SA')}</td><td>{tx.type}</td><td>{tx.category}</td><td className={tx.type==='debit'?'text-red-500':'text-emerald-500'}>{tx.type==='debit'?'-':'+'}{formatSar(tx.amountSar, 4)}</td><td>{formatSar(tx.balanceAfterSar, 4)}</td></tr>)}</tbody>
+          <tbody>{summary.transactions?.map((tx:any)=><tr key={tx.id} className="border-t border-purple-100/60 dark:border-white/10"><td className="py-4">{formatDateTime(tx.createdAt)}</td><td>{tx.type}</td><td>{tx.category}</td><td className={tx.type==='debit'?'text-red-500':'text-emerald-500'}>{tx.type==='debit'?'-':'+'}{formatSar(tx.amountSar, 4)}</td><td>{formatSar(tx.balanceAfterSar, 4)}</td></tr>)}</tbody>
         </table>
       </Card>
 
       <Card variant="labbaik" className="overflow-x-auto">
         <h2 className="text-xl font-black mb-5">عمليات الدفع</h2>
-        <table className="w-full text-sm min-w-[760px]"><thead className="text-xs text-neutral-500"><tr><th className="text-right py-3">التاريخ</th><th className="text-right">النوع</th><th className="text-right">المبلغ</th><th className="text-right">الحالة</th><th className="text-right">مرجع ميسر</th></tr></thead><tbody>{summary.payments?.map((p:any)=><tr key={p.id} className="border-t border-purple-100/60 dark:border-white/10"><td className="py-4">{new Date(p.createdAt).toLocaleString('ar-SA')}</td><td>{p.type}</td><td>{formatSar(p.amountMinor/100)}</td><td>{paymentStatusLabel[p.status] || p.status}</td><td className="font-mono text-xs">{p.providerPaymentId}</td></tr>)}</tbody></table>
+        <table className="w-full text-sm min-w-[760px]"><thead className="text-xs text-neutral-500"><tr><th className="text-right py-3">التاريخ</th><th className="text-right">النوع</th><th className="text-right">المبلغ</th><th className="text-right">الحالة</th><th className="text-right">مرجع ميسر</th></tr></thead><tbody>{summary.payments?.map((p:any)=><tr key={p.id} className="border-t border-purple-100/60 dark:border-white/10"><td className="py-4">{formatDateTime(p.createdAt)}</td><td>{p.type}</td><td>{formatSar(p.amountMinor/100)}</td><td>{paymentStatusLabel[p.status] || p.status}</td><td className="font-mono text-xs">{p.providerPaymentId}</td></tr>)}</tbody></table>
       </Card>
     </div>
   );
