@@ -4,7 +4,7 @@ import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { Alert } from '../components/ui/Alert';
-import { Trash2, ShieldAlert, CheckCircle2, Send, Clock, FileText, UserCheck, HelpCircle } from 'lucide-react';
+import { Trash2, ShieldAlert, CheckCircle2, Send, Clock } from 'lucide-react';
 import api from '../api/client';
 
 export default function AccountDeletionPage() {

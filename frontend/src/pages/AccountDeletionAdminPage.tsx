@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { useToast } from '../components/Toast';
-import { Trash2, CheckCircle2, XCircle, Clock, ShieldAlert, RefreshCw, Loader2, Search, Filter } from 'lucide-react';
+import { Trash2, CheckCircle2, RefreshCw, Loader2, Search } from 'lucide-react';
 import api from '../api/client';
 
 type DeletionRequest = {

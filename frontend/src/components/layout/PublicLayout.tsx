@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { Sun, Moon, ShieldCheck, Mail, ArrowRight, UserCheck } from 'lucide-react';
+import { Sun, Moon, ShieldCheck, Mail, ArrowRight } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
 import LogoImage from '../../assets/logos/logo.png';
 import LogoAltImage from '../../assets/logos/logo-alt.png';
