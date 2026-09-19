@@ -18,13 +18,13 @@ export class AccountDeletionRequest {
   email: string;
 
   @Column({ nullable: true })
-  organizationName: string;
+  organizationName: string | null;
 
   @Column({ nullable: true })
-  phone: string;
+  phone: string | null;
 
   @Column({ type: 'text', nullable: true })
-  reason: string;
+  reason: string | null;
 
   @Column({
     type: 'enum',
