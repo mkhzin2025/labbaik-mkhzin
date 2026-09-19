@@ -13,6 +13,10 @@ import FlowEditorPage from './pages/FlowEditorPage';
 import WhatsAppTemplatesPage from './pages/WhatsAppTemplatesPage';
 import BillingPage from './pages/BillingPage';
 import BillingAdminPage from './pages/BillingAdminPage';
+import PrivacyPolicyPage from './pages/PrivacyPolicyPage';
+import TermsPage from './pages/TermsPage';
+import AccountDeletionPage from './pages/AccountDeletionPage';
+import AccountDeletionAdminPage from './pages/AccountDeletionAdminPage';
 import { ToastProvider } from './components/Toast';
 import { ThemeProvider } from './context/ThemeContext';
 import './index.css';
@@ -32,6 +36,12 @@ function App() {
           {/* Public Routes */}
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
+          <Route path="/privacy" element={<PrivacyPolicyPage />} />
+          <Route path="/privacy-policy" element={<PrivacyPolicyPage />} />
+          <Route path="/terms" element={<TermsPage />} />
+          <Route path="/terms-of-service" element={<TermsPage />} />
+          <Route path="/account-deletion" element={<AccountDeletionPage />} />
+          <Route path="/data-deletion" element={<AccountDeletionPage />} />
 
           {/* Protected Dashboard Routes */}
           <Route
@@ -50,6 +60,7 @@ function App() {
                     <Route path="reviews" element={<ReviewsPage />} />
                     <Route path="billing" element={<BillingPage />} />
                     <Route path="billing-admin" element={<BillingAdminPage />} />
+                    <Route path="deletion-requests" element={<AccountDeletionAdminPage />} />
                     <Route path="analytics" element={<div className="p-16 text-3xl font-black text-center text-neutral-900 dark:text-white">التقارير المتقدمة <br /><span className="text-neutral-500 dark:text-neutral-400 text-sm font-bold block mt-4 italic opacity-80">قريباً في المرحلة الثانية</span></div>} />
                     <Route path="settings" element={<SettingsPage />} />
                   </Routes>
@@ -57,6 +68,7 @@ function App() {
               </PrivateRoute>
             }
           />
+
 
           {/* Default Redirect */}
           <Route path="/" element={<Navigate to="/login" replace />} />

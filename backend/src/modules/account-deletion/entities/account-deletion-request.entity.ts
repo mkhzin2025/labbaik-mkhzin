@@ -1,0 +1,62 @@
+import { Column, CreateDateColumn, Entity, PrimaryGeneratedColumn, UpdateDateColumn } from 'typeorm';
+
+export enum AccountDeletionStatus {
+  PENDING = 'PENDING',
+  VERIFIED = 'VERIFIED',
+  PROCESSING = 'PROCESSING',
+  COMPLETED = 'COMPLETED',
+  REJECTED = 'REJECTED',
+  CANCELLED = 'CANCELLED',
+}
+
+@Entity('account_deletion_requests')
+export class AccountDeletionRequest {
+  @PrimaryGeneratedColumn('uuid')
+  id: string;
+
+  @Column()
+  email: string;
+
+  @Column({ nullable: true })
+  organizationName: string;
+
+  @Column({ nullable: true })
+  phone: string;
+
+  @Column({ type: 'text', nullable: true })
+  reason: string;
+
+  @Column({
+    type: 'enum',
+    enum: AccountDeletionStatus,
+    default: AccountDeletionStatus.PENDING,
+  })
+  status: AccountDeletionStatus;
+
+  @Column({ type: 'uuid', nullable: true })
+  matchedUserId: string | null;
+
+  @Column({ type: 'uuid', nullable: true })
+  matchedOrganizationId: string | null;
+
+  @Column({ type: 'text', nullable: true })
+  adminNotes: string | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  ipAddress: string | null;
+
+  @Column({ type: 'text', nullable: true })
+  userAgent: string | null;
+
+  @Column({ type: 'timestamp', nullable: true })
+  verifiedAt: Date | null;
+
+  @Column({ type: 'timestamp', nullable: true })
+  completedAt: Date | null;
+
+  @CreateDateColumn()
+  createdAt: Date;
+
+  @UpdateDateColumn()
+  updatedAt: Date;
+}

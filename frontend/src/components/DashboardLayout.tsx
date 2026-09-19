@@ -21,8 +21,10 @@ import {
   Sun,
   MessageSquareText,
   WalletCards,
-  BadgeDollarSign
+  BadgeDollarSign,
+  Trash2,
 } from 'lucide-react';
+
 import LogoImage from '../assets/logos/logo.png';
 import LogoAltImage from '../assets/logos/logo-alt.png';
 import NotificationCenter from './NotificationCenter';
@@ -117,8 +119,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     { icon: <MessageSquareText size={22} />, label: 'قوالب وقوائم الإرسال', path: '/dashboard/whatsapp-templates' },
     { icon: <Star size={22} />, label: 'التقييمات', path: '/dashboard/reviews' },
     { icon: <WalletCards size={22} />, label: 'الباقات والفوترة', path: '/dashboard/billing' },
-    ...(isPlatformAdmin ? [{ icon: <BadgeDollarSign size={22} />, label: 'إدارة الاشتراكات', path: '/dashboard/billing-admin' }] : []),
+    ...(isPlatformAdmin
+      ? [
+          { icon: <BadgeDollarSign size={22} />, label: 'إدارة الاشتراكات', path: '/dashboard/billing-admin' },
+          { icon: <Trash2 size={22} />, label: 'طلبات حذف الحساب', path: '/dashboard/deletion-requests' },
+        ]
+      : []),
     { icon: <BarChart3 size={22} />, label: 'التقارير', path: '/dashboard/analytics' },
+
     { icon: <Settings size={22} />, label: 'الإعدادات', path: '/dashboard/settings' },
   ];
 

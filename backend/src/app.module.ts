@@ -38,6 +38,8 @@ import { WalletTransaction } from './modules/billing/entities/wallet-transaction
 import { PaymentMethod } from './modules/billing/entities/payment-method.entity';
 import { BillingPayment } from './modules/billing/entities/billing-payment.entity';
 import { PricingRule } from './modules/billing/entities/pricing-rule.entity';
+import { AccountDeletionModule } from './modules/account-deletion/account-deletion.module';
+import { AccountDeletionRequest } from './modules/account-deletion/entities/account-deletion-request.entity';
 
 
 @Module({
@@ -53,7 +55,7 @@ import { PricingRule } from './modules/billing/entities/pricing-rule.entity';
         username: configService.get<string>('POSTGRES_USER'),
         password: configService.get<string>('POSTGRES_PASSWORD'),
         database: configService.get<string>('POSTGRES_DB'),
-        entities: [User, Store, Channel, Review, Notification, Customer, CustomerCategory, CustomerTag, Flow, Organization, OrganizationMember, StoreMember, MetaWhatsAppConnection, WhatsAppTemplate, BillingPlan, Subscription, Wallet, WalletTransaction, PaymentMethod, BillingPayment, PricingRule],
+        entities: [User, Store, Channel, Review, Notification, Customer, CustomerCategory, CustomerTag, Flow, Organization, OrganizationMember, StoreMember, MetaWhatsAppConnection, WhatsAppTemplate, BillingPlan, Subscription, Wallet, WalletTransaction, PaymentMethod, BillingPayment, PricingRule, AccountDeletionRequest],
         synchronize: configService.get<string>('TYPEORM_SYNCHRONIZE') === 'true',
       }),
     }),
@@ -79,6 +81,8 @@ import { PricingRule } from './modules/billing/entities/pricing-rule.entity';
     NotificationsModule,
     CustomersModule,
     FlowsModule,
+    AccountDeletionModule,
   ],
 })
 export class AppModule {}
+
