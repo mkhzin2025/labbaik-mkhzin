@@ -17,10 +17,10 @@ export class AccountDeletionRequest {
   @Column()
   email: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', length: 255, nullable: true })
   organizationName: string | null;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', length: 50, nullable: true })
   phone: string | null;
 
   @Column({ type: 'text', nullable: true })
