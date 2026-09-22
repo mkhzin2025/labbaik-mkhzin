@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import api from '../api/client';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { Mail, Lock, Eye, EyeOff, Sun, Moon } from 'lucide-react';
 import LogoImage from '../assets/logos/logo.png';
 import LogoAltImage from '../assets/logos/logo-alt.png';
@@ -143,31 +143,6 @@ export default function LoginPage() {
                 {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
               </button>
             </div>
-
-            {/* Demo Account Helper */}
-            <div className="rounded-xl border p-3.5 text-xs flex items-center justify-between gap-2 transition-colors
-              border-purple-200/80 bg-purple-50/70 text-purple-900
-              dark:border-primary-500/30 dark:bg-primary-950/40 dark:text-primary-200">
-              <div className="flex flex-col gap-0.5">
-                <span className="text-neutral-500 dark:text-neutral-400 text-[11px]">بيانات الحساب التجريبي:</span>
-                <span className="font-mono font-semibold text-purple-950 dark:text-white text-[11px]">
-                  admin@labbaik.local | Admin123!
-                </span>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setEmail('admin@labbaik.local');
-                  setPassword('Admin123!');
-                }}
-                className="px-2.5 py-1.5 rounded-lg text-white text-xs font-medium transition-all shrink-0 cursor-pointer
-                  bg-labbaik-blue hover:opacity-90 active:scale-95
-                  dark:bg-primary-600 dark:hover:bg-primary-500"
-              >
-                تعبئة تلقائية
-              </button>
-            </div>
-
             {/* Submit Button */}
             <Button
               type="submit"
@@ -182,23 +157,10 @@ export default function LoginPage() {
             </Button>
           </form>
 
-          {/* Register Link */}
-          <div className="mt-7 pt-5 border-t border-purple-100 dark:border-white/10 text-center">
-            <p className="text-sm text-neutral-600 dark:text-neutral-400 font-medium">
-              ليس لديك حساب مؤسسة؟{' '}
-              <Link
-                to="/register"
-                className="font-bold text-labbaik-blue hover:underline"
-              >
-                سجّل مؤسستك الآن
-              </Link>
-            </p>
-          </div>
-
           {/* Footer */}
           <div className="mt-6 text-center">
             <p className="text-xs text-neutral-500 dark:text-neutral-400 font-medium">
-              © 2026 Labbaik AI System • جميع الحقوق محفوظة
+              © 2026 Labbaik System • جميع الحقوق محفوظة
             </p>
           </div>
         </div>

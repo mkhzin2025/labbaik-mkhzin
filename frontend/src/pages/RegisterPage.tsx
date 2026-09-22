@@ -273,7 +273,7 @@ export default function RegisterPage() {
           {/* Footer */}
           <div className="mt-6 text-center">
             <p className="text-xs text-neutral-500 dark:text-neutral-500 font-medium">
-              © 2026 Labbaik AI System • جميع الحقوق محفوظة
+              © 2026 Labbaik System • جميع الحقوق محفوظة
             </p>
           </div>
         </div>
