@@ -26,13 +26,13 @@ import {
   Users,
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
-import { LEGAL_CONFIG } from '../lib/legal-config';
 import LogoImage from '../assets/logos/logo.png';
 import LogoAltImage from '../assets/logos/logo-alt.png';
 
 type Lang = 'ar' | 'en';
 
 const LANG_STORAGE_KEY = 'landing_lang';
+const CONTACT_EMAIL = 'info@mkhzin.com';
 
 const content = {
   ar: {
@@ -640,11 +640,11 @@ export default function LandingPage() {
           <div>
             <h3 className="text-sm font-black">{t.footer.contact}</h3>
             <a
-              href={`mailto:${LEGAL_CONFIG.supportEmail}`}
+              href={`mailto:${CONTACT_EMAIL}`}
               dir="ltr"
               className="mt-4 inline-flex items-center gap-2 text-sm font-bold text-labbaik-text-muted hover:text-labbaik-blue dark:hover:text-white transition-colors"
             >
-              <Mail size={15} /> {LEGAL_CONFIG.supportEmail}
+              <Mail size={15} /> {CONTACT_EMAIL}
             </a>
           </div>
         </div>
