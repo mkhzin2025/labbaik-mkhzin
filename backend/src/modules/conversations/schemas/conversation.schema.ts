@@ -41,6 +41,9 @@ export class Conversation extends Document {
   @Prop({ nullable: true })
   customerId: string; // Link to Postgres Customer Entity UUID
 
+  @Prop({ nullable: true })
+  customerName: string; // WhatsApp profile name or the customer's saved name
+
   @Prop({ default: 'open' })
   status: string;
 

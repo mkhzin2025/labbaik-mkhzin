@@ -86,6 +86,8 @@ export class ConversationsService implements OnModuleInit {
 
   async addMessage(customerPhone: string, storeId: string, platform: string, messageData: any) {
     customerPhone = this.normalizeCustomerPhone(customerPhone, platform);
+    const { customerName, ...message } = messageData;
+    messageData = message;
     const updateQuery: any = {
       $push: { messages: messageData },
       $set: { 
@@ -96,6 +98,7 @@ export class ConversationsService implements OnModuleInit {
 
     if (messageData.sentiment) updateQuery.$set.lastSentiment = messageData.sentiment;
     if (messageData.customerId) updateQuery.$set.customerId = messageData.customerId;
+    if (customerName) updateQuery.$set.customerName = customerName;
     if (messageData.metadata?.metaConnectionId) updateQuery.$set.metaConnectionId = messageData.metadata.metaConnectionId;
     if (messageData.tags && messageData.tags.length > 0) updateQuery.$addToSet = { tags: { $each: messageData.tags } };
 
@@ -162,12 +165,23 @@ export class ConversationsService implements OnModuleInit {
   }
 
   async findAllByStore(storeId: string) {
-    return this.conversationModel.find({ storeId }).sort({ lastMessageAt: -1 }).exec();
+    return this.withCustomerNames(await this.conversationModel.find({ storeId }).sort({ lastMessageAt: -1 }).lean().exec());
   }
 
   async findAllByStores(storeIds: string[]) {
     if (!storeIds.length) return [];
-    return this.conversationModel.find({ storeId: { $in: storeIds } }).sort({ lastMessageAt: -1 }).exec();
+    return this.withCustomerNames(await this.conversationModel.find({ storeId: { $in: storeIds } }).sort({ lastMessageAt: -1 }).lean().exec());
+  }
+
+  // A name saved on the customer record (possibly edited by the team) wins over the WhatsApp profile name.
+  private async withCustomerNames<T extends { customerId?: string; customerName?: string }>(conversations: T[]) {
+    try {
+      const names = await this.customersService.findNamesByIds(conversations.map((conv) => conv.customerId || ''));
+      return conversations.map((conv) => ({ ...conv, customerName: (conv.customerId && names.get(conv.customerId)) || conv.customerName || null }));
+    } catch (error) {
+      this.logger.warn(`Could not load customer names: ${error?.message}`);
+      return conversations;
+    }
   }
 
   async findOne(id: string) {

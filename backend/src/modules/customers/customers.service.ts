@@ -51,6 +51,34 @@ export class CustomersService {
     return customer;
   }
 
+  /** Placeholder names we generate ourselves; safe to replace with the customer's real WhatsApp profile name. */
+  isPlaceholderName(name: string | null | undefined, identifier?: string) {
+    const value = String(name || '').trim();
+    if (!value) return true;
+    if (/^(WhatsApp|العميل|عميل)\s/.test(value)) return true;
+    const digits = value.replace(/[^0-9]/g, '');
+    return !!identifier && digits.length > 5 && digits === identifier.replace(/[^0-9]/g, '');
+  }
+
+  async updateProfileName(customer: Customer, profileName: string | null | undefined, identifier: string) {
+    const name = String(profileName || '').trim();
+    if (!name || !this.isPlaceholderName(customer.fullName, identifier) || customer.fullName === name) return customer;
+    customer.fullName = name;
+    await this.customerRepository.update(customer.id, { fullName: name });
+    return customer;
+  }
+
+  async findNamesByIds(ids: string[]) {
+    const unique = Array.from(new Set(ids.filter(Boolean)));
+    if (!unique.length) return new Map<string, string>();
+    const rows = await this.customerRepository.find({ where: { id: In(unique) }, select: ['id', 'fullName', 'phoneNumber', 'whatsappId'] });
+    const names = new Map<string, string>();
+    for (const row of rows) {
+      if (!this.isPlaceholderName(row.fullName, row.phoneNumber || row.whatsappId || '')) names.set(row.id, row.fullName);
+    }
+    return names;
+  }
+
   async findAllByStore(storeId: string, filters: CustomerFilters = {}) {
     return this.findAllScoped(undefined, storeId, filters);
   }

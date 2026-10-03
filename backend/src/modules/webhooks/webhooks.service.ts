@@ -108,7 +108,7 @@ export class WebhooksService {
 
         for (const message of messages) {
           if (message?.id && await this.conversationsService.hasWhatsAppMessage(channel.store.id, message.id)) continue;
-          await this.processWhatsAppCustomerMessage(message, channel, metadata);
+          await this.processWhatsAppCustomerMessage(message, channel, metadata, undefined, this.getWhatsAppProfileName(value, message?.from));
         }
       }
     }
@@ -151,7 +151,7 @@ export class WebhooksService {
           }
           const targetStore = await this.metaWhatsAppService.resolveInboundStore(connection, message?.from || '');
           const channel = await this.metaWhatsAppService.findChannelForConnection(connection, targetStore.id);
-          await this.processWhatsAppCustomerMessage(message, channel, metadata, connection.id);
+          await this.processWhatsAppCustomerMessage(message, channel, metadata, connection.id, this.getWhatsAppProfileName(value, message?.from));
         }
       }
     }
@@ -232,7 +232,15 @@ export class WebhooksService {
     }
   }
 
-  private async processWhatsAppCustomerMessage(message: any, channel: any, webhookMetadata: any, metaConnectionId?: string) {
+  // Meta sends the sender's WhatsApp display name in value.contacts[].profile.name (profile photos are not exposed).
+  private getWhatsAppProfileName(value: any, from?: string): string | undefined {
+    const contacts: any[] = value?.contacts || [];
+    const contact = contacts.find((c) => c?.wa_id && from && String(c.wa_id) === String(from)) || contacts[0];
+    const name = String(contact?.profile?.name || '').trim();
+    return name || undefined;
+  }
+
+  private async processWhatsAppCustomerMessage(message: any, channel: any, webhookMetadata: any, metaConnectionId?: string, profileName?: string) {
     const storeId = channel.store.id;
     const currentStore = await this.channelsService.getStoreContext(storeId);
     const ownerId = currentStore.owner?.id || (typeof currentStore.owner === 'string' ? currentStore.owner : 'global');
@@ -242,10 +250,13 @@ export class WebhooksService {
     this.logger.log(`Incoming WhatsApp ${normalized.type} from ${normalized.from}: [${normalized.text}]`);
 
     const customer = await this.customersService.findOrCreate(currentStore, normalized.from, {
-      fullName: `WhatsApp ${normalized.from}`,
+      fullName: profileName || `WhatsApp ${normalized.from}`,
       phoneNumber: normalized.from,
       whatsappId: normalized.from,
     }, 'whatsapp');
+    // Replace our generated placeholder with the real WhatsApp name, without overwriting names the team edited.
+    await this.customersService.updateProfileName(customer, profileName, normalized.from);
+    const customerName = this.customersService.isPlaceholderName(customer.fullName, normalized.from) ? profileName : customer.fullName;
 
     const analysisText = normalized.text || `[${normalized.type}]`;
     const sentiment = await this.aiService.analyzeSentiment(analysisText);
@@ -261,6 +272,7 @@ export class WebhooksService {
       sentiment,
       tags,
       customerId: customer.id,
+      customerName,
     });
 
     if (ownerId) {
@@ -276,6 +288,7 @@ export class WebhooksService {
         sentiment,
         tags,
         customerId: customer.id,
+        customerName,
       });
     }
 

@@ -1,11 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
+import CustomerAvatar from '../components/CustomerAvatar';
 import api from '../api/client';
 import { getApiBaseUrl } from '../api/baseUrl';
 import CustomerProfile from '../components/CustomerProfile';
 import { useToast } from '../components/Toast';
 import { Button } from '../components/ui/Button';
-import { Card } from '../components/ui/Card';
 import { SkeletonCard } from '../components/ui/Skeleton';
 import {
   Search, 
@@ -38,7 +38,7 @@ import {
   FaFacebook, 
   FaMapMarkerAlt 
 } from 'react-icons/fa';
-import { format } from 'date-fns';
+import { differenceInCalendarDays, format, isToday, isYesterday } from 'date-fns';
 import { ar } from 'date-fns/locale';
 import { toEnglishDigits } from '@/lib/utils';
 
@@ -70,6 +70,7 @@ interface Conversation {
   storeId: string;
   platform: string;
   customerId?: string; // Link to Postgres
+  customerName?: string | null;
   lastMessage: string;
   lastMessageAt: string;
   messages: Message[];
@@ -172,6 +173,8 @@ export default function ConversationsPage() {
   const [showProfile, setShowProfile] = useState(false);
   
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
+  const [searchText, setSearchText] = useState('');
+  const [listTab, setListTab] = useState<'all' | 'unread'>('all');
   const [selectedPlatform, setSelectedPlatform] = useState<string | null>(null);
   const [selectedStoreId, setSelectedStoreId] = useState<string>('all');
   const [stores, setStores] = useState<Array<{ id: string; name: string }>>([]);
@@ -345,6 +348,7 @@ export default function ConversationsPage() {
           lastMessageAt: new Date().toISOString(),
           lastSentiment: payload.sentiment || updatedList[existingIdx].lastSentiment,
           customerId: payload.customerId || updatedList[existingIdx].customerId,
+          customerName: updatedList[existingIdx].customerName || payload.customerName,
           tags: Array.from(new Set([...oldTags, ...newTags])),
           messages: [...(updatedList[existingIdx].messages || []), newMessage],
           unreadCount: (!isOwnOrSystem && !isCurrentlyOpen) ? (updatedList[existingIdx].unreadCount || 0) + 1 : (updatedList[existingIdx].unreadCount || 0)
@@ -358,6 +362,7 @@ export default function ConversationsPage() {
           storeId: targetStoreId || '',
           platform: payload.platform || 'whatsapp',
           customerId: payload.customerId,
+          customerName: payload.customerName,
           lastMessage: payload.text || `[${payload.type || 'message'}]`,
           lastMessageAt: new Date().toISOString(),
           messages: [newMessage],
@@ -471,22 +476,37 @@ export default function ConversationsPage() {
     return map[tag] || 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20';
   };
 
-  const filteredConversations = conversations.filter(c => {
+  const scopedConversations = conversations.filter(c => {
     const tagMatch = !selectedTag || c.tags?.includes(selectedTag);
     const platformMatch = !selectedPlatform || c.platform === selectedPlatform;
     const storeMatch = selectedStoreId === 'all' || c.storeId === selectedStoreId;
-    return tagMatch && platformMatch && storeMatch;
+    const q = searchText.trim().toLowerCase();
+    const searchMatch = !q || [c.customerName, c.customerPhone, c.lastMessage].some(v => String(v || '').toLowerCase().includes(q));
+    return tagMatch && platformMatch && storeMatch && searchMatch;
   });
+  const unreadTotal = scopedConversations.filter(c => Number(c.unreadCount) > 0).length;
+  const filteredConversations = listTab === 'unread' ? scopedConversations.filter(c => Number(c.unreadCount) > 0) : scopedConversations;
+
+  // WhatsApp-style time: HH:mm today, "أمس" yesterday, weekday within a week, otherwise the date.
+  const formatListTime = (date?: string) => {
+    if (!date) return '';
+    const d = new Date(date);
+    if (isNaN(d.getTime())) return '';
+    if (isToday(d)) return safeFormatDate(d, 'HH:mm');
+    if (isYesterday(d)) return 'أمس';
+    if (differenceInCalendarDays(new Date(), d) < 7) return safeFormatDate(d, 'EEEE');
+    return safeFormatDate(d, 'dd/MM/yy');
+  };
 
   const allTags = Array.from(new Set([...defaultTags, ...customTags]));
 
   return (
     <div className="h-[calc(100vh-160px)] flex bg-labbaik-surface lg:rounded-[2.5rem] overflow-hidden border border-purple-100/60 dark:border-white/10 shadow-2xl animate-fade-in relative" dir="rtl">
       
-      <div className={`${showMobileList ? 'flex' : 'hidden'} lg:flex w-full lg:w-[450px] border-l border-purple-100/60 dark:border-white/10 flex-col bg-purple-50/20 dark:bg-white/2`}>
-        <div className="p-8 border-b border-purple-100/60 dark:border-white/10 space-y-6">
+      <div className={`${showMobileList ? 'flex' : 'hidden'} lg:flex w-full lg:w-[380px] border-l border-purple-100/60 dark:border-white/10 flex-col bg-purple-50/20 dark:bg-white/2`}>
+        <div className="px-4 pt-4 pb-3 border-b border-purple-100/60 dark:border-white/10 space-y-3">
           <div className="flex items-center justify-between">
-            <h2 className="text-xl font-black text-neutral-900 dark:text-white">صندوق الوارد الموحد</h2>
+            <h2 className="text-lg font-black text-neutral-900 dark:text-white flex items-center gap-2">المحادثات {unreadTotal > 0 && <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-labbaik-blue text-labbaik-on-accent tabular-nums">{unreadTotal} جديدة</span>}</h2>
             <div className="relative" ref={filterRef}>
               <Button onClick={() => setShowFilterDropdown(!showFilterDropdown)} variant={(selectedTag || selectedPlatform || selectedStoreId !== 'all') ? 'primary' : 'secondary'} size="md" className="gap-2"><Filter size={20} />{(selectedTag || selectedPlatform || selectedStoreId !== 'all') && <span className="w-2 h-2 bg-red-500 rounded-full"></span>}</Button>
               {showFilterDropdown && (
@@ -502,27 +522,76 @@ export default function ConversationsPage() {
               )}
             </div>
           </div>
-          <div className="relative group"><Search className="absolute right-5 top-1/2 -translate-y-1/2 text-neutral-400 group-focus-within:text-labbaik-blue transition-colors" size={18} /><input type="text" placeholder="البحث في المحادثات..." className="w-full bg-purple-50/30 dark:bg-white/5 border border-purple-100/60 dark:border-white/10 rounded-[1.5rem] py-4 pr-12 pl-6 text-sm text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-labbaik-blue/30 transition-all font-bold placeholder:text-neutral-400"/></div>
+          <div className="relative group">
+            <Search className="absolute right-4 top-1/2 -translate-y-1/2 text-neutral-400 group-focus-within:text-labbaik-blue transition-colors" size={16} />
+            <input type="text" value={searchText} onChange={(e) => setSearchText(e.target.value)} placeholder="ابحث بالاسم أو الرقم أو نص الرسالة..." className="w-full bg-purple-50/40 dark:bg-white/5 border border-purple-100/60 dark:border-white/10 rounded-xl py-2.5 pr-10 pl-9 text-[13px] text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-labbaik-blue/30 transition-all font-bold placeholder:text-neutral-400" />
+            {searchText && <button onClick={() => setSearchText('')} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-red-400"><CloseIcon size={14} /></button>}
+          </div>
+          <div className="flex items-center gap-1.5">
+            {([['all', 'الكل', scopedConversations.length], ['unread', 'غير مقروءة', unreadTotal]] as const).map(([key, label, count]) => (
+              <button key={key} onClick={() => setListTab(key)} className={`px-3 py-1.5 rounded-full text-[11px] font-black flex items-center gap-1.5 transition ${listTab === key ? 'bg-labbaik-blue text-labbaik-on-accent shadow-sm' : 'bg-purple-50 dark:bg-white/5 text-neutral-500 hover:text-labbaik-blue'}`}>
+                {label}
+                <span className={`tabular-nums text-[10px] px-1.5 rounded-full ${listTab === key ? 'bg-white/25' : 'bg-neutral-500/10'}`}>{count}</span>
+              </button>
+            ))}
+          </div>
         </div>
-        <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-3">
-          {loading ? <SkeletonCard count={5} className="rounded-[2.2rem]" /> : filteredConversations.length === 0 ? (<div className="p-10 text-center space-y-4"><MessageCircle size={40} className="mx-auto text-neutral-400 dark:text-neutral-600" /><p className="text-neutral-500 font-black text-sm">لا توجد نتائج.</p></div>) : filteredConversations.map((conv) => (
-            <Card 
-              key={conv._id} 
-              variant="labbaik"
-              isSelected={selectedChat?._id === conv._id}
-              interactive={true}
-              padding="md"
-              onClick={() => selectConversation(conv)}
-              className="flex flex-col gap-4 relative overflow-hidden group"
-            >
-              <div className="flex items-start gap-4">
-                <div className="relative shrink-0"><div className={`w-14 h-14 rounded-2xl flex items-center justify-center border transition-transform group-hover:scale-105 ${selectedChat?._id === conv._id ? 'bg-labbaik-blue/20 border-labbaik-blue/30' : 'bg-purple-50/50 dark:bg-white/5 border-purple-100/60 dark:border-white/10'}`}><UserIcon size={24} className={selectedChat?._id === conv._id ? 'text-labbaik-blue' : 'text-neutral-500 dark:text-neutral-400'} /></div><div className="absolute -bottom-1 -left-1 bg-labbaik-surface p-1.5 rounded-lg border border-purple-100/60 dark:border-white/10 shadow-sm">{getPlatformIcon(conv.platform)}</div></div>
-                <div className="flex-1 min-w-0 text-right space-y-1"><div className="flex justify-between items-center"><div className="flex items-center gap-2 truncate"><h4 className={`text-sm font-bold truncate ${conv.unreadCount && conv.unreadCount > 0 ? 'text-neutral-900 dark:text-white' : 'font-black text-neutral-700 dark:text-neutral-300'}`}>{conv.customerPhone}</h4>{getSentimentEmoji(conv.lastSentiment)}</div><span className="text-[9px] text-neutral-500 font-black">{safeFormatDate(conv.lastMessageAt || Date.now(), 'HH:mm')}</span></div><p className={`text-[11px] truncate ${conv.unreadCount && conv.unreadCount > 0 ? 'text-neutral-800 dark:text-gray-200 font-bold' : 'text-neutral-500 dark:text-neutral-400 font-medium'}`}>{conv.lastMessage}</p><span className="inline-flex mt-1 text-[8px] font-black px-2 py-0.5 rounded-md bg-labbaik-blue/10 text-labbaik-blue border border-labbaik-blue/20">{getStoreName(conv.storeId)}</span></div>
-              </div>
-              {conv.tags && conv.tags.length > 0 && (<div className="flex flex-wrap gap-1.5 pt-1">{conv.tags.map(tag => (<span key={tag} className={`text-[8px] font-black px-2 py-0.5 rounded-md border flex items-center gap-1 ${getTagColor(tag)}`}><Tag size={8} /> {tag.replace('_', ' ')}</span>))}</div>)}
-              {Number(conv.unreadCount) > 0 && <div className="absolute left-6 top-1/2 -translate-y-1/2 w-6 h-6 bg-labbaik-blue text-labbaik-on-accent text-[10px] font-black rounded-full flex items-center justify-center shadow-lg animate-bounce-short">{conv.unreadCount}</div>}
-            </Card>
-          ))}
+        <div className="flex-1 overflow-y-auto custom-scrollbar">
+          {loading ? <div className="p-3"><SkeletonCard count={8} className="rounded-2xl" /></div> : filteredConversations.length === 0 ? (
+            <div className="p-10 text-center space-y-3">
+              <MessageCircle size={36} className="mx-auto text-neutral-400 dark:text-neutral-600" />
+              <p className="text-neutral-500 font-black text-sm">{listTab === 'unread' ? 'لا توجد محادثات غير مقروءة 🎉' : 'لا توجد نتائج.'}</p>
+            </div>
+          ) : filteredConversations.map((conv) => {
+            const unread = Number(conv.unreadCount) > 0;
+            const selected = selectedChat?._id === conv._id;
+            const lastMsg = conv.messages?.[conv.messages.length - 1];
+            const lastFromMe = lastMsg?.from === 'me';
+            return (
+              <button
+                key={conv._id}
+                onClick={() => selectConversation(conv)}
+                className={`relative w-full flex items-center gap-3 px-4 py-2.5 text-right transition-colors border-b border-purple-100/50 dark:border-white/5 group
+                  ${selected ? 'bg-labbaik-blue/12 dark:bg-labbaik-blue/20' : unread ? 'bg-labbaik-blue/[0.05] dark:bg-labbaik-blue/10 hover:bg-labbaik-blue/10' : 'hover:bg-purple-50/70 dark:hover:bg-white/5'}`}
+              >
+                {(unread || selected) && <span className={`absolute right-0 top-2 bottom-2 w-1 rounded-l-full ${selected ? 'bg-labbaik-blue' : 'bg-labbaik-blue/70'}`} />}
+
+                <div className="relative shrink-0">
+                  <CustomerAvatar name={conv.customerName} seed={conv.customerPhone} size={46} className={`rounded-full ${!conv.customerName ? 'bg-purple-100/70 dark:bg-white/10' : ''}`} />
+                  <span className="absolute -bottom-0.5 -left-0.5 bg-labbaik-surface rounded-full p-[3px] shadow-sm ring-1 ring-purple-100/70 dark:ring-white/10">{getPlatformIcon(conv.platform)}</span>
+                </div>
+
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between gap-2">
+                    <h4 className={`text-[13.5px] truncate ${unread ? 'font-black text-neutral-900 dark:text-white' : 'font-bold text-neutral-800 dark:text-neutral-200'}`}>
+                      {conv.customerName || <span dir="ltr" className="tabular-nums">{conv.customerPhone}</span>}
+                    </h4>
+                    <span className={`text-[10.5px] shrink-0 tabular-nums ${unread ? 'text-labbaik-blue font-black' : 'text-neutral-400 font-bold'}`}>{formatListTime(conv.lastMessageAt)}</span>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-2 mt-0.5">
+                    <p className={`text-[12px] truncate flex items-center gap-1 ${unread ? 'text-neutral-800 dark:text-neutral-100 font-bold' : 'text-neutral-500 dark:text-neutral-400 font-medium'}`}>
+                      {lastFromMe && <span className={`shrink-0 ${lastMsg?.metadata?.status === 'read' ? 'text-sky-500' : lastMsg?.metadata?.status === 'failed' ? 'text-red-500' : 'text-neutral-400'}`}>{lastMsg?.metadata?.status === 'failed' ? <AlertTriangle size={13} /> : ['delivered', 'read'].includes(lastMsg?.metadata?.status) ? <CheckCheck size={14} /> : <Check size={13} />}</span>}
+                      <span className="truncate">{conv.lastMessage || '—'}</span>
+                    </p>
+                    <div className="flex items-center gap-1 shrink-0">
+                      {conv.lastSentiment === 'negative' && <span title="عميل منزعج" className="text-xs">😡</span>}
+                      {conv.aiEnabled === false && <span title="الذكاء متوقف" className="w-1.5 h-1.5 rounded-full bg-amber-400" />}
+                      {unread && <span className="min-w-5 h-5 px-1.5 rounded-full bg-labbaik-blue text-labbaik-on-accent text-[10px] font-black flex items-center justify-center tabular-nums shadow-sm">{Number(conv.unreadCount) > 99 ? '99+' : conv.unreadCount}</span>}
+                    </div>
+                  </div>
+
+                  {(stores.length > 1 || (conv.tags && conv.tags.length > 0)) && (
+                    <div className="flex items-center gap-1 mt-1 overflow-hidden">
+                      {stores.length > 1 && <span className="text-[9px] font-black px-1.5 py-px rounded bg-labbaik-blue/10 text-labbaik-blue shrink-0">{getStoreName(conv.storeId)}</span>}
+                      {conv.tags?.slice(0, 2).map(tag => <span key={tag} className={`text-[9px] font-bold px-1.5 py-px rounded border shrink-0 ${getTagColor(tag)}`}>{tag.replace('_', ' ')}</span>)}
+                      {(conv.tags?.length || 0) > 2 && <span className="text-[9px] font-bold text-neutral-400">+{(conv.tags?.length || 0) - 2}</span>}
+                    </div>
+                  )}
+                </div>
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -530,7 +599,7 @@ export default function ConversationsPage() {
         {selectedChat ? (
           <>
             <div className="h-24 px-8 flex items-center justify-between border-b border-purple-100/60 dark:border-white/10 backdrop-blur-md z-40 bg-labbaik-surface/80">
-              <div className="flex items-center gap-5"><button onClick={() => setShowMobileList(true)} className="lg:hidden p-2 text-neutral-400"><ChevronRight size={28} /></button><div className="w-12 h-12 bg-labbaik-blue/10 rounded-2xl flex items-center justify-center border border-labbaik-blue/20 shadow-lg"><UserIcon size={24} className="text-labbaik-blue" /></div><div className="space-y-1"><div className="flex items-center gap-2"><h3 className="font-black text-sm text-neutral-900 dark:text-white">{selectedChat.customerPhone}</h3><span className="text-[8px] font-black px-2 py-0.5 rounded-md bg-labbaik-blue/10 text-labbaik-blue border border-labbaik-blue/20">{getStoreName(selectedChat.storeId)}</span></div><div className="flex items-center gap-2">{selectedChat.tags?.map(tag => (<span key={tag} className={`text-[7px] font-black px-1.5 py-0.5 rounded border uppercase tracking-widest ${getTagColor(tag)}`}>{tag.replace('_', ' ')}</span>))}<button onClick={() => setShowTagEditor(true)} className="p-1 hover:bg-labbaik-blue/10 dark:hover:bg-white/5 rounded-md text-neutral-400 hover:text-labbaik-blue transition-all"><Plus size={12} /></button></div></div></div>
+              <div className="flex items-center gap-5"><button onClick={() => setShowMobileList(true)} className="lg:hidden p-2 text-neutral-400"><ChevronRight size={28} /></button>{selectedChat.customerName ? <CustomerAvatar name={selectedChat.customerName} seed={selectedChat.customerPhone} size={48} className="shadow-lg" /> : <div className="w-12 h-12 bg-labbaik-blue/10 rounded-2xl flex items-center justify-center border border-labbaik-blue/20 shadow-lg"><UserIcon size={24} className="text-labbaik-blue" /></div>}<div className="space-y-1"><div className="flex items-center gap-2"><h3 className="font-black text-sm text-neutral-900 dark:text-white">{selectedChat.customerName || selectedChat.customerPhone}</h3>{selectedChat.customerName && <span className="text-[11px] font-bold text-neutral-400 tabular-nums" dir="ltr">{selectedChat.customerPhone}</span>}<span className="text-[8px] font-black px-2 py-0.5 rounded-md bg-labbaik-blue/10 text-labbaik-blue border border-labbaik-blue/20">{getStoreName(selectedChat.storeId)}</span></div><div className="flex items-center gap-2">{selectedChat.tags?.map(tag => (<span key={tag} className={`text-[7px] font-black px-1.5 py-0.5 rounded border uppercase tracking-widest ${getTagColor(tag)}`}>{tag.replace('_', ' ')}</span>))}<button onClick={() => setShowTagEditor(true)} className="p-1 hover:bg-labbaik-blue/10 dark:hover:bg-white/5 rounded-md text-neutral-400 hover:text-labbaik-blue transition-all"><Plus size={12} /></button></div></div></div>
               <div className="flex items-center gap-6">
                 {selectedChat.customerId && (<Button onClick={() => setShowProfile(!showProfile)} variant={showProfile ? 'primary' : 'secondary'} size="md"><Contact size={20} /></Button>)}
                 <div onClick={toggleAi} className={`flex items-center gap-3 px-4 py-2.5 rounded-2xl cursor-pointer transition-all border group ${selectedChat.aiEnabled !== false ? 'bg-labbaik-blue/10 border-labbaik-blue/30 text-labbaik-blue' : 'bg-red-500/10 border-red-500/30 text-red-400'}`}><div className={`w-2 h-2 rounded-full ${selectedChat.aiEnabled !== false ? 'bg-labbaik-blue animate-pulse shadow-[0_0_8px_#643B89]' : 'bg-red-500'}`}></div><span className="text-[10px] font-black uppercase tracking-widest">{selectedChat.aiEnabled !== false ? 'لبيك نشط' : 'الذكاء معطل'}</span></div>
