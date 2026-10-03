@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException, InternalServerErrorException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, InternalServerErrorException, OnModuleInit } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Conversation } from './schemas/conversation.schema';
@@ -8,9 +8,10 @@ import { CustomersService } from '../customers/customers.service';
 import { EventsGateway } from '../events/events.gateway';
 import { BillingService } from '../billing/billing.service';
 import { MetaUsageType } from '../billing/entities/pricing-rule.entity';
+import { normalizePhoneNumber } from '../../common/utils/phone.util';
 
 @Injectable()
-export class ConversationsService {
+export class ConversationsService implements OnModuleInit {
   private readonly logger = new Logger(ConversationsService.name);
 
   constructor(
@@ -23,7 +24,68 @@ export class ConversationsService {
     private readonly billingService: BillingService,
   ) {}
 
+  async onModuleInit() {
+    try {
+      await this.mergeDuplicateWhatsAppConversations();
+      // Remove the old "AI reply failed" system notes; auto-reply now stops silently instead.
+      await this.conversationModel.updateMany(
+        { 'messages.type': 'system_error', 'messages.text': /^تعذر توليد رد تلقائي/ },
+        { $pull: { messages: { type: 'system_error', text: /^تعذر توليد رد تلقائي/ } } } as any,
+      );
+      const stalePreviews = await this.conversationModel.find({ lastMessage: /^تعذر توليد رد تلقائي/ }).exec();
+      for (const conv of stalePreviews) {
+        const last = conv.messages?.[conv.messages.length - 1];
+        await this.conversationModel.updateOne({ _id: conv._id }, { $set: { lastMessage: last?.text || '' } });
+      }
+    } catch (error) {
+      this.logger.error('Failed to merge duplicate WhatsApp conversations', error?.stack);
+    }
+  }
+
+  private normalizeCustomerPhone(customerPhone: string, platform: string) {
+    return platform === 'whatsapp' ? normalizePhoneNumber(customerPhone) : customerPhone;
+  }
+
+  /**
+   * Merges WhatsApp conversations saved under a local number format (e.g. 05XXXXXXXX)
+   * into the conversation for the international number, so one number shows as one conversation.
+   */
+  async mergeDuplicateWhatsAppConversations() {
+    const candidates = await this.conversationModel.find({ platform: 'whatsapp', customerPhone: { $not: /^9[0-9]{8,}$/ } }).exec();
+    let merged = 0;
+    for (const source of candidates) {
+      const phone = normalizePhoneNumber(source.customerPhone);
+      if (!phone || phone === source.customerPhone) continue;
+      const target = await this.conversationModel.findOne({
+        _id: { $ne: source._id }, platform: 'whatsapp', storeId: source.storeId, customerPhone: phone, status: source.status,
+      }).exec();
+      if (!target) {
+        await this.conversationModel.updateOne({ _id: source._id }, { $set: { customerPhone: phone } });
+        continue;
+      }
+      const messages = [...(target.messages || []), ...(source.messages || [])]
+        .sort((a: any, b: any) => (Number(a.timestamp) || 0) - (Number(b.timestamp) || 0));
+      const latest = [target, source].sort((a, b) => (new Date(b.lastMessageAt || 0).getTime()) - (new Date(a.lastMessageAt || 0).getTime()))[0];
+      await this.conversationModel.updateOne({ _id: target._id }, {
+        $set: {
+          messages,
+          unreadCount: (target.unreadCount || 0) + (source.unreadCount || 0),
+          tags: Array.from(new Set([...(target.tags || []), ...(source.tags || [])])),
+          lastMessage: latest.lastMessage,
+          lastMessageAt: latest.lastMessageAt,
+          customerId: target.customerId || source.customerId,
+          metaConnectionId: target.metaConnectionId || source.metaConnectionId,
+        },
+      });
+      await this.conversationModel.deleteOne({ _id: source._id });
+      merged++;
+    }
+    if (merged) this.logger.log(`Merged ${merged} duplicate WhatsApp conversation(s)`);
+    return merged;
+  }
+
   async addMessage(customerPhone: string, storeId: string, platform: string, messageData: any) {
+    customerPhone = this.normalizeCustomerPhone(customerPhone, platform);
     const updateQuery: any = {
       $push: { messages: messageData },
       $set: { 
@@ -199,6 +261,7 @@ export class ConversationsService {
   }
 
   async isAiEnabled(customerPhone: string, storeId: string, platform: string): Promise<boolean> {
+    customerPhone = this.normalizeCustomerPhone(customerPhone, platform);
     const conversation = await this.conversationModel.findOne({ customerPhone, storeId, platform, status: 'open' });
     if (!conversation) return true;
     if (conversation.aiEnabled === false && conversation.aiDisabledUntil) {

@@ -1,3 +1,4 @@
+import { normalizePhoneNumber } from '../../common/utils/phone.util';
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Brackets, In, Repository } from 'typeorm';
@@ -396,6 +397,6 @@ export class CustomersService {
   }
 
   private normalizePhone(value: string) {
-    return String(value || '').replace(/[^0-9]/g, '');
+    return normalizePhoneNumber(value);
   }
 }

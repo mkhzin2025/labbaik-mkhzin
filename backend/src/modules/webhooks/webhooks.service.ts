@@ -475,9 +475,9 @@ export class WebhooksService {
   private async processAiResponse(from: string, text: string, storeId: string, platform: string, store: any, ownerId: string, conversation?: any) {
     const aiResponseText = await this.aiResponse(text, store);
     if (!aiResponseText) {
-      // AI failed on our side: don't message the customer, stop auto-reply and leave it to a human agent.
+      // AI failed on our side: silently stop auto-reply for this conversation and leave it to a human agent.
+      this.logger.warn(`AI reply failed for ${from} (store ${storeId}); auto-reply disabled for this conversation`);
       if (conversation?._id) await this.conversationsService.toggleAi(String(conversation._id), false);
-      await this.conversationsService.addSystemError(from, storeId, platform, 'تعذر توليد رد تلقائي، تم إيقاف الذكاء لهذه المحادثة. يرجى الرد يدوياً.');
       return;
     }
     const availableChannels = await this.channelsService.findAllByStore(storeId, { maskCredentials: false });

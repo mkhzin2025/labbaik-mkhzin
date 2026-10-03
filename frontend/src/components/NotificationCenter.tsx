@@ -8,12 +8,16 @@ import {
   ExternalLink,
   CheckCheck,
   Loader2,
-  Monitor
+  Monitor,
+  Volume2,
+  VolumeX
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { ar } from 'date-fns/locale';
 import { toEnglishDigits } from '@/lib/utils';
 import { Link, useNavigate } from 'react-router-dom';
+
+const SOUND_PREF_KEY = 'labbaik_notification_sound';
 
 let audioContext: AudioContext | null = null;
 
@@ -24,30 +28,48 @@ const getAudioContext = () => {
   return audioContext;
 };
 
-const unlockNotificationSound = () => {
+const isSoundUnlocked = () => audioContext?.state === 'running';
+
+// Must be called from a user gesture (click/key): browsers keep audio blocked until then.
+const unlockNotificationSound = async () => {
   const ctx = getAudioContext();
-  if (ctx && ctx.state === 'suspended') ctx.resume().catch(() => {});
+  if (!ctx) return false;
+  try {
+    if (ctx.state !== 'running') await ctx.resume();
+    // Play a silent buffer so Safari/iOS fully unlocks the context.
+    const source = ctx.createBufferSource();
+    source.buffer = ctx.createBuffer(1, 1, 22050);
+    source.connect(ctx.destination);
+    source.start(0);
+  } catch {
+    return false;
+  }
+  return ctx.state === 'running';
+};
+
+const readSoundPref = () => {
+  try { return localStorage.getItem(SOUND_PREF_KEY) !== 'off'; } catch { return true; }
 };
 
 // Two-tone chime generated locally, so it doesn't depend on an external audio file.
 const playNotificationSound = () => {
   const ctx = getAudioContext();
-  if (!ctx) return;
-  if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+  if (!ctx || ctx.state !== 'running') return false;
   const now = ctx.currentTime;
   [880, 1320].forEach((freq, i) => {
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
-    const start = now + i * 0.15;
-    osc.type = 'sine';
+    const start = now + i * 0.16;
+    osc.type = 'triangle';
     osc.frequency.value = freq;
     gain.gain.setValueAtTime(0.0001, start);
-    gain.gain.exponentialRampToValueAtTime(0.25, start + 0.02);
-    gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.3);
+    gain.gain.exponentialRampToValueAtTime(0.5, start + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.35);
     osc.connect(gain).connect(ctx.destination);
     osc.start(start);
-    osc.stop(start + 0.32);
+    osc.stop(start + 0.37);
   });
+  return true;
 };
 
 interface Notification {
@@ -67,18 +89,31 @@ export default function NotificationCenter({ socket }: { socket: any }) {
   const [browserPermission, setBrowserPermission] = useState<NotificationPermission>(
     typeof window !== 'undefined' && 'Notification' in window ? window.Notification.permission : 'denied'
   );
+  const [soundEnabled, setSoundEnabled] = useState(readSoundPref);
+  const [soundUnlocked, setSoundUnlocked] = useState(isSoundUnlocked);
+  const soundEnabledRef = useRef(soundEnabled);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
 
   const unreadCount = notifications.filter(n => !n.isRead).length;
 
   useEffect(() => {
+    soundEnabledRef.current = soundEnabled;
+    try { localStorage.setItem(SOUND_PREF_KEY, soundEnabled ? 'on' : 'off'); } catch { }
+  }, [soundEnabled]);
+
+  useEffect(() => {
     fetchNotifications();
 
-    // Browsers block audio until the user interacts with the page; unlock on first gesture.
-    const unlock = () => unlockNotificationSound();
-    window.addEventListener('pointerdown', unlock, { once: true });
-    window.addEventListener('keydown', unlock, { once: true });
+    // Browsers block audio until the user interacts with the page; keep trying on every gesture until unlocked.
+    const events = ['pointerdown', 'keydown', 'touchstart'] as const;
+    const unlock = async () => {
+      if (await unlockNotificationSound()) {
+        setSoundUnlocked(true);
+        events.forEach(e => window.removeEventListener(e, unlock));
+      }
+    };
+    events.forEach(e => window.addEventListener(e, unlock));
 
     const handleClickOutside = (event: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
@@ -88,8 +123,7 @@ export default function NotificationCenter({ socket }: { socket: any }) {
     document.addEventListener('mousedown', handleClickOutside);
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
-      window.removeEventListener('pointerdown', unlock);
-      window.removeEventListener('keydown', unlock);
+      events.forEach(e => window.removeEventListener(e, unlock));
     };
   }, []);
 
@@ -138,12 +172,20 @@ export default function NotificationCenter({ socket }: { socket: any }) {
     }
   };
 
+  const enableSound = async () => {
+    const ok = await unlockNotificationSound();
+    setSoundUnlocked(ok);
+    setSoundEnabled(true);
+    if (ok) playNotificationSound();
+  };
+
   const showBrowserNotification = (title: string, body: string, tag: string, link?: string) => {
-    playNotificationSound();
+    const played = soundEnabledRef.current && playNotificationSound();
 
     if ('Notification' in window && window.Notification.permission === 'granted' && document.hidden) {
       try {
-        const n = new window.Notification(title, { body, tag, dir: 'rtl', icon: '/favicon.svg' });
+        // If the page sound is blocked, let the OS play its notification sound instead.
+        const n = new window.Notification(title, { body, tag, dir: 'rtl', icon: '/favicon.svg', silent: played || !soundEnabledRef.current });
         n.onclick = () => {
           window.focus();
           setIsOpen(false);
@@ -180,7 +222,16 @@ export default function NotificationCenter({ socket }: { socket: any }) {
   };
 
   return (
-    <div className="relative" ref={dropdownRef}>
+    <div className="relative flex items-center gap-2" ref={dropdownRef}>
+      {soundEnabled && !soundUnlocked && (
+        <button
+          onClick={enableSound}
+          className="flex items-center gap-1.5 rounded-2xl border border-amber-300/70 bg-amber-50 px-3 py-2 text-[11px] font-black text-amber-700 shadow-sm transition-all hover:scale-105 dark:border-amber-400/30 dark:bg-amber-500/10 dark:text-amber-300 animate-pulse"
+          title="المتصفح يمنع الصوت حتى تضغط على الصفحة"
+        >
+          <VolumeX size={14} /> تفعيل الصوت
+        </button>
+      )}
       <button
         onClick={() => setIsOpen(!isOpen)}
         className="relative p-2.5 lg:p-3 bg-labbaik-surface border border-purple-100/80 dark:border-white/10 rounded-2xl text-neutral-600 hover:bg-labbaik-blue/10 hover:border-labbaik-blue/30 hover:text-labbaik-blue dark:text-neutral-300 dark:hover:bg-white/10 dark:hover:text-white transition-all shadow-sm hover:scale-105"
@@ -212,6 +263,21 @@ export default function NotificationCenter({ socket }: { socket: any }) {
               </button>
             </div>
           )}
+
+          <div className="px-6 py-3 border-b border-purple-100/60 dark:border-white/10 flex items-center justify-between gap-3">
+            <button
+              onClick={() => (soundEnabled ? setSoundEnabled(false) : enableSound())}
+              className="flex items-center gap-2 text-[11px] font-black text-neutral-600 dark:text-neutral-300 hover:text-labbaik-blue transition-colors"
+            >
+              {soundEnabled ? <Volume2 size={14} className="text-labbaik-blue" /> : <VolumeX size={14} />}
+              صوت الإشعارات: {soundEnabled ? 'مفعل' : 'مغلق'}
+            </button>
+            {soundEnabled && (
+              <button onClick={enableSound} className="text-[10px] font-bold text-labbaik-blue hover:underline">
+                اختبار الصوت
+              </button>
+            )}
+          </div>
 
           <div className="p-6 border-b border-purple-100/60 dark:border-white/10 flex items-center justify-between">
             <h3 className="text-sm font-black text-neutral-900 dark:text-white">مركز التنبيهات</h3>

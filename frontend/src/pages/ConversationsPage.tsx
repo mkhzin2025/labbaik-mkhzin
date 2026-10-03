@@ -311,7 +311,8 @@ export default function ConversationsPage() {
 
   const handleIncomingRealtimeMessage = (payload: any) => {
     if (!payload) return;
-    const targetPhone = payload.from === 'me' ? payload.customerPhone : payload.from;
+    const isOwnOrSystem = payload.from === 'me' || payload.from === 'system';
+    const targetPhone = isOwnOrSystem ? payload.customerPhone : payload.from;
     const targetStoreId = payload.storeId as string | undefined;
     if (!targetPhone) return;
 
@@ -346,7 +347,7 @@ export default function ConversationsPage() {
           customerId: payload.customerId || updatedList[existingIdx].customerId,
           tags: Array.from(new Set([...oldTags, ...newTags])),
           messages: [...(updatedList[existingIdx].messages || []), newMessage],
-          unreadCount: (payload.from !== 'me' && !isCurrentlyOpen) ? (updatedList[existingIdx].unreadCount || 0) + 1 : (updatedList[existingIdx].unreadCount || 0)
+          unreadCount: (!isOwnOrSystem && !isCurrentlyOpen) ? (updatedList[existingIdx].unreadCount || 0) + 1 : (updatedList[existingIdx].unreadCount || 0)
         };
         updatedList.splice(existingIdx, 1);
         return [updatedConv, ...updatedList];

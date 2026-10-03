@@ -1,3 +1,4 @@
+import { normalizePhoneNumber } from '../../common/utils/phone.util';
 import { BadRequestException, Injectable, Logger, NotFoundException, OnModuleInit, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -732,7 +733,7 @@ export class MetaWhatsAppService implements OnModuleInit {
   }
 
   private normalizePhone(value: string) {
-    return String(value || '').replace(/[^0-9]/g, '');
+    return normalizePhoneNumber(value);
   }
 
   private metaErrorMessage(error: any) {
