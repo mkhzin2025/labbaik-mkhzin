@@ -13,7 +13,42 @@ import {
 import { formatDistanceToNow } from 'date-fns';
 import { ar } from 'date-fns/locale';
 import { toEnglishDigits } from '@/lib/utils';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
+
+let audioContext: AudioContext | null = null;
+
+const getAudioContext = () => {
+  const Ctx = window.AudioContext || (window as any).webkitAudioContext;
+  if (!Ctx) return null;
+  if (!audioContext) audioContext = new Ctx();
+  return audioContext;
+};
+
+const unlockNotificationSound = () => {
+  const ctx = getAudioContext();
+  if (ctx && ctx.state === 'suspended') ctx.resume().catch(() => {});
+};
+
+// Two-tone chime generated locally, so it doesn't depend on an external audio file.
+const playNotificationSound = () => {
+  const ctx = getAudioContext();
+  if (!ctx) return;
+  if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+  const now = ctx.currentTime;
+  [880, 1320].forEach((freq, i) => {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    const start = now + i * 0.15;
+    osc.type = 'sine';
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(0.0001, start);
+    gain.gain.exponentialRampToValueAtTime(0.25, start + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.3);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(start);
+    osc.stop(start + 0.32);
+  });
+};
 
 interface Notification {
   id: string;
@@ -29,20 +64,21 @@ export default function NotificationCenter({ socket }: { socket: any }) {
   const [isOpen, setIsOpen] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
-  const [browserPermission, setBrowserPermission] = useState<NotificationPermission>(Notification.permission);
+  const [browserPermission, setBrowserPermission] = useState<NotificationPermission>(
+    typeof window !== 'undefined' && 'Notification' in window ? window.Notification.permission : 'denied'
+  );
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const navigate = useNavigate();
 
   const unreadCount = notifications.filter(n => !n.isRead).length;
 
   useEffect(() => {
     fetchNotifications();
 
-    if (socket) {
-      socket.on('notification', (newNotif: Notification) => {
-        setNotifications(prev => [newNotif, ...prev]);
-        showBrowserNotification(newNotif);
-      });
-    }
+    // Browsers block audio until the user interacts with the page; unlock on first gesture.
+    const unlock = () => unlockNotificationSound();
+    window.addEventListener('pointerdown', unlock, { once: true });
+    window.addEventListener('keydown', unlock, { once: true });
 
     const handleClickOutside = (event: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
@@ -50,7 +86,35 @@ export default function NotificationCenter({ socket }: { socket: any }) {
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      window.removeEventListener('pointerdown', unlock);
+      window.removeEventListener('keydown', unlock);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!socket) return;
+
+    const onNotification = (newNotif: Notification) => {
+      setNotifications(prev => [newNotif, ...prev]);
+      showBrowserNotification(newNotif.title, newNotif.message, newNotif.id);
+    };
+
+    // Incoming customer messages (outgoing ones have from 'me', system notes have from 'system').
+    const onNewMessage = (payload: any) => {
+      if (!payload || payload.from === 'me' || payload.from === 'system' || payload.isManual) return;
+      const sender = payload.customerName || payload.from || payload.customerPhone || 'عميل';
+      const body = payload.text || 'رسالة جديدة';
+      showBrowserNotification(`رسالة جديدة من ${sender}`, body, `msg_${payload.from}_${payload.timestamp || Date.now()}`, '/dashboard/conversations');
+    };
+
+    socket.on('notification', onNotification);
+    socket.on('new_message', onNewMessage);
+    return () => {
+      socket.off('notification', onNotification);
+      socket.off('new_message', onNewMessage);
+    };
   }, [socket]);
 
   const fetchNotifications = async () => {
@@ -65,31 +129,30 @@ export default function NotificationCenter({ socket }: { socket: any }) {
   };
 
   const requestPermission = async () => {
-    const result = await Notification.requestPermission();
+    if (!('Notification' in window)) return;
+    unlockNotificationSound();
+    const result = await window.Notification.requestPermission();
     setBrowserPermission(result);
     if (result === 'granted') {
-      new Notification("لبيك الذكي", { body: "تم تفعيل إشعارات سطح المكتب بنجاح! 🎉" });
+      new window.Notification("لبيك الذكي", { body: "تم تفعيل إشعارات سطح المكتب بنجاح! 🎉" });
     }
   };
 
-  const playNotificationSound = () => {
-    const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2354/2354-preview.mp3');
-    audio.play().catch(() => console.log('Audio blocked'));
-  };
-
-  const showBrowserNotification = (notif: Notification) => {
+  const showBrowserNotification = (title: string, body: string, tag: string, link?: string) => {
     playNotificationSound();
 
-    if (Notification.permission === 'granted') {
-      const n = new Notification(notif.title, {
-        body: notif.message,
-        tag: notif.id,
-        dir: 'rtl'
-      });
-      n.onclick = () => {
-        window.focus();
-        setIsOpen(false);
-      };
+    if ('Notification' in window && window.Notification.permission === 'granted' && document.hidden) {
+      try {
+        const n = new window.Notification(title, { body, tag, dir: 'rtl', icon: '/favicon.svg' });
+        n.onclick = () => {
+          window.focus();
+          setIsOpen(false);
+          if (link) navigate(link);
+          n.close();
+        };
+      } catch {
+        // Some mobile browsers only allow notifications through a service worker.
+      }
     }
   };
 

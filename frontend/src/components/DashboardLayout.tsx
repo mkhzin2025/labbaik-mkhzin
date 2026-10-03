@@ -92,8 +92,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const sidebarLogo = theme === 'light' ? LogoAltImage : LogoImage;
 
   useEffect(() => {
-    if (Notification.permission === 'default') {
-      Notification.requestPermission();
+    if ('Notification' in window && window.Notification.permission === 'default') {
+      window.Notification.requestPermission().catch(() => {});
     }
     const token = localStorage.getItem('access_token');
     if (token) {
