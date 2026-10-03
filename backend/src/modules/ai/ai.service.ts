@@ -32,7 +32,7 @@ export class AiService implements OnModuleInit {
     }
   }
 
-  async generateResponse(customerMessage: string, storeContext: any): Promise<string> {
+  async generateResponse(customerMessage: string, storeContext: any): Promise<string | null> {
     const systemPrompt = `
       أنت "لبيك"، مساعد ذكاء اصطناعي ذكي لمتجر "${storeContext.name}".
       
@@ -57,7 +57,8 @@ export class AiService implements OnModuleInit {
       if (response) return response;
     }
 
-    return `أعتذر منك، واجهت مشكلة في معالجة طلبك حالياً. سأقوم بتحويلك للموظف المختص.`;
+    // All models failed: return null so the caller stops auto-replying instead of sending an apology.
+    return null;
   }
 
   async analyzeSentiment(message: string): Promise<'positive' | 'neutral' | 'negative'> {
