@@ -70,7 +70,7 @@ export default function DashboardHome() {
 
   if (loading) {
     return (
-      <div className="space-y-10 animate-fade-in" dir="rtl">
+      <div className="space-y-8 animate-fade-in" dir="rtl">
         {/* Loading skeleton for header */}
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
           <div className="space-y-3">
@@ -80,8 +80,24 @@ export default function DashboardHome() {
           <div className="h-11 w-48 bg-neutral-200/80 dark:bg-neutral-800/80 rounded-2xl animate-pulse"></div>
         </div>
 
+        {/* Loading skeleton for primary stats */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-5">
+          {Array.from({ length: 4 }, (_, index) => (
+            <div key={index} className="space-y-5 py-4">
+              <div className="flex justify-between">
+                <Skeleton width={48} height={48} className="rounded-2xl" />
+                <Skeleton width={24} height={24} className="rounded-lg" />
+              </div>
+              <div className="space-y-3">
+                <Skeleton width="50%" height="0.875rem" className="rounded-md" />
+                <Skeleton width="75%" height="2rem" className="rounded-lg" />
+              </div>
+            </div>
+          ))}
+        </div>
+
         {/* Loading skeleton for performance cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 lg:gap-5">
           {Array.from({ length: 3 }, (_, index) => (
             <div key={index} className="space-y-5 py-4">
               <div className="flex justify-between">
@@ -97,24 +113,8 @@ export default function DashboardHome() {
           ))}
         </div>
 
-        {/* Loading skeleton for stat cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-          {Array.from({ length: 4 }, (_, index) => (
-            <div key={index} className="space-y-5 py-4">
-              <div className="flex justify-between">
-                <Skeleton width={48} height={48} className="rounded-2xl" />
-                <Skeleton width={24} height={24} className="rounded-lg" />
-              </div>
-              <div className="space-y-3">
-                <Skeleton width="50%" height="0.875rem" className="rounded-md" />
-                <Skeleton width="75%" height="2rem" className="rounded-lg" />
-              </div>
-            </div>
-          ))}
-        </div>
-
         {/* Loading skeleton for charts */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-5">
           <div className="lg:col-span-2 py-4 space-y-6">
             <div className="h-7 w-48 bg-neutral-200/80 dark:bg-neutral-800/80 rounded-xl animate-pulse"></div>
             <div className="h-64 md:h-80 w-full bg-neutral-100 dark:bg-neutral-800/40 rounded-2xl animate-pulse"></div>
@@ -171,33 +171,50 @@ export default function DashboardHome() {
   ];
 
   return (
-    <div className="space-y-10 animate-fade-in" dir="rtl">
+    <div className="space-y-8 animate-fade-in" dir="rtl">
       {/* Welcome Header */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
         <div>
           <h1 className="text-3xl lg:text-4xl font-black text-neutral-900 dark:text-white tracking-tight">
-            لوحة القيادة الذكية 📈
+            لوحة القيادة الذكية
           </h1>
           <p className="text-neutral-600 dark:text-neutral-400 mt-2 font-medium text-base leading-relaxed">
             نظرة عامة على أداء "لبيك" ونجاعة الذكاء الاصطناعي في متجرك.
           </p>
         </div>
         <div className="flex items-center gap-3">
-          <Activity size={18} className="text-success-500 flex-shrink-0" />
-          <span className="text-sm font-semibold text-neutral-700 dark:text-neutral-300">النظام يعمل بكفاءة قصوى</span>
+          <div className="flex items-center gap-2 rounded-full border border-success-500/20 bg-success-500/5 px-3 py-2">
+            <Activity size={16} className="text-success-600 dark:text-success-400 flex-shrink-0" />
+            <span className="text-sm font-semibold text-success-700 dark:text-success-300">النظام يعمل بكفاءة قصوى</span>
+          </div>
         </div>
       </div>
 
+      {/* Primary Stats Grid */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-5">
+        {statCards.map((stat) => (
+          <StatCard
+            key={stat.label}
+            icon={stat.icon}
+            label={stat.label}
+            value={formatNumber(stat.value)}
+            iconBgColor={stat.iconBgColor}
+            iconColor={stat.iconColor}
+            className="rounded-2xl border border-purple-100/70 bg-labbaik-surface p-4 shadow-sm dark:border-white/10 dark:shadow-none sm:p-5"
+          />
+        ))}
+      </div>
+
       {/* Speed & Savings Performance Banner */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 lg:gap-5">
         {/* Hours Saved Card */}
-        <Card variant="plain" padding="none">
-          <CardBody className="space-y-6">
+        <Card variant="default" padding="none" className="rounded-2xl">
+          <CardBody className="space-y-5 p-5 sm:p-6">
             <div className="flex justify-between items-start">
               <div className="p-3 bg-primary-500/10 rounded-2xl">
                 <Timer className="text-labbaik-blue" size={24} />
               </div>
-              <span className="text-xs font-bold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider">Efficiency</span>
+              <span className="text-xs font-bold text-neutral-500 dark:text-neutral-400">الكفاءة</span>
             </div>
             <div>
               <h2 className="text-neutral-500 dark:text-neutral-400 text-sm font-semibold mb-2">الوقت الموفر يدوياً</h2>
@@ -211,8 +228,8 @@ export default function DashboardHome() {
         </Card>
 
         {/* Speed Comparison Card */}
-        <Card variant="plain" padding="none">
-          <CardBody className="space-y-6">
+        <Card variant="default" padding="none" className="rounded-2xl">
+          <CardBody className="space-y-5 p-5 sm:p-6">
             <div className="flex justify-between items-center">
               <h2 className="text-xs font-bold text-neutral-500 dark:text-neutral-400 uppercase flex items-center gap-2">
                 <Zap size={15} className="text-warning-500" />
@@ -243,8 +260,8 @@ export default function DashboardHome() {
         </Card>
 
         {/* Conversion Rate Card */}
-        <Card variant="plain" padding="none">
-          <CardBody className="flex flex-col justify-center items-center text-center space-y-4">
+        <Card variant="default" padding="none" className="rounded-2xl">
+          <CardBody className="flex flex-col justify-center items-center text-center space-y-4 p-5 sm:p-6">
             <div className="w-16 h-16 bg-success-500/10 rounded-2xl flex items-center justify-center border border-success-500/20">
               <TrendingUp className="text-success-500" size={32} />
             </div>
@@ -256,26 +273,11 @@ export default function DashboardHome() {
         </Card>
       </div>
 
-      {/* Primary Stats Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-        {statCards.map((stat, i) => (
-          <StatCard
-            key={i}
-            icon={stat.icon}
-            label={stat.label}
-            value={formatNumber(stat.value)}
-            iconBgColor={stat.iconBgColor}
-            iconColor={stat.iconColor}
-            trend="up"
-          />
-        ))}
-      </div>
-
       {/* Charts Section */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-5">
         {/* Main Timeline Chart */}
-        <Card variant="plain" padding="none" className="lg:col-span-2">
-          <CardBody className="space-y-8">
+        <Card variant="default" padding="none" className="min-w-0 rounded-2xl lg:col-span-2">
+          <CardBody className="space-y-6 p-5 sm:p-6">
             <div className="flex items-center justify-between">
               <h2 className="text-xl font-bold text-neutral-900 dark:text-white flex items-center gap-3">
                 <TrendingUp className="text-labbaik-blue" size={20} />
@@ -314,8 +316,8 @@ export default function DashboardHome() {
         </Card>
 
         {/* Sentiment Pie Chart */}
-        <Card variant="plain" padding="none">
-          <CardBody className="space-y-8">
+        <Card variant="default" padding="none" className="min-w-0 rounded-2xl">
+          <CardBody className="space-y-6 p-5 sm:p-6">
             <h2 className="text-lg font-bold text-neutral-900 dark:text-white flex items-center gap-3">
               <Smile className="text-success-500" size={20} />
               مؤشر سعادة العملاء
@@ -370,8 +372,8 @@ export default function DashboardHome() {
         </Card>
 
         {/* Platform Bar Chart */}
-        <Card variant="plain" padding="none" className="lg:col-span-3">
-          <CardBody className="space-y-8">
+        <Card variant="default" padding="none" className="min-w-0 rounded-2xl lg:col-span-3">
+          <CardBody className="space-y-6 p-5 sm:p-6">
             <h2 className="text-lg font-bold text-neutral-900 dark:text-white flex items-center gap-3">
               <BarChart3 className="text-warning-500" size={20} />
               توزيع القنوات الأكثر تفاعلاً
