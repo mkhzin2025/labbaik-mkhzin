@@ -501,7 +501,7 @@ export default function ConversationsPage() {
   const allTags = Array.from(new Set([...defaultTags, ...customTags]));
 
   return (
-    <div className="h-[calc(100vh-160px)] flex bg-labbaik-surface lg:rounded-[2.5rem] overflow-hidden border border-purple-100/60 dark:border-white/10 shadow-2xl animate-fade-in relative" dir="rtl">
+    <div className="h-full min-h-0 flex bg-labbaik-surface overflow-hidden animate-fade-in relative" dir="rtl">
       
       <div className={`${showMobileList ? 'flex' : 'hidden'} lg:flex w-full lg:w-[380px] border-l border-purple-100/60 dark:border-white/10 flex-col bg-purple-50/20 dark:bg-white/2`}>
         <div className="px-4 pt-4 pb-3 border-b border-purple-100/60 dark:border-white/10 space-y-3">
@@ -510,7 +510,7 @@ export default function ConversationsPage() {
             <div className="relative" ref={filterRef}>
               <Button onClick={() => setShowFilterDropdown(!showFilterDropdown)} variant={(selectedTag || selectedPlatform || selectedStoreId !== 'all') ? 'primary' : 'secondary'} size="md" className="gap-2"><Filter size={20} />{(selectedTag || selectedPlatform || selectedStoreId !== 'all') && <span className="w-2 h-2 bg-red-500 rounded-full"></span>}</Button>
               {showFilterDropdown && (
-                <div className="absolute left-0 mt-4 w-72 bg-labbaik-surface border border-purple-100 dark:border-white/10 rounded-[2rem] shadow-3xl z-[100] overflow-hidden animate-slide-up">
+                <div className="absolute left-0 mt-4 w-72 bg-labbaik-surface border border-purple-100 dark:border-white/10 rounded-2xl shadow-3xl z-[100] overflow-hidden animate-slide-up">
                   <div className="p-5 border-b border-purple-100 dark:border-white/5 flex justify-between items-center bg-purple-50/30 dark:bg-white/2"><span className="text-xs font-black text-neutral-600 dark:text-neutral-300">تصفية النتائج</span>{(selectedTag || selectedPlatform || selectedStoreId !== 'all') && (<button onClick={() => {setSelectedTag(null); setSelectedPlatform(null); setSelectedStoreId('all'); setShowFilterDropdown(false);}} className="text-[10px] font-black text-labbaik-blue hover:underline">مسح الكل</button>)}</div>
                   <div className="max-h-[400px] overflow-y-auto custom-scrollbar p-4 space-y-6">
                     <div className="space-y-3"><span className="text-[9px] font-black text-neutral-500 dark:text-neutral-400 uppercase tracking-widest flex items-center gap-2"><Share2 size={12} /> القنوات</span><div className="grid grid-cols-1 gap-1">{platforms.map(p => (<Button key={p.id} onClick={() => setSelectedPlatform(selectedPlatform === p.id ? null : p.id)} variant={selectedPlatform === p.id ? 'primary' : 'secondary'} size="sm" className="w-full justify-between">{p.icon} {p.name}{selectedPlatform === p.id && <Check size={14} />}</Button>))}</div></div>
@@ -622,7 +622,7 @@ export default function ConversationsPage() {
                   </div>
                 ) : (
                 <div key={idx} className={`flex ${msg.from === 'me' ? 'justify-start' : 'justify-end'}`}>
-                  <div className={`max-w-[80%] lg:max-w-[65%] p-5 rounded-[2rem] shadow-2xl ${msg.from === 'me' ? 'bg-gradient-to-br from-labbaik-blue to-[#7A4DA3] text-labbaik-on-accent rounded-tr-none font-bold' : 'bg-labbaik-surface dark:bg-labbaik-chat text-neutral-900 dark:text-white rounded-tl-none border border-purple-100/60 dark:border-white/10 shadow-sm'}`}>
+                  <div className={`max-w-[80%] lg:max-w-[65%] p-5 rounded-2xl shadow-2xl ${msg.from === 'me' ? 'bg-gradient-to-br from-labbaik-blue to-[#7A4DA3] text-labbaik-on-accent rounded-tr-none font-bold' : 'bg-labbaik-surface dark:bg-labbaik-chat text-neutral-900 dark:text-white rounded-tl-none border border-purple-100/60 dark:border-white/10 shadow-sm'}`}>
                     <div className="flex justify-between items-start gap-6">
                       <p className="text-[13px] leading-[1.8] whitespace-pre-wrap">{msg.text}</p>
                       {msg.from !== 'me' && msg.sentiment && <span className="text-xl shrink-0 filter drop-shadow-md">{getSentimentEmoji(msg.sentiment)}</span>}
@@ -638,9 +638,9 @@ export default function ConversationsPage() {
               ))}
               <div ref={messagesEndRef} />
             </div>
-            <div className="p-6 border-t border-purple-100/60 dark:border-white/10 bg-labbaik-surface/80 backdrop-blur-xl"><form onSubmit={handleSendMessage} className="flex items-center gap-4 max-w-5xl mx-auto"><input type="text" value={messageInput} onChange={(e) => setMessageInput(e.target.value)} placeholder="اكتب ردك هنا..." className="flex-1 bg-purple-50/30 dark:bg-white/5 border border-purple-100/60 dark:border-white/10 rounded-[1.8rem] py-5 px-8 text-sm text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-labbaik-blue/50 font-bold placeholder:text-neutral-400"/><Button type="submit" variant="primary" size="md" className="shrink-0" style={{width: '64px', height: '64px', borderRadius: '1.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center'}}><Send size={28} /></Button></form></div>
+            <div className="p-6 border-t border-purple-100/60 dark:border-white/10 bg-labbaik-surface/80 backdrop-blur-xl"><form onSubmit={handleSendMessage} className="flex items-center gap-4 max-w-5xl mx-auto"><input type="text" value={messageInput} onChange={(e) => setMessageInput(e.target.value)} placeholder="اكتب ردك هنا..." className="flex-1 bg-purple-50/30 dark:bg-white/5 border border-purple-100/60 dark:border-white/10 rounded-2xl py-5 px-8 text-sm text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-labbaik-blue/50 font-bold placeholder:text-neutral-400"/><Button type="submit" variant="primary" size="md" className="shrink-0" style={{width: '64px', height: '64px', borderRadius: '0.75rem', display: 'flex', alignItems: 'center', justifyContent: 'center'}}><Send size={28} /></Button></form></div>
           </>
-        ) : <div className="flex-1 flex flex-col items-center justify-center text-neutral-400 p-10 text-center animate-pulse"><div className="w-32 h-32 bg-purple-50/40 dark:bg-white/2 rounded-[3rem] flex items-center justify-center mb-8 border border-purple-100/60 dark:border-white/10 shadow-inner"><MessageCircle size={64} className="opacity-15 text-labbaik-blue" /></div><h3 className="text-2xl font-black text-neutral-400">بانتظار اختيارك..</h3></div>}
+        ) : <div className="flex-1 flex flex-col items-center justify-center text-neutral-400 p-10 text-center animate-pulse"><div className="w-32 h-32 bg-purple-50/40 dark:bg-white/2 rounded-2xl flex items-center justify-center mb-8 border border-purple-100/60 dark:border-white/10 shadow-inner"><MessageCircle size={64} className="opacity-15 text-labbaik-blue" /></div><h3 className="text-2xl font-black text-neutral-400">بانتظار اختيارك..</h3></div>}
       </div>
 
       {selectedChat && showProfile && selectedChat.customerId && (<CustomerProfile customerId={selectedChat.customerId} onClose={() => setShowProfile(false)} />)}
@@ -648,7 +648,7 @@ export default function ConversationsPage() {
       {showTagEditor && (
         <div className="fixed inset-0 z-[999] flex items-center justify-center p-6 lg:p-0">
           <div className="absolute inset-0 bg-black/60 backdrop-blur-md" onClick={() => setShowTagEditor(false)}></div>
-          <div className="relative bg-labbaik-surface border border-purple-100/60 dark:border-white/10 p-10 rounded-[3rem] shadow-3xl w-full max-w-xl animate-slide-up space-y-10">
+          <div className="relative bg-labbaik-surface border border-purple-100/60 dark:border-white/10 p-10 rounded-2xl shadow-3xl w-full max-w-xl animate-slide-up space-y-10">
             <div className="flex justify-between items-center border-b border-purple-100/60 dark:border-white/10 pb-6"><div className="flex items-center gap-4"><div className="p-3 bg-labbaik-blue/10 rounded-2xl"><Layers className="text-labbaik-blue" size={24} /></div><div><h4 className="text-xl font-black text-neutral-900 dark:text-white">إدارة تصنيفات العميل</h4><p className="text-neutral-500 dark:text-neutral-400 text-[10px] mt-1 font-bold">أضف وسوماً مخصصة لتنظيم محادثات متجرك بذكاء.</p></div></div><button onClick={() => setShowTagEditor(false)} className="p-2 hover:bg-purple-50 dark:hover:bg-white/5 rounded-xl text-neutral-400 hover:text-neutral-700 dark:hover:text-white transition-all"><CloseIcon size={24} /></button></div>
             <div className="space-y-4"><label className="text-xs font-black text-neutral-500 dark:text-neutral-400 uppercase px-2 flex items-center gap-2"><Plus size={14} className="text-labbaik-blue" /> إنشاء وسم جديد</label><form onSubmit={handleAddNewTag} className="relative group"><Hash className="absolute right-5 top-1/2 -translate-y-1/2 text-neutral-400 group-focus-within:text-labbaik-blue transition-colors" size={18} /><input type="text" value={newTagInput} onChange={(e) => setNewTagInput(e.target.value)} placeholder="اكتب اسم الوسم واضغط Enter..." className="w-full bg-purple-50/30 dark:bg-white/2 border border-purple-100/60 dark:border-white/10 rounded-2xl py-5 pr-14 pl-6 text-sm text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-labbaik-blue/50 transition-all font-bold placeholder:text-neutral-400"/></form></div>
             <div className="space-y-4"><label className="text-xs font-black text-neutral-500 dark:text-neutral-400 uppercase px-2 flex items-center gap-2"><Tag size={14} className="text-labbaik-blue" /> الوسوم المتوفرة</label><div className="flex flex-wrap gap-3 max-h-64 overflow-y-auto custom-scrollbar p-2">{allTags.map(tag => (<Button key={tag} onClick={() => handleToggleTag(tag)} variant={selectedChat?.tags?.includes(tag) ? 'primary' : 'secondary'} size="sm" className="gap-2">{selectedChat?.tags?.includes(tag) && <Check size={14} />} {tag.replace('_', ' ')}</Button>))}</div></div>
@@ -659,5 +659,3 @@ export default function ConversationsPage() {
     </div>
   );
 }
-
-

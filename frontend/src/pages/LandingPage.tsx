@@ -397,7 +397,7 @@ export default function LandingPage() {
 
             {/* Illustrative inbox preview (pure UI, no real data) */}
             <div className="landing-rise landing-rise-delay relative mx-auto w-full max-w-md" aria-hidden="true">
-              <div className="absolute -inset-4 rounded-[2rem] bg-gradient-to-br from-labbaik-blue/30 via-transparent to-emerald-400/20 blur-2xl" />
+              <div className="absolute -inset-4 rounded-2xl bg-gradient-to-br from-labbaik-blue/30 via-transparent to-emerald-400/20 blur-2xl" />
               <div className="relative rounded-3xl border border-labbaik-border bg-labbaik-surface shadow-2xl shadow-labbaik-blue/10 overflow-hidden">
                 <div className="flex items-center justify-between px-5 py-4 border-b border-labbaik-border">
                   <div className="flex items-center gap-3">
@@ -517,7 +517,7 @@ export default function LandingPage() {
 
         {/* Data use */}
         <section id="data" className="scroll-mt-24 max-w-6xl mx-auto px-4 sm:px-6 pb-16 sm:pb-20">
-          <div className="relative overflow-hidden rounded-[2rem] border border-labbaik-border bg-labbaik-surface p-7 sm:p-12 shadow-sm">
+          <div className="relative overflow-hidden rounded-2xl border border-labbaik-border bg-labbaik-surface p-7 sm:p-12 shadow-sm">
             <div aria-hidden="true" className="absolute -top-20 -end-20 h-64 w-64 rounded-full bg-emerald-400/10 blur-3xl" />
             <div className="relative grid lg:grid-cols-[auto_1fr] gap-8 items-start">
               <span className="grid h-16 w-16 place-items-center rounded-3xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
@@ -588,7 +588,7 @@ export default function LandingPage() {
 
         {/* CTA */}
         <section className="max-w-6xl mx-auto px-4 sm:px-6 pb-16 sm:pb-24">
-          <div className="relative overflow-hidden rounded-[2rem] bg-gradient-to-br from-labbaik-blue to-[#3d2257] px-6 py-12 sm:px-12 sm:py-16 text-center text-white shadow-2xl shadow-labbaik-blue/25">
+          <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-labbaik-blue to-[#3d2257] px-6 py-12 sm:px-12 sm:py-16 text-center text-white shadow-2xl shadow-labbaik-blue/25">
             <div aria-hidden="true" className="absolute inset-0 bg-[radial-gradient(rgba(255,255,255,0.12)_1px,transparent_1px)] [background-size:20px_20px] opacity-60" />
             <div className="relative">
               <h2 className="text-2xl sm:text-4xl font-black leading-tight">{t.cta.title}</h2>

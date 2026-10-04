@@ -84,13 +84,13 @@ export default function CustomerProfile({ customerId, onClose, onUpdated }: { cu
     setFormData((current) => ({ ...current, [field]: current[field].includes(id) ? current[field].filter((item) => item !== id) : [...current[field], id] }));
   };
 
-  if (loading) return <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/40 backdrop-blur-md"><div className="bg-labbaik-surface p-16 rounded-[3rem] border border-white/5 flex flex-col items-center gap-4"><Loader2 className="animate-spin text-labbaik-blue" size={44} /><p className="font-black text-neutral-500">جاري جلب الملف...</p></div></div>;
+  if (loading) return <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/40 backdrop-blur-md"><div className="bg-labbaik-surface p-16 rounded-2xl border border-white/5 flex flex-col items-center gap-4"><Loader2 className="animate-spin text-labbaik-blue" size={44} /><p className="font-black text-neutral-500">جاري جلب الملف...</p></div></div>;
   if (!customer) return null;
 
   return (
     <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/70 backdrop-blur-md" onClick={onClose} />
-      <div className="relative bg-labbaik-surface border border-white/10 rounded-[3rem] shadow-3xl w-full max-w-3xl overflow-hidden animate-slide-up" dir="rtl">
+      <div className="relative bg-labbaik-surface border border-white/10 rounded-2xl shadow-3xl w-full max-w-3xl overflow-hidden animate-slide-up" dir="rtl">
         <div className="bg-gradient-to-r from-labbaik-blue/10 to-transparent p-7 lg:p-9 border-b border-white/5 flex justify-between items-center">
           <div className="flex items-center gap-5"><div className="w-14 h-14 bg-labbaik-blue/20 rounded-2xl flex items-center justify-center border border-labbaik-blue/30"><User className="text-labbaik-blue" size={28} /></div><div><h3 className="text-2xl font-black text-neutral-900 dark:text-white">بطاقة العميل</h3><p className="text-neutral-500 text-xs mt-1 font-bold">الهوية، الفرع، الفئات والتاقات المستخدمة في قوائم الإرسال.</p></div></div>
           <button onClick={onClose} className="p-3 hover:bg-white/5 rounded-2xl text-neutral-500 hover:text-white"><X size={26} /></button>
@@ -109,7 +109,7 @@ export default function CustomerProfile({ customerId, onClose, onUpdated }: { cu
           <SelectionBlock title="فئات العميل" icon={<FolderOpen size={15} />} items={categories} selected={formData.categoryIds} onToggle={(id) => toggle('categoryIds', id)} empty="أنشئ الفئات من شاشة العملاء أولاً." />
           <SelectionBlock title="تاقات العميل" icon={<TagIcon size={15} />} items={tags} selected={formData.tagIds} onToggle={(id) => toggle('tagIds', id)} empty="أنشئ التاقات من شاشة العملاء أولاً." />
 
-          <Field label="ملاحظات الموظف" icon={<StickyNote size={13} />}><textarea value={formData.notes} onChange={(e) => setFormData({ ...formData, notes: e.target.value })} className="w-full h-32 bg-white/5 border border-white/10 rounded-[1.7rem] p-5 text-sm text-neutral-900 dark:text-white outline-none focus:ring-2 focus:ring-labbaik-blue/40 resize-none" /></Field>
+          <Field label="ملاحظات الموظف" icon={<StickyNote size={13} />}><textarea value={formData.notes} onChange={(e) => setFormData({ ...formData, notes: e.target.value })} className="w-full h-32 bg-white/5 border border-white/10 rounded-xl p-5 text-sm text-neutral-900 dark:text-white outline-none focus:ring-2 focus:ring-labbaik-blue/40 resize-none" /></Field>
         </div>
 
         <div className="p-7 bg-white/5 border-t border-white/5 flex justify-end"><button onClick={handleSave} disabled={saving} className="bg-labbaik-blue text-white px-9 py-3.5 rounded-2xl font-black text-sm flex items-center gap-3 hover:scale-[1.02] transition disabled:opacity-50">{saving ? <Loader2 className="animate-spin" size={18} /> : <Save size={18} />} حفظ التحديثات</button></div>

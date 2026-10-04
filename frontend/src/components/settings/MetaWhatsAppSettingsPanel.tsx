@@ -148,7 +148,7 @@ export default function MetaWhatsAppSettingsPanel() {
     : 'Meta App Callback';
 
   return <div className="lg:col-span-3 space-y-8">
-    <Card variant="labbaik" className="space-y-7">
+    <Card variant="plain" padding="none" className="space-y-7">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-5">
         <div className="flex items-center gap-4">
           <div className="w-12 h-12 rounded-2xl bg-green-500/10 border border-green-500/20 flex items-center justify-center">
@@ -220,7 +220,7 @@ export default function MetaWhatsAppSettingsPanel() {
       </div>
 
       {scope === 'store' && branches.length > 0 && (
-        <div className="rounded-3xl border border-neutral-200/80 dark:border-white/10 bg-neutral-50 dark:bg-white/5 p-5 flex items-center justify-between gap-4">
+        <div className="flex items-center justify-between gap-4 py-4 border-y border-neutral-200/70 dark:border-white/10">
           <div>
             <div className="text-sm font-black text-neutral-900 dark:text-white">الفرع المرتبط بالرقم</div>
             <p className="text-xs text-neutral-600 dark:text-neutral-400 mt-1">القوالب والرسائل لهذا الفرع.</p>
@@ -230,7 +230,7 @@ export default function MetaWhatsAppSettingsPanel() {
       )}
 
       {scope === 'organization' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-5 rounded-3xl border border-purple-500/20 bg-purple-500/5 p-5">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
           <div className="space-y-2">
             <label className="text-xs font-black text-neutral-700 dark:text-neutral-300 px-1 block">الفرع الافتراضي للرسائل الجديدة</label>
             <select
@@ -404,7 +404,7 @@ export default function MetaWhatsAppSettingsPanel() {
         : (connection.webhookUrl || '-');
 
       return (
-        <Card variant="labbaik" className="space-y-5">
+        <Card variant="plain" padding="none" className="space-y-5">
           <div>
             <h3 className="text-lg font-black text-neutral-900 dark:text-white flex items-center gap-2">
               <Webhook className="text-labbaik-blue" size={20} /> Webhook {scope === 'organization' ? 'المنظمة' : 'الفرع'}

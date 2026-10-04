@@ -119,7 +119,7 @@ export default function AccountDeletionAdminPage() {
       </div>
 
       {/* Filters and Search */}
-      <Card variant="labbaik" className="p-4">
+      <Card variant="plain" padding="none" className="py-4">
         <div className="flex flex-col sm:flex-row items-center gap-3 justify-between">
           <div className="relative flex-1 w-full">
             <Search size={16} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-neutral-400" />
@@ -157,7 +157,7 @@ export default function AccountDeletionAdminPage() {
           <p className="text-xs text-neutral-500 mt-2 font-bold">جاري تحميل الطلبات...</p>
         </div>
       ) : filtered.length === 0 ? (
-        <Card variant="labbaik" className="text-center py-16">
+        <Card variant="plain" padding="none" className="text-center py-16">
           <CheckCircle2 size={44} className="mx-auto text-neutral-400 opacity-40 mb-3" />
           <h3 className="text-base font-black text-neutral-800 dark:text-neutral-200">لا توجد طلبات حذف مطابقة</h3>
           <p className="text-xs text-neutral-500 mt-1">جميع الطلبات تم التعامل معها أو لا توجد نتائج للبحث.</p>

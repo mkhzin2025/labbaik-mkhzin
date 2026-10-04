@@ -26,7 +26,7 @@ import {
   BarChart,
   Bar
 } from 'recharts';
-import { Card, CardBody, StatCard, SkeletonCard, ErrorState } from '@/components/ui';
+import { Card, CardBody, StatCard, Skeleton, ErrorState } from '@/components/ui';
 import { toEnglishDigits, formatNumber } from '@/lib/utils';
 
 interface DashboardStats {
@@ -82,21 +82,44 @@ export default function DashboardHome() {
 
         {/* Loading skeleton for performance cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <SkeletonCard count={3} />
+          {Array.from({ length: 3 }, (_, index) => (
+            <div key={index} className="space-y-5 py-4">
+              <div className="flex justify-between">
+                <Skeleton width={48} height={48} className="rounded-2xl" />
+                <Skeleton width={72} height={12} className="rounded-md" />
+              </div>
+              <div className="space-y-3">
+                <Skeleton width="50%" height="0.875rem" className="rounded-md" />
+                <Skeleton width="60%" height="2rem" className="rounded-lg" />
+              </div>
+              <Skeleton width="80%" height="0.75rem" className="rounded-md" />
+            </div>
+          ))}
         </div>
 
         {/* Loading skeleton for stat cards */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-          <SkeletonCard count={4} />
+          {Array.from({ length: 4 }, (_, index) => (
+            <div key={index} className="space-y-5 py-4">
+              <div className="flex justify-between">
+                <Skeleton width={48} height={48} className="rounded-2xl" />
+                <Skeleton width={24} height={24} className="rounded-lg" />
+              </div>
+              <div className="space-y-3">
+                <Skeleton width="50%" height="0.875rem" className="rounded-md" />
+                <Skeleton width="75%" height="2rem" className="rounded-lg" />
+              </div>
+            </div>
+          ))}
         </div>
 
         {/* Loading skeleton for charts */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          <div className="lg:col-span-2 bg-labbaik-surface border border-labbaik-border rounded-3xl p-8 space-y-6 shadow-sm">
+          <div className="lg:col-span-2 py-4 space-y-6">
             <div className="h-7 w-48 bg-neutral-200/80 dark:bg-neutral-800/80 rounded-xl animate-pulse"></div>
             <div className="h-64 md:h-80 w-full bg-neutral-100 dark:bg-neutral-800/40 rounded-2xl animate-pulse"></div>
           </div>
-          <div className="bg-labbaik-surface border border-labbaik-border rounded-3xl p-8 space-y-6 shadow-sm">
+          <div className="py-4 space-y-6">
             <div className="h-7 w-40 bg-neutral-200/80 dark:bg-neutral-800/80 rounded-xl animate-pulse"></div>
             <div className="h-48 md:h-64 w-full bg-neutral-100 dark:bg-neutral-800/40 rounded-2xl animate-pulse"></div>
           </div>
@@ -159,7 +182,7 @@ export default function DashboardHome() {
             نظرة عامة على أداء "لبيك" ونجاعة الذكاء الاصطناعي في متجرك.
           </p>
         </div>
-        <div className="flex items-center gap-3 bg-labbaik-surface px-5 py-2.5 rounded-2xl border border-labbaik-border shadow-sm">
+        <div className="flex items-center gap-3">
           <Activity size={18} className="text-success-500 flex-shrink-0" />
           <span className="text-sm font-semibold text-neutral-700 dark:text-neutral-300">النظام يعمل بكفاءة قصوى</span>
         </div>
@@ -168,7 +191,7 @@ export default function DashboardHome() {
       {/* Speed & Savings Performance Banner */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {/* Hours Saved Card */}
-        <Card variant="elevated" className="rounded-3xl">
+        <Card variant="plain" padding="none">
           <CardBody className="space-y-6">
             <div className="flex justify-between items-start">
               <div className="p-3 bg-primary-500/10 rounded-2xl">
@@ -188,7 +211,7 @@ export default function DashboardHome() {
         </Card>
 
         {/* Speed Comparison Card */}
-        <Card variant="default" className="rounded-3xl">
+        <Card variant="plain" padding="none">
           <CardBody className="space-y-6">
             <div className="flex justify-between items-center">
               <h2 className="text-xs font-bold text-neutral-500 dark:text-neutral-400 uppercase flex items-center gap-2">
@@ -220,7 +243,7 @@ export default function DashboardHome() {
         </Card>
 
         {/* Conversion Rate Card */}
-        <Card variant="default" className="rounded-3xl">
+        <Card variant="plain" padding="none">
           <CardBody className="flex flex-col justify-center items-center text-center space-y-4">
             <div className="w-16 h-16 bg-success-500/10 rounded-2xl flex items-center justify-center border border-success-500/20">
               <TrendingUp className="text-success-500" size={32} />
@@ -251,7 +274,7 @@ export default function DashboardHome() {
       {/* Charts Section */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Main Timeline Chart */}
-        <Card variant="default" className="lg:col-span-2 rounded-3xl">
+        <Card variant="plain" padding="none" className="lg:col-span-2">
           <CardBody className="space-y-8">
             <div className="flex items-center justify-between">
               <h2 className="text-xl font-bold text-neutral-900 dark:text-white flex items-center gap-3">
@@ -291,7 +314,7 @@ export default function DashboardHome() {
         </Card>
 
         {/* Sentiment Pie Chart */}
-        <Card variant="default" className="rounded-3xl">
+        <Card variant="plain" padding="none">
           <CardBody className="space-y-8">
             <h2 className="text-lg font-bold text-neutral-900 dark:text-white flex items-center gap-3">
               <Smile className="text-success-500" size={20} />
@@ -347,7 +370,7 @@ export default function DashboardHome() {
         </Card>
 
         {/* Platform Bar Chart */}
-        <Card variant="default" className="lg:col-span-3 rounded-3xl">
+        <Card variant="plain" padding="none" className="lg:col-span-3">
           <CardBody className="space-y-8">
             <h2 className="text-lg font-bold text-neutral-900 dark:text-white flex items-center gap-3">
               <BarChart3 className="text-warning-500" size={20} />

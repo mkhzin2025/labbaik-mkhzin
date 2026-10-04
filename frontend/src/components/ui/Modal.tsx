@@ -49,7 +49,7 @@ const Modal = React.forwardRef<HTMLDivElement, ModalProps>(
         <div
           ref={ref}
           className={cn(
-            'w-full bg-labbaik-surface border border-labbaik-border rounded-3xl shadow-2xl',
+            'w-full bg-labbaik-surface border border-labbaik-border rounded-2xl shadow-2xl',
             'max-h-[90vh] overflow-y-auto',
             sizeStyles[size],
             className

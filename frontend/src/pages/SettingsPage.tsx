@@ -199,7 +199,7 @@ export default function SettingsPage() {
   return (
     <div className="max-w-6xl mx-auto space-y-10 animate-fade-in" dir="rtl">
       {/* Header & Tabs */}
-      <Card variant="labbaik" className="space-y-8">
+      <Card variant="plain" padding="none" className="space-y-8">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
           <div className="flex items-center gap-5">
             <div className="w-14 h-14 bg-labbaik-blue/10 rounded-2xl flex items-center justify-center border border-labbaik-blue/20">
@@ -283,7 +283,7 @@ export default function SettingsPage() {
         {/* Branches Tab */}
         {activeTab === 'branches' && (
           <div className="lg:col-span-3 space-y-8">
-            <Card variant="labbaik" className="space-y-6">
+            <Card variant="plain" padding="none" className="space-y-6">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
                   <h3 className="text-xl font-black text-neutral-900 dark:text-white flex items-center gap-3">
@@ -311,7 +311,7 @@ export default function SettingsPage() {
               {showAddBranch && (
                 <form
                   onSubmit={handleCreateBranch}
-                  className="rounded-3xl border border-purple-200/80 dark:border-white/10 bg-purple-50/50 dark:bg-white/5 p-6 space-y-5 animate-fade-in"
+                  className="border-y border-purple-200/60 dark:border-white/10 py-5 space-y-5 animate-fade-in"
                 >
                   <div className="flex items-center justify-between">
                     <h4 className="font-black text-base text-neutral-900 dark:text-white flex items-center gap-2">
@@ -453,7 +453,7 @@ export default function SettingsPage() {
         {/* Profile Tab */}
         {activeTab === 'profile' && (
           <div className="lg:col-span-2 space-y-8">
-            <Card variant="labbaik" className="space-y-8">
+            <Card variant="plain" padding="none" className="space-y-8">
               <h3 className="text-xl font-black text-neutral-900 dark:text-white flex items-center gap-3">
                 <Store className="text-labbaik-blue" size={24} />معلومات المتجر
               </h3>
@@ -490,7 +490,7 @@ export default function SettingsPage() {
               </Button>
             </Card>
 
-            <Card variant="labbaik" className="space-y-8">
+            <Card variant="plain" padding="none" className="space-y-8">
               <h3 className="text-xl font-black text-neutral-900 dark:text-white flex items-center gap-3">
                 <UserIcon className="text-labbaik-blue" size={24} />معلومات الحساب
               </h3>
@@ -532,7 +532,7 @@ export default function SettingsPage() {
         {/* Knowledge Base Tab */}
         {activeTab === 'kb' && (
           <div className="lg:col-span-2">
-            <Card variant="labbaik" className="space-y-0">
+            <Card variant="plain" padding="none" className="space-y-0">
               <div className="p-8 border-b border-purple-100 dark:border-white/5 flex items-center justify-between -m-8 mb-0 pb-8">
                 <div className="flex items-center gap-3">
                   <Brain className="text-labbaik-blue" size={24} />
@@ -557,7 +557,7 @@ export default function SettingsPage() {
         {/* AI & Working Hours Tab */}
         {activeTab === 'ai' && (
           <div className="lg:col-span-2 space-y-8">
-            <Card variant="labbaik" className="space-y-8">
+            <Card variant="plain" padding="none" className="space-y-8">
               <div className="space-y-4">
                 <h3 className="text-xl font-black text-neutral-900 dark:text-white flex items-center gap-3">
                   <Cpu className="text-labbaik-blue" size={24} />محرك الذكاء المفضل
@@ -572,7 +572,7 @@ export default function SettingsPage() {
                   <div 
                     key={model.id}
                     onClick={() => setStoreData({ ...storeData, preferredModel: model.id })}
-                    className={`p-6 rounded-[2rem] border cursor-pointer transition-all flex items-center gap-6 ${
+                    className={`p-6 rounded-2xl border cursor-pointer transition-all flex items-center gap-6 ${
                       storeData.preferredModel === model.id
                         ? 'bg-labbaik-blue/10 border-labbaik-blue shadow-lg shadow-labbaik-blue/5'
                         : 'bg-neutral-50/70 dark:bg-white/2 border-neutral-200/80 dark:border-white/5 hover:border-labbaik-blue/30'
@@ -605,7 +605,7 @@ export default function SettingsPage() {
               </div>
             </Card>
 
-            <Card variant="labbaik" className="space-y-10">
+            <Card variant="plain" padding="none" className="space-y-10">
               <div className="space-y-4">
                 <h3 className="text-xl font-black text-neutral-900 dark:text-white flex items-center gap-3">
                   <Zap className="text-labbaik-blue" size={24} />وضعية تشغيل لبيك
@@ -690,14 +690,14 @@ export default function SettingsPage() {
         {/* Common Sidebar */}
         {activeTab !== 'meta' && activeTab !== 'branches' && (
           <div className="space-y-8">
-            <Card variant="labbaik" className="space-y-6">
+            <Card variant="plain" padding="none" className="space-y-6">
               <h4 className="flex items-center gap-2 font-black text-labbaik-blue">💡 حماية الخدمة</h4>
               <p className="text-xs text-neutral-600 dark:text-neutral-400 font-medium leading-loose">
                 باختيارك <span className="text-neutral-900 dark:text-white font-bold">DeepSeek-R1 (Groq)</span>، ستحصل على أذكى ردود بلهجة سعودية متقنة وبأعلى سرعة معالجة متاحة عالمياً. 🚀🇸🇦
               </p>
             </Card>
             
-            <Card variant="labbaik" className="space-y-4">
+            <Card variant="plain" padding="none" className="space-y-4">
               <h4 className="text-xs font-black text-neutral-700 dark:text-neutral-400 flex items-center gap-2">
                 <Monitor size={14} /> اختبار التنبيهات
               </h4>

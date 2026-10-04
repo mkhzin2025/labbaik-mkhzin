@@ -307,7 +307,7 @@ export const componentSizes = {
 
 // Font Families
 export const fontFamilies = {
-  sans: 'Tajarib Typeface, IBM Plex Sans Arabic, Inter, ui-sans-serif, system-ui, -apple-system, sans-serif',
+  sans: 'Thmanyah Sans, IBM Plex Sans Arabic, Inter, ui-sans-serif, system-ui, -apple-system, sans-serif',
   mono: 'IBM Plex Mono, Monaco, Courier New, monospace',
 } as const;
 

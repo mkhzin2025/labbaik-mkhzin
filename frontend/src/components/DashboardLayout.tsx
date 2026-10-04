@@ -88,6 +88,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [isPlatformAdmin, setPlatformAdmin] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
+  const isConversationsPage = location.pathname === '/dashboard/conversations';
   const user = JSON.parse(localStorage.getItem('user') || '{}');
   const sidebarLogo = theme === 'light' ? LogoAltImage : LogoImage;
 
@@ -148,7 +149,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       )}
       {/* Sidebar */}
       <aside
-        className={`fixed inset-y-0 right-0 z-50 bg-labbaik-surface border-l border-purple-100/60 dark:border-white/10 transition-transform duration-300 ease-in-out transform shadow-2xl h-screen flex flex-col ${isCollapsed ? 'w-24' : 'w-72'
+        className={`fixed inset-y-0 right-0 z-50 bg-labbaik-surface border-l border-purple-100/60 dark:border-white/10 transition-transform duration-300 ease-in-out transform shadow-[-6px_0_18px_-10px_rgba(100,59,137,0.24)] dark:shadow-[-6px_0_18px_-10px_rgba(0,0,0,0.35)] h-screen flex flex-col ${isCollapsed ? 'w-24' : 'w-72'
           } ${isSidebarOpen ? 'translate-x-0' : 'translate-x-full'
           } lg:relative lg:translate-x-0`}
       >
@@ -236,8 +237,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-10 custom-scrollbar bg-labbaik-page/50">
-          <div className="max-w-7xl mx-auto">
+        <main className={`flex-1 ${isConversationsPage ? 'min-h-0 overflow-hidden bg-labbaik-surface' : 'overflow-y-auto p-4 sm:p-6 lg:p-10 custom-scrollbar bg-labbaik-page/50'}`}>
+          <div className={isConversationsPage ? 'h-full min-h-0 w-full' : 'max-w-7xl mx-auto'}>
             {children}
           </div>
         </main>
@@ -245,5 +246,4 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     </div>
   );
 }
-
 

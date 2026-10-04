@@ -223,7 +223,7 @@ export default function BillingPage() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-        <Card variant="labbaik" className="relative overflow-hidden">
+        <Card variant="plain" padding="none" className="relative overflow-hidden">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-xs font-black text-neutral-500">رصيد محفظة Meta لبيك</p>
@@ -235,13 +235,13 @@ export default function BillingPage() {
             <div className="mt-5 flex gap-2 items-center text-amber-500 text-xs font-bold"><AlertTriangle size={16}/> الرصيد قريب من الحد المنخفض</div>
           )}
         </Card>
-        <Card variant="labbaik">
+        <Card variant="plain" padding="none">
           <p className="text-xs font-black text-neutral-500">الباقة الحالية</p>
           <div className="mt-3 flex items-center gap-2"><ShieldCheck className="text-emerald-500"/><span className="text-2xl font-black text-neutral-900 dark:text-white">{currentPlan?.nameAr || '-'}</span></div>
           <p className="text-xs text-neutral-500 mt-4">الحالة: <span className="font-black">{summary.subscription?.status}</span></p>
           <p className="text-xs text-neutral-500 mt-1">نهاية الفترة: {formatDate(summary.subscription?.currentPeriodEnd)}</p>
         </Card>
-        <Card variant="labbaik">
+        <Card variant="plain" padding="none">
           <p className="text-xs font-black text-neutral-500">وسيلة الدفع الافتراضية</p>
           {defaultMethod ? (
             <div className="mt-4">
@@ -252,7 +252,7 @@ export default function BillingPage() {
         </Card>
       </div>
 
-      <div className={`rounded-3xl border p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4 ${currentPlan?.features?.metaLabbaik && defaultMethod && Number(wallet?.balanceSar || 0) > 0 ? 'border-emerald-500/20 bg-emerald-500/5' : 'border-amber-500/20 bg-amber-500/5'}`}>
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 py-4 border-y border-neutral-200/70 dark:border-white/10">
         <div>
           <div className="font-black text-sm">جاهزية Meta لبيك</div>
           <p className="text-xs text-neutral-500 mt-2 leading-6">
@@ -263,13 +263,13 @@ export default function BillingPage() {
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-        <Card variant="labbaik" className="space-y-5">
+        <Card variant="plain" padding="none" className="space-y-5">
           <div className="flex items-center justify-between gap-4">
             <div><h2 className="text-xl font-black">شحن المحفظة</h2><p className="text-xs text-neutral-500 mt-1">الرصيد يستخدم تلقائيًا عند الإرسال عبر Meta لبيك.</p></div>
             <Zap className="text-labbaik-blue"/>
           </div>
           {defaultMethod && (
-            <div className="rounded-2xl border border-purple-100/70 dark:border-white/10 p-4 space-y-4">
+            <div className="space-y-4 py-4 border-y border-neutral-200/70 dark:border-white/10">
               <div className="font-black text-sm">شحن سريع من البطاقة المحفوظة</div>
               <div className="flex gap-3">
                 <input type="number" dir="ltr" min="1" value={savedCardAmount} onChange={(e) => setSavedCardAmount(Number(e.target.value))} className="flex-1 bg-transparent border border-white/10 rounded-xl px-4 py-3 font-mono"/>
@@ -279,7 +279,7 @@ export default function BillingPage() {
           )}
           <Button variant="secondary" onClick={() => setShowCardForm(v => !v)}><Plus size={16}/> {showCardForm ? 'إغلاق نموذج البطاقة' : defaultMethod ? 'استخدام بطاقة جديدة' : 'إضافة بطاقة وشحن الرصيد'}</Button>
           {showCardForm && (
-            <div className="space-y-4 rounded-2xl bg-black/5 dark:bg-white/5 p-5">
+            <div className="space-y-4 pt-4 border-t border-neutral-200/70 dark:border-white/10">
               <div className="flex items-center gap-2 text-xs text-emerald-500 font-bold"><ShieldCheck size={15}/> بيانات البطاقة تُرسل مباشرة إلى ميسر ولا تمر على خادم لبيك.</div>
               <input placeholder="اسم حامل البطاقة" value={card.name} onChange={(e)=>setCard({...card,name:e.target.value})} className="w-full bg-transparent border border-white/10 rounded-xl px-4 py-3"/>
               <input dir="ltr" inputMode="numeric" placeholder="رقم البطاقة" value={card.number} onChange={(e)=>setCard({...card,number:toEnglishDigits(e.target.value)})} className="w-full bg-transparent border border-white/10 rounded-xl px-4 py-3 font-mono"/>
@@ -296,7 +296,7 @@ export default function BillingPage() {
           )}
         </Card>
 
-        <Card variant="labbaik" className="space-y-5">
+        <Card variant="plain" padding="none" className="space-y-5">
           <h2 className="text-xl font-black">الشحن التلقائي</h2>
           <label className="flex items-center gap-3 font-bold text-sm">
             <input type="checkbox" checked={walletSettings.autoRechargeEnabled} onChange={(e)=>setWalletSettings({...walletSettings,autoRechargeEnabled:e.target.checked})}/>
@@ -338,7 +338,7 @@ export default function BillingPage() {
         </div>
       </div>
 
-      <Card variant="labbaik" className="space-y-4">
+      <Card variant="plain" padding="none" className="space-y-4">
         <h2 className="text-xl font-black flex items-center gap-2"><Zap/> أسعار استخدام Meta لبيك</h2>
         <p className="text-xs text-neutral-500">يخصم النظام السعر المقابل تلقائيًا من المحفظة عند الإرسال عبر خيار Meta لبيك. عند فشل Meta يتم رد عملية الخصم تلقائيًا.</p>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -346,7 +346,7 @@ export default function BillingPage() {
         </div>
       </Card>
 
-      <Card variant="labbaik" className="space-y-4">
+      <Card variant="plain" padding="none" className="space-y-4">
         <h2 className="text-xl font-black flex items-center gap-2"><CreditCard/> طرق الدفع المحفوظة</h2>
         {summary.paymentMethods?.length ? summary.paymentMethods.map((method:any)=><div key={method.id} className="flex flex-wrap items-center justify-between gap-4 p-4 border border-purple-100/70 dark:border-white/10 rounded-2xl">
           <div><div className="font-black">{String(method.brand || 'CARD').toUpperCase()} •••• {toEnglishDigits(method.lastFour)}</div><div className="text-xs text-neutral-500 mt-1">انتهاء {toEnglishDigits(method.expiryMonth)}/{toEnglishDigits(method.expiryYear)} · {method.status}</div></div>
@@ -354,7 +354,7 @@ export default function BillingPage() {
         </div>) : <p className="text-sm text-neutral-500">لا توجد طرق دفع محفوظة بعد.</p>}
       </Card>
 
-      <Card variant="labbaik" className="overflow-x-auto">
+      <Card variant="plain" padding="none" className="overflow-x-auto">
         <h2 className="text-xl font-black mb-5 flex items-center gap-2"><ReceiptText/> حركة المحفظة</h2>
         <table className="w-full text-sm min-w-[760px]">
           <thead className="text-neutral-500 text-xs"><tr><th className="text-right py-3">التاريخ</th><th className="text-right">النوع</th><th className="text-right">التصنيف</th><th className="text-right">المبلغ</th><th className="text-right">الرصيد بعد العملية</th></tr></thead>
@@ -362,7 +362,7 @@ export default function BillingPage() {
         </table>
       </Card>
 
-      <Card variant="labbaik" className="overflow-x-auto">
+      <Card variant="plain" padding="none" className="overflow-x-auto">
         <h2 className="text-xl font-black mb-5">عمليات الدفع</h2>
         <table className="w-full text-sm min-w-[760px]"><thead className="text-xs text-neutral-500"><tr><th className="text-right py-3">التاريخ</th><th className="text-right">النوع</th><th className="text-right">المبلغ</th><th className="text-right">الحالة</th><th className="text-right">مرجع ميسر</th></tr></thead><tbody>{summary.payments?.map((p:any)=><tr key={p.id} className="border-t border-purple-100/60 dark:border-white/10"><td className="py-4">{formatDateTime(p.createdAt)}</td><td>{p.type}</td><td>{formatSar(p.amountMinor/100)}</td><td>{paymentStatusLabel[p.status] || p.status}</td><td className="font-mono text-xs">{p.providerPaymentId}</td></tr>)}</tbody></table>
       </Card>

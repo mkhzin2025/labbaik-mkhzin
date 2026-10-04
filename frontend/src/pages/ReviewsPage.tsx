@@ -105,7 +105,7 @@ export default function ReviewsPage() {
   return (
     <div className="max-w-6xl mx-auto space-y-10 animate-fade-in" dir="rtl">
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 bg-labbaik-surface p-8 rounded-[2.5rem] border border-white/5 shadow-2xl">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div className="flex items-center gap-6">
           <div className="w-16 h-16 bg-labbaik-blue/10 rounded-2xl flex items-center justify-center border border-labbaik-blue/20">
             <Star size={32} className="text-labbaik-blue" />
@@ -127,7 +127,7 @@ export default function ReviewsPage() {
         {/* Reviews List */}
         <div className="lg:col-span-2 space-y-6">
           {reviews.length === 0 ? (
-            <div className="bg-labbaik-surface p-20 rounded-[2.5rem] border border-white/5 text-center space-y-4">
+            <div className="py-12 text-center space-y-4">
               <Star size={48} className="mx-auto text-gray-700" />
               <p className="text-neutral-400 font-bold">لا يوجد تقييمات حالياً.</p>
             </div>
@@ -136,7 +136,7 @@ export default function ReviewsPage() {
               <div 
                 key={review.id}
                 onClick={() => review.status === 'pending' && setActiveReview(review)}
-                className={`p-8 rounded-[2.5rem] border transition-all cursor-pointer group ${
+                className={`p-8 rounded-2xl border transition-all cursor-pointer group ${
                   activeReview?.id === review.id 
                     ? 'bg-labbaik-blue/10 border-labbaik-blue/30' 
                     : 'bg-labbaik-surface border-white/5 hover:border-white/10'
@@ -189,7 +189,7 @@ export default function ReviewsPage() {
         <div className="space-y-6">
           <div className="sticky top-10">
             {activeReview ? (
-              <div className="bg-labbaik-surface p-8 rounded-[2.5rem] border border-labbaik-blue/20 shadow-2xl space-y-8 animate-slide-up">
+              <div className="space-y-8 animate-slide-up">
                 <div className="flex items-center gap-3">
                   <div className="p-3 bg-labbaik-blue/10 rounded-xl">
                     <MessageSquare size={20} className="text-labbaik-blue" />
@@ -236,7 +236,7 @@ export default function ReviewsPage() {
                 </div>
               </div>
             ) : (
-              <div className="bg-white/2 p-10 rounded-[2.5rem] border border-white/5 text-center space-y-6">
+              <div className="py-10 text-center space-y-6">
                 <div className="w-16 h-16 bg-white/5 rounded-2xl flex items-center justify-center mx-auto border border-white/5">
                   <Star size={24} className="text-gray-700" />
                 </div>
@@ -252,5 +252,3 @@ export default function ReviewsPage() {
     </div>
   );
 }
-
-

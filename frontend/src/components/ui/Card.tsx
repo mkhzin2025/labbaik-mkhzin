@@ -1,13 +1,14 @@
 import React from 'react';
 import { cn } from '@/lib/utils';
 
-type CardVariant = 'default' | 'elevated' | 'flat' | 'outline' | 'labbaik' | 'labbaik-selected' | 'labbaik-hover';
+type CardVariant = 'default' | 'elevated' | 'flat' | 'outline' | 'plain' | 'labbaik' | 'labbaik-selected' | 'labbaik-hover';
 
 const variantStyles: Record<CardVariant, string> = {
   default: 'bg-labbaik-surface border border-purple-100/60 dark:border-white/10 shadow-sm dark:shadow-none',
   elevated: 'bg-labbaik-surface border border-purple-100/60 dark:border-white/10 shadow-md dark:shadow-xl',
   flat: 'bg-labbaik-deep border-0',
   outline: 'bg-transparent border border-purple-100/70 dark:border-white/10',
+  plain: 'bg-transparent border-0 shadow-none',
   labbaik: 'bg-labbaik-surface border border-purple-100/60 dark:border-white/10 hover:border-labbaik-blue/40 shadow-sm hover:shadow-md transition-all duration-300',
   'labbaik-selected': 'bg-labbaik-blue/10 border border-labbaik-blue/40 shadow-xl',
   'labbaik-hover': 'bg-labbaik-surface border border-purple-100/60 dark:border-white/10 shadow-md hover:shadow-lg transition-all',
@@ -51,7 +52,7 @@ const Card = React.forwardRef<HTMLDivElement, CardProps>(
         className={cn(
           'transition-colors duration-200',
           interactive && 'cursor-pointer',
-          'rounded-lg',
+          computedVariant !== 'plain' && 'rounded-md',
           variantStyles[computedVariant],
           paddingStyles[padding],
           className

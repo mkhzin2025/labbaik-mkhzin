@@ -42,7 +42,7 @@ type FlowNodeData = {
 type FlowNode = Node<FlowNodeData>;
 
 const StartNode = (_props: NodeProps<FlowNode>) => (
-  <div className="bg-labbaik-deep border-2 border-green-500/50 p-6 rounded-[2rem] shadow-[0_0_20px_rgba(34,197,94,0.2)] min-w-[180px] text-center relative overflow-hidden">
+  <div className="bg-labbaik-deep border-2 border-green-500/50 p-6 rounded-2xl shadow-[0_0_20px_rgba(34,197,94,0.2)] min-w-[180px] text-center relative overflow-hidden">
     <div className="absolute top-0 right-0 left-0 h-1 bg-green-500"></div>
     <div className="flex flex-col items-center gap-3">
       <div className="p-3 bg-green-500/20 rounded-2xl"><PlayCircle size={24} className="text-green-400" /></div>
@@ -54,7 +54,7 @@ const StartNode = (_props: NodeProps<FlowNode>) => (
 );
 
 const MessageNode = ({ data }: NodeProps<FlowNode>) => (
-  <div className="bg-labbaik-surface border-2 border-white/5 p-6 rounded-[2rem] shadow-2xl min-w-[200px] group hover:border-labbaik-blue/50 transition-all">
+  <div className="bg-labbaik-surface border-2 border-white/5 p-6 rounded-2xl shadow-2xl min-w-[200px] group hover:border-labbaik-blue/50 transition-all">
     <Handle type="target" position={Position.Top} className="!bg-labbaik-blue !w-3 !h-3 !border-labbaik-page" />
     <div className="flex items-center gap-3 mb-4">
       <div className="p-2 bg-labbaik-blue/10 rounded-lg"><MessageSquare size={16} className="text-labbaik-blue" /></div>
@@ -66,7 +66,7 @@ const MessageNode = ({ data }: NodeProps<FlowNode>) => (
 );
 
 const ButtonsNode = ({ data }: NodeProps<FlowNode>) => (
-  <div className="bg-labbaik-surface border-2 border-labbaik-blue/30 p-6 rounded-[2rem] shadow-2xl min-w-[250px] group hover:border-labbaik-blue transition-all">
+  <div className="bg-labbaik-surface border-2 border-labbaik-blue/30 p-6 rounded-2xl shadow-2xl min-w-[250px] group hover:border-labbaik-blue transition-all">
     <Handle type="target" position={Position.Top} className="!bg-labbaik-blue !w-3 !h-3" />
     <div className="flex items-center gap-3 mb-4">
       <div className="p-2 bg-labbaik-blue/20 rounded-lg"><Zap size={16} className="text-labbaik-blue" /></div>
@@ -230,5 +230,4 @@ export default function FlowEditorPage() {
     </div>
   );
 }
-
 

@@ -2,40 +2,45 @@
 
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *, .dark, .dark *));
 
-/* Tajarib Typeface Font Faces */
+/* Thmanyah Sans font faces */
 @font-face {
-  font-family: "Tajarib Typeface";
-  src: url("/fonts/Tajarib_Typeface_Regular.otf") format("opentype");
+  font-family: "Thmanyah Sans";
+  src: url("/fonts/thmanyahsans-Regular.woff2") format("woff2");
   font-weight: 400;
   font-style: normal;
+  font-display: swap;
 }
 
 @font-face {
-  font-family: "Tajarib Typeface";
-  src: url("/fonts/Tajarib_Typeface_Medium.otf") format("opentype");
+  font-family: "Thmanyah Sans";
+  src: url("/fonts/thmanyahsans-Medium.woff2") format("woff2");
   font-weight: 500;
   font-style: normal;
+  font-display: swap;
 }
 
 @font-face {
-  font-family: "Tajarib Typeface";
-  src: url("/fonts/Tajarib_Typeface_Bold.otf") format("opentype");
+  font-family: "Thmanyah Sans";
+  src: url("/fonts/thmanyahsans-Bold.woff2") format("woff2");
   font-weight: 700;
   font-style: normal;
+  font-display: swap;
 }
 
 @font-face {
-  font-family: "Tajarib Typeface";
-  src: url("/fonts/Tajarib_Typeface_Light.otf") format("opentype");
+  font-family: "Thmanyah Sans";
+  src: url("/fonts/thmanyahsans-Light.woff2") format("woff2");
   font-weight: 300;
   font-style: normal;
+  font-display: swap;
 }
 
 @font-face {
-  font-family: "Tajarib Typeface";
-  src: url("/fonts/Tajarib_Typeface_Black.otf") format("opentype");
+  font-family: "Thmanyah Sans";
+  src: url("/fonts/thmanyahsans-Black.woff2") format("woff2");
   font-weight: 900;
   font-style: normal;
+  font-display: swap;
 }
 
 @theme {
@@ -46,11 +51,17 @@
   --color-labbaik-on-accent: #ffffff;
   --color-labbaik-blue: #643B89;
   --color-labbaik-border: rgba(100, 59, 137, 0.08);
+  --color-input-border: rgba(100, 59, 137, 0.18);
   --color-labbaik-text: #1e293b;
   --color-labbaik-text-muted: #64748b;
+  --radius-sm: 2px;
+  --radius-md: 4px;
+  --radius-lg: 6px;
+  --radius-xl: 8px;
+  --radius-2xl: 10px;
+  --radius-3xl: 12px;
   
-  /* Setting Tajarib Typeface as the default font */
-  --font-sans: "Tajarib Typeface", "IBM Plex Sans Arabic", "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-sans: "Thmanyah Sans", "IBM Plex Sans Arabic", "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
 }
 
 :root,
@@ -74,6 +85,7 @@
   --color-labbaik-chat: #1a2c45;
   --color-labbaik-on-accent: #ffffff;
   --color-labbaik-border: rgba(255, 255, 255, 0.08);
+  --color-input-border: rgba(255, 255, 255, 0.16);
   --color-labbaik-text: #f8fafc;
   --color-labbaik-text-muted: #94a3b8;
 }
@@ -104,7 +116,6 @@ body {
   background-color: var(--color-labbaik-page);
   color: var(--color-labbaik-text);
   direction: rtl;
-  /* Applying the theme font to body explicitly */
   font-family: var(--font-sans);
   min-width: 320px;
 }
@@ -115,6 +126,12 @@ input,
 select,
 textarea {
   -webkit-tap-highlight-color: transparent;
+}
+
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="hidden"]):not([type="submit"]):not([type="reset"]):not([type="button"]),
+select,
+textarea {
+  border: 1px solid var(--color-input-border);
 }
 
 :focus-visible {

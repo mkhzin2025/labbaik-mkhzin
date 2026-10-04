@@ -97,7 +97,7 @@ export default {
         },
       },
       fontFamily: {
-        sans: ['Tajarib Typeface', 'IBM Plex Sans Arabic', 'Inter', 'ui-sans-serif', 'system-ui', '-apple-system', 'sans-serif'],
+        sans: ['Thmanyah Sans', 'IBM Plex Sans Arabic', 'Inter', 'ui-sans-serif', 'system-ui', '-apple-system', 'sans-serif'],
       },
       fontSize: {
         xs: ['0.75rem', { lineHeight: '1rem', letterSpacing: '0.4px' }],        // 12px
@@ -139,13 +139,13 @@ export default {
       },
       borderRadius: {
         none: '0',
-        sm: '4px',
-        base: '8px',
-        md: '12px',
-        lg: '16px',
-        xl: '20px',
-        '2xl': '24px',
-        '3xl': '32px',
+        sm: '2px',
+        base: '4px',
+        md: '4px',
+        lg: '6px',
+        xl: '8px',
+        '2xl': '10px',
+        '3xl': '12px',
         full: '9999px',
       },
       boxShadow: {

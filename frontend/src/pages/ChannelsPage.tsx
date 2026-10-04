@@ -123,7 +123,7 @@ export default function ChannelsPage() {
   return (
     <div className="max-w-6xl mx-auto space-y-8 animate-fade-in" dir="rtl">
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 bg-labbaik-surface p-8 rounded-[2.5rem] border border-purple-100/60 dark:border-white/5 shadow-2xl">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div className="flex items-center gap-6">
           <div className="w-16 h-16 bg-labbaik-blue/10 rounded-2xl flex items-center justify-center border border-labbaik-blue/20">
             <Share2 size={32} className="text-labbaik-blue" />
@@ -140,9 +140,9 @@ export default function ChannelsPage() {
         {platformData.map((platform) => {
           const connected = channels.find(c => c.type === platform.id);
           return (
-            <div key={platform.id} className={`p-8 rounded-[2.5rem] border transition-all hover:scale-[1.02] ${platform.color} flex flex-col justify-between gap-6 group`}>
+            <div key={platform.id} className={`p-8 rounded-2xl border transition-all hover:scale-[1.02] ${platform.color} flex flex-col justify-between gap-6 group`}>
               <div className="flex justify-between items-start">
-                <div className="p-4 bg-white/40 dark:bg-white/5 rounded-[1.5rem] border border-black/5 dark:border-white/5 group-hover:border-black/10 dark:group-hover:border-white/10 transition-colors shadow-sm">
+                <div className="p-4 bg-white/40 dark:bg-white/5 rounded-xl border border-black/5 dark:border-white/5 group-hover:border-black/10 dark:group-hover:border-white/10 transition-colors shadow-sm">
                   {platform.icon}
                 </div>
                 {connected ? (
@@ -191,7 +191,7 @@ export default function ChannelsPage() {
       {/* Connection Modal */}
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 backdrop-blur-xl bg-black/40 animate-fade-in">
-          <div className="bg-labbaik-surface w-full max-w-lg rounded-[2.5rem] border border-purple-100/60 dark:border-white/10 shadow-3xl overflow-hidden relative">
+          <div className="bg-labbaik-surface w-full max-w-lg rounded-2xl border border-purple-100/60 dark:border-white/10 shadow-3xl overflow-hidden relative">
             <button onClick={() => setShowModal(false)} className="absolute left-6 top-6 text-neutral-400 hover:text-neutral-900 dark:hover:text-white transition-colors"><X size={24} /></button>
             
             <div className="p-10 space-y-8">
@@ -276,5 +276,3 @@ export default function ChannelsPage() {
     </div>
   );
 }
-
-

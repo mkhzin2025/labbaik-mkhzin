@@ -25,7 +25,7 @@ const StatCard = React.forwardRef<HTMLDivElement, StatCardProps>(
     ...props
   }, ref) => {
     return (
-      <Card variant="default" ref={ref} className={cn('rounded-3xl hover:border-labbaik-blue/40 transition-all duration-200 shadow-sm', className)} {...props}>
+      <Card variant="plain" padding="none" ref={ref} className={cn(className)} {...props}>
         <CardBody className="space-y-4">
           <div className="flex justify-between items-start">
             <div className={cn('p-3 rounded-2xl flex items-center justify-center', iconBgColor)}>

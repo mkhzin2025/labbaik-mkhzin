@@ -91,7 +91,7 @@ export default function FlowsPage() {
 
   return (
     <div className="space-y-10 animate-fade-in" dir="rtl">
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 bg-labbaik-surface p-10 rounded-[3rem] border border-white/5 shadow-2xl">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
         <div>
           <h1 className="text-3xl font-black text-neutral-900 dark:text-white flex items-center gap-4">
             باني التدفقات الذكي <span className="bg-labbaik-blue/10 text-labbaik-blue text-xs px-4 py-1.5 rounded-full border border-labbaik-blue/20">BETA</span>
@@ -139,5 +139,4 @@ export default function FlowsPage() {
     </div>
   );
 }
-
 
