@@ -1,22 +1,25 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import api from '../api/client';
 import {
   Building2,
-  Calendar,
+  Check,
+  Copy,
   FolderOpen,
   Loader2,
   Mail,
-  Phone,
+  MessageCircle,
   Save,
-  ShieldCheck,
   StickyNote,
   Tag as TagIcon,
   User,
   X,
 } from 'lucide-react';
+import { format } from 'date-fns';
+import { toEnglishDigits } from '@/lib/utils';
+import CustomerAvatar from './CustomerAvatar';
 import { useToast } from './Toast';
 
-interface TaxonomyItem { id: string; name: string; color: string; isActive: boolean; }
+interface TaxonomyItem { id: string; name: string; color: string; isActive: boolean; scope?: 'organization' | 'store' }
 interface Customer {
   id: string;
   storeId: string;
@@ -24,11 +27,31 @@ interface Customer {
   fullName: string;
   email: string;
   phoneNumber: string;
+  whatsappId?: string;
   notes: string;
   categories: TaxonomyItem[];
   tags: TaxonomyItem[];
   createdAt: string;
+  updatedAt?: string;
 }
+
+type FormState = { fullName: string; email: string; notes: string; categoryIds: string[]; tagIds: string[] };
+
+const toForm = (data: Customer): FormState => ({
+  fullName: data.fullName || '',
+  email: data.email || '',
+  notes: data.notes || '',
+  categoryIds: (data.categories || []).map((item) => item.id),
+  tagIds: (data.tags || []).map((item) => item.id),
+});
+
+const sameIds = (a: string[], b: string[]) => a.length === b.length && a.every((id) => b.includes(id));
+const formatDate = (value?: string) => (value ? toEnglishDigits(format(new Date(value), 'yyyy/MM/dd')) : '—');
+const errorMessage = (error: unknown, fallback: string) =>
+  (error as { response?: { data?: { message?: string } } })?.response?.data?.message || fallback;
+
+// Names like "WhatsApp 9665..." are generated placeholders, not real customer names.
+const isGeneratedName = (name?: string) => !name || /^(WhatsApp|العميل|عميل)\s/.test(name);
 
 export default function CustomerProfile({ customerId, onClose, onUpdated }: { customerId: string; onClose: () => void; onUpdated?: () => void }) {
   const [customer, setCustomer] = useState<Customer | null>(null);
@@ -36,93 +59,237 @@ export default function CustomerProfile({ customerId, onClose, onUpdated }: { cu
   const [tags, setTags] = useState<TaxonomyItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [formData, setFormData] = useState({ fullName: '', email: '', notes: '', categoryIds: [] as string[], tagIds: [] as string[] });
+  const [copied, setCopied] = useState(false);
+  const [form, setForm] = useState<FormState>({ fullName: '', email: '', notes: '', categoryIds: [], tagIds: [] });
   const { showToast } = useToast();
 
-  useEffect(() => { void fetchCustomer(); }, [customerId]);
-
-  const fetchCustomer = async () => {
+  useEffect(() => {
+    let active = true;
     setLoading(true);
-    try {
-      const { data } = await api.get(`/customers/${customerId}`);
-      setCustomer(data);
-      setFormData({
-        fullName: data.fullName || '',
-        email: data.email || '',
-        notes: data.notes || '',
-        categoryIds: (data.categories || []).map((item: TaxonomyItem) => item.id),
-        tagIds: (data.tags || []).map((item: TaxonomyItem) => item.id),
-      });
-      const taxonomy = await api.get('/customers/taxonomy', { params: { storeId: data.storeId } });
-      setCategories(taxonomy.data?.categories || []);
-      setTags(taxonomy.data?.tags || []);
-    } catch (error: any) {
-      showToast(error?.response?.data?.message || 'تعذر جلب بطاقة العميل.', 'error');
-    } finally {
-      setLoading(false);
-    }
-  };
+    void (async () => {
+      try {
+        const { data } = await api.get<Customer>(`/customers/${customerId}`);
+        const taxonomy = await api.get('/customers/taxonomy', { params: { storeId: data.storeId } });
+        if (!active) return;
+        setCustomer(data);
+        setForm(toForm(data));
+        setCategories(taxonomy.data?.categories || []);
+        setTags(taxonomy.data?.tags || []);
+      } catch (error) {
+        if (active) showToast(errorMessage(error, 'تعذر جلب بيانات العميل.'), 'error');
+      } finally {
+        if (active) setLoading(false);
+      }
+    })();
+    return () => { active = false; };
+  }, [customerId, showToast]);
+
+  const dirty = useMemo(() => {
+    if (!customer) return false;
+    const original = toForm(customer);
+    return original.fullName !== form.fullName
+      || original.email !== form.email
+      || original.notes !== form.notes
+      || !sameIds(original.categoryIds, form.categoryIds)
+      || !sameIds(original.tagIds, form.tagIds);
+  }, [customer, form]);
+
+  // Closing plays the slide-out first; onClose fires when the panel has left the screen.
+  const [closing, setClosing] = useState(false);
+  const requestClose = useCallback(() => {
+    if (closing) return;
+    if (dirty && !window.confirm('لديك تعديلات غير محفوظة. هل تريد الإغلاق بدون حفظ؟')) return;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) onClose();
+    else setClosing(true);
+  }, [closing, dirty, onClose]);
+
+  useEffect(() => {
+    const esc = (event: KeyboardEvent) => { if (event.key === 'Escape') requestClose(); };
+    document.addEventListener('keydown', esc);
+    return () => document.removeEventListener('keydown', esc);
+  }, [requestClose]);
 
   const handleSave = async () => {
     setSaving(true);
     try {
-      const payload: any = { ...formData };
+      const payload: Partial<FormState> = { ...form };
       if (!payload.email) delete payload.email;
-      const { data } = await api.patch(`/customers/${customerId}`, payload);
+      const { data } = await api.patch<Customer>(`/customers/${customerId}`, payload);
       setCustomer(data);
-      setFormData((current) => ({ ...current, categoryIds: (data.categories || []).map((item: TaxonomyItem) => item.id), tagIds: (data.tags || []).map((item: TaxonomyItem) => item.id) }));
-      showToast('تم حفظ بيانات وتصنيفات العميل بنجاح.', 'success');
+      setForm(toForm(data));
+      showToast('تم حفظ بيانات العميل.', 'success');
       onUpdated?.();
-    } catch (error: any) {
-      showToast(error?.response?.data?.message || 'فشل حفظ بيانات العميل.', 'error');
+    } catch (error) {
+      showToast(errorMessage(error, 'تعذر حفظ بيانات العميل.'), 'error');
     } finally {
       setSaving(false);
     }
   };
 
   const toggle = (field: 'categoryIds' | 'tagIds', id: string) => {
-    setFormData((current) => ({ ...current, [field]: current[field].includes(id) ? current[field].filter((item) => item !== id) : [...current[field], id] }));
+    setForm((current) => ({ ...current, [field]: current[field].includes(id) ? current[field].filter((item) => item !== id) : [...current[field], id] }));
   };
 
-  if (loading) return <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/40 backdrop-blur-md"><div className="bg-labbaik-surface p-16 rounded-2xl border border-white/5 flex flex-col items-center gap-4"><Loader2 className="animate-spin text-labbaik-blue" size={44} /><p className="font-black text-neutral-500">جاري جلب الملف...</p></div></div>;
-  if (!customer) return null;
+  const phone = customer?.phoneNumber || customer?.whatsappId || '';
+  const phoneDigits = phone.replace(/[^0-9]/g, '');
+
+  const copyPhone = async () => {
+    try {
+      await navigator.clipboard.writeText(phone);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      showToast('تعذر نسخ الرقم.', 'error');
+    }
+  };
 
   return (
-    <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/70 backdrop-blur-md" onClick={onClose} />
-      <div className="relative bg-labbaik-surface border border-white/10 rounded-2xl shadow-3xl w-full max-w-3xl overflow-hidden animate-slide-up" dir="rtl">
-        <div className="bg-gradient-to-r from-labbaik-blue/10 to-transparent p-7 lg:p-9 border-b border-white/5 flex justify-between items-center">
-          <div className="flex items-center gap-5"><div className="w-14 h-14 bg-labbaik-blue/20 rounded-2xl flex items-center justify-center border border-labbaik-blue/30"><User className="text-labbaik-blue" size={28} /></div><div><h3 className="text-2xl font-black text-neutral-900 dark:text-white">بطاقة العميل</h3><p className="text-neutral-500 text-xs mt-1 font-bold">الهوية، الفرع، الفئات والتاقات المستخدمة في قوائم الإرسال.</p></div></div>
-          <button onClick={onClose} className="p-3 hover:bg-white/5 rounded-2xl text-neutral-500 hover:text-white"><X size={26} /></button>
+    <div className="fixed inset-0 z-[1000]" role="dialog" aria-modal="true" aria-labelledby="customer-profile-title" dir="rtl">
+      <div className={`absolute inset-0 bg-black/40 ${closing ? 'drawer-backdrop-out' : 'drawer-backdrop-in'}`} onClick={requestClose} />
+      <aside
+        onAnimationEnd={(event) => { if (closing && event.target === event.currentTarget) onClose(); }}
+        className={`absolute inset-y-0 left-0 w-full max-w-lg flex flex-col bg-labbaik-surface border-r border-labbaik-border shadow-[0_0_48px_-12px_rgba(15,10,30,0.45)] ${closing ? 'drawer-left-out' : 'drawer-left-in'}`}
+      >
+        {/* Header */}
+        <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-labbaik-border">
+          {customer ? (
+            <div className="flex items-center gap-3 min-w-0">
+              <CustomerAvatar name={isGeneratedName(customer.fullName) ? '' : customer.fullName} seed={phone || customer.id} size={48} className="rounded-full" />
+              <div className="min-w-0">
+                <h2 id="customer-profile-title" className="text-lg font-black text-neutral-900 dark:text-white truncate">
+                  {isGeneratedName(customer.fullName) ? phone || 'عميل بدون اسم' : customer.fullName}
+                </h2>
+                <p className="flex items-center gap-1 text-xs font-bold text-labbaik-text-muted">
+                  <Building2 size={12} /> {customer.store?.name || 'فرع غير معروف'}
+                </p>
+              </div>
+            </div>
+          ) : (
+            <h2 id="customer-profile-title" className="text-lg font-black text-neutral-900 dark:text-white">بيانات العميل</h2>
+          )}
+          <button type="button" onClick={requestClose} aria-label="إغلاق" className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-labbaik-text-muted hover:text-neutral-900 dark:hover:text-white hover:bg-labbaik-page cursor-pointer">
+            <X size={20} />
+          </button>
         </div>
 
-        <div className="p-7 lg:p-9 space-y-8 max-h-[72vh] overflow-y-auto custom-scrollbar">
-          <div className="rounded-2xl border border-labbaik-blue/15 bg-labbaik-blue/5 p-4 flex items-center gap-3"><Building2 size={19} className="text-labbaik-blue" /><div><div className="text-[10px] font-black text-neutral-500">الفرع المرتبط</div><div className="font-black text-neutral-900 dark:text-white">{customer.store?.name || customer.storeId}</div></div></div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-            <Field label="الاسم بالكامل" icon={<User size={12} />}><input value={formData.fullName} onChange={(e) => setFormData({ ...formData, fullName: e.target.value })} className="field-input" /></Field>
-            <Field label="البريد الإلكتروني" icon={<Mail size={12} />}><input type="email" value={formData.email} onChange={(e) => setFormData({ ...formData, email: e.target.value })} className="field-input" /></Field>
-            <Field label="رقم التواصل" icon={<Phone size={12} />}><div className="field-input flex items-center gap-3"><ShieldCheck size={17} className="text-green-500" /><span className="font-black tabular-nums">{customer.phoneNumber || 'غير مسجل'}</span></div></Field>
-            <Field label="تاريخ الانضمام" icon={<Calendar size={12} />}><div className="field-input text-xs text-neutral-500">{new Date(customer.createdAt).toLocaleDateString('ar-SA', { year: 'numeric', month: 'long', day: 'numeric' })}</div></Field>
+        {loading || !customer ? (
+          <div className="flex-1 grid place-items-center">
+            {loading ? <Loader2 className="animate-spin text-labbaik-blue" size={28} /> : <p className="text-sm text-labbaik-text-muted">تعذر تحميل بيانات العميل.</p>}
           </div>
+        ) : (
+          <>
+            <div className="flex-1 overflow-y-auto custom-scrollbar px-5 py-5 space-y-6">
+              {/* Contact */}
+              <section className="space-y-2">
+                {phone ? (
+                  <div className="flex items-center gap-2">
+                    <span className="flex-1 h-10 flex items-center rounded-lg border border-labbaik-border bg-labbaik-page px-3 text-sm font-black tabular-nums text-neutral-900 dark:text-white" dir="ltr">{phone}</span>
+                    <button type="button" onClick={() => void copyPhone()} aria-label="نسخ الرقم" title="نسخ الرقم" className="grid h-10 w-10 place-items-center rounded-lg border border-labbaik-border text-labbaik-text-muted hover:text-labbaik-blue hover:border-labbaik-blue/40 cursor-pointer">
+                      {copied ? <Check size={16} className="text-emerald-600" /> : <Copy size={16} />}
+                    </button>
+                    {phoneDigits && (
+                      <a href={`https://wa.me/${phoneDigits}`} target="_blank" rel="noreferrer" aria-label="فتح في واتساب" title="فتح في واتساب" className="grid h-10 w-10 place-items-center rounded-lg border border-labbaik-border text-emerald-700 dark:text-emerald-400 hover:border-emerald-500/50">
+                        <MessageCircle size={16} />
+                      </a>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-sm text-labbaik-text-muted">لا يوجد رقم مسجل.</p>
+                )}
+                <dl className="grid grid-cols-2 gap-2 text-xs">
+                  <div className="rounded-lg bg-labbaik-page px-3 py-2">
+                    <dt className="text-labbaik-text-muted">تاريخ الإضافة</dt>
+                    <dd className="mt-0.5 font-bold tabular-nums text-neutral-900 dark:text-white">{formatDate(customer.createdAt)}</dd>
+                  </div>
+                  <div className="rounded-lg bg-labbaik-page px-3 py-2">
+                    <dt className="text-labbaik-text-muted">آخر تحديث</dt>
+                    <dd className="mt-0.5 font-bold tabular-nums text-neutral-900 dark:text-white">{formatDate(customer.updatedAt)}</dd>
+                  </div>
+                </dl>
+              </section>
 
-          <SelectionBlock title="فئات العميل" icon={<FolderOpen size={15} />} items={categories} selected={formData.categoryIds} onToggle={(id) => toggle('categoryIds', id)} empty="أنشئ الفئات من شاشة العملاء أولاً." />
-          <SelectionBlock title="تاقات العميل" icon={<TagIcon size={15} />} items={tags} selected={formData.tagIds} onToggle={(id) => toggle('tagIds', id)} empty="أنشئ التاقات من شاشة العملاء أولاً." />
+              {/* Identity */}
+              <section className="space-y-3">
+                <Field label="الاسم" icon={<User size={13} />} htmlFor="customer-name">
+                  <input id="customer-name" value={form.fullName} onChange={(e) => setForm({ ...form, fullName: e.target.value })} className={inputClass} />
+                </Field>
+                <Field label="البريد الإلكتروني" icon={<Mail size={13} />} htmlFor="customer-email">
+                  <input id="customer-email" type="email" dir="ltr" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="name@example.com" className={`${inputClass} text-right`} />
+                </Field>
+              </section>
 
-          <Field label="ملاحظات الموظف" icon={<StickyNote size={13} />}><textarea value={formData.notes} onChange={(e) => setFormData({ ...formData, notes: e.target.value })} className="w-full h-32 bg-white/5 border border-white/10 rounded-xl p-5 text-sm text-neutral-900 dark:text-white outline-none focus:ring-2 focus:ring-labbaik-blue/40 resize-none" /></Field>
-        </div>
+              <SelectionBlock title="الفئات" kind="category" icon={<FolderOpen size={14} />} items={categories} selected={form.categoryIds} onToggle={(id) => toggle('categoryIds', id)} />
+              <SelectionBlock title="التاقات" kind="tag" icon={<TagIcon size={14} />} items={tags} selected={form.tagIds} onToggle={(id) => toggle('tagIds', id)} />
 
-        <div className="p-7 bg-white/5 border-t border-white/5 flex justify-end"><button onClick={handleSave} disabled={saving} className="bg-labbaik-blue text-white px-9 py-3.5 rounded-2xl font-black text-sm flex items-center gap-3 hover:scale-[1.02] transition disabled:opacity-50">{saving ? <Loader2 className="animate-spin" size={18} /> : <Save size={18} />} حفظ التحديثات</button></div>
-      </div>
-      <style>{`.field-input{width:100%;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:1rem;padding:.9rem 1.15rem;font-size:.875rem;outline:none}.field-input:focus{box-shadow:0 0 0 2px rgba(80,90,255,.25)}`}</style>
+              <Field label="ملاحظات الفريق" icon={<StickyNote size={13} />} htmlFor="customer-notes">
+                <textarea
+                  id="customer-notes"
+                  value={form.notes}
+                  onChange={(e) => setForm({ ...form, notes: e.target.value })}
+                  placeholder="معلومات تفيد الفريق عند التواصل مع العميل..."
+                  className={`${inputClass} h-28 py-2.5 resize-none`}
+                />
+              </Field>
+            </div>
+
+            {/* Footer */}
+            <div className="flex items-center justify-between gap-3 px-5 py-3 border-t border-labbaik-border">
+              <span className="text-xs font-bold text-labbaik-text-muted">{dirty ? 'تعديلات غير محفوظة' : 'لا توجد تعديلات'}</span>
+              <div className="flex items-center gap-2">
+                <button type="button" onClick={requestClose} className="h-10 px-4 rounded-lg text-sm font-bold text-labbaik-text-muted hover:text-neutral-900 dark:hover:text-white cursor-pointer">إغلاق</button>
+                <button
+                  type="button"
+                  onClick={() => void handleSave()}
+                  disabled={saving || !dirty}
+                  className="inline-flex items-center gap-2 h-10 px-5 rounded-lg bg-labbaik-blue text-labbaik-on-accent text-sm font-black hover:bg-[#553174] disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                >
+                  {saving ? <Loader2 className="animate-spin" size={16} /> : <Save size={16} />} حفظ
+                </button>
+              </div>
+            </div>
+          </>
+        )}
+      </aside>
     </div>
   );
 }
 
-function Field({ label, icon, children }: { label: string; icon: ReactNode; children: ReactNode }) {
-  return <div className="space-y-2"><label className="text-[10px] font-black text-neutral-500 px-1 flex items-center gap-2">{icon}{label}</label>{children}</div>;
+const inputClass = 'w-full h-10 rounded-lg border border-labbaik-border bg-labbaik-page px-3 text-sm text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-labbaik-blue/30 focus:border-labbaik-blue placeholder:text-labbaik-text-muted';
+
+function Field({ label, icon, htmlFor, children }: { label: string; icon: ReactNode; htmlFor: string; children: ReactNode }) {
+  return (
+    <div className="space-y-1.5">
+      <label htmlFor={htmlFor} className="text-xs font-bold text-labbaik-text-muted flex items-center gap-1.5">{icon}{label}</label>
+      {children}
+    </div>
+  );
 }
 
-function SelectionBlock({ title, icon, items, selected, onToggle, empty }: { title: string; icon: ReactNode; items: TaxonomyItem[]; selected: string[]; onToggle: (id: string) => void; empty: string }) {
-  return <div className="space-y-3"><h4 className="text-xs font-black text-neutral-500 flex items-center gap-2">{icon}{title}</h4><div className="flex flex-wrap gap-2">{items.filter((item) => item.isActive).map((item) => <button type="button" key={item.id} onClick={() => onToggle(item.id)} className={`px-4 py-2 rounded-xl text-xs font-black border transition ${selected.includes(item.id) ? 'ring-2 ring-labbaik-blue/20' : 'opacity-60 hover:opacity-100'}`} style={{ color: item.color, borderColor: `${item.color}55`, backgroundColor: selected.includes(item.id) ? `${item.color}1f` : `${item.color}0c` }}>{item.name}{selected.includes(item.id) ? ' ✓' : ''}</button>)}{!items.length && <span className="text-xs text-neutral-600">{empty}</span>}</div></div>;
+function SelectionBlock({ title, kind, icon, items, selected, onToggle }: { title: string; kind: 'category' | 'tag'; icon: ReactNode; items: TaxonomyItem[]; selected: string[]; onToggle: (id: string) => void }) {
+  // Hidden items stay visible here only while the customer still has them, so they can be removed.
+  const visible = items.filter((item) => item.isActive || selected.includes(item.id));
+  return (
+    <section className="space-y-2">
+      <h3 className="text-xs font-bold text-labbaik-text-muted flex items-center gap-1.5">{icon}{title}</h3>
+      <div className="flex flex-wrap gap-1.5">
+        {visible.map((item) => {
+          const on = selected.includes(item.id);
+          return (
+            <button
+              type="button"
+              key={item.id}
+              onClick={() => onToggle(item.id)}
+              aria-pressed={on}
+              className={`inline-flex items-center gap-1.5 h-8 px-2.5 border text-xs font-bold transition-colors cursor-pointer ${kind === 'category' ? 'rounded-md' : 'rounded-full'} ${on ? 'text-neutral-900 dark:text-white' : 'border-labbaik-border text-labbaik-text-muted hover:text-neutral-900 dark:hover:text-white'}`}
+              style={on ? { borderColor: item.color, backgroundColor: `${item.color}1f` } : undefined}
+            >
+              {on ? <Check size={13} style={{ color: item.color }} /> : <span className={`h-2 w-2 ${kind === 'category' ? 'rounded-sm' : 'rounded-full'}`} style={{ backgroundColor: item.color }} />}
+              {kind === 'tag' && '#'}{item.name}
+            </button>
+          );
+        })}
+        {!visible.length && <span className="text-xs text-labbaik-text-muted">لا توجد {kind === 'category' ? 'فئات' : 'تاقات'} بعد. أضفها من صفحة العملاء ← «الفئات والتاقات».</span>}
+      </div>
+    </section>
+  );
 }

@@ -54,6 +54,56 @@
   --color-input-border: rgba(100, 59, 137, 0.18);
   --color-labbaik-text: #1e293b;
   --color-labbaik-text-muted: #64748b;
+
+  /* Semantic scales from tailwind.config.ts (Tailwind v4 does not load that file) */
+  --color-neutral-0: #ffffff;
+  --color-primary-50: #f7f4fb;
+  --color-primary-100: #ede4f6;
+  --color-primary-200: #dcc9ee;
+  --color-primary-300: #c7ade5;
+  --color-primary-400: #b292dd;
+  --color-primary-500: #9d76d4;
+  --color-primary-600: #8860cb;
+  --color-primary-700: #643B89;
+  --color-primary-800: #4a2a63;
+  --color-primary-900: #301a3d;
+  --color-secondary-500: #a973cf;
+  --color-success-50: #f0fdf4;
+  --color-success-100: #dcfce7;
+  --color-success-200: #bbf7d0;
+  --color-success-300: #86efac;
+  --color-success-400: #4ade80;
+  --color-success-500: #22c55e;
+  --color-success-600: #16a34a;
+  --color-success-700: #15803d;
+  --color-success-800: #166534;
+  --color-success-900: #145231;
+  --color-error-50: #fef2f2;
+  --color-error-100: #fee2e2;
+  --color-error-200: #fecaca;
+  --color-error-300: #fca5a5;
+  --color-error-400: #f87171;
+  --color-error-500: #ef4444;
+  --color-error-600: #dc2626;
+  --color-error-700: #b91c1c;
+  --color-error-800: #991b1b;
+  --color-error-900: #7f1d1d;
+  --color-warning-50: #fffbeb;
+  --color-warning-100: #fef3c7;
+  --color-warning-200: #fde68a;
+  --color-warning-300: #fcd34d;
+  --color-warning-400: #fbbf24;
+  --color-warning-500: #f59e0b;
+  --color-warning-600: #d97706;
+  --color-warning-700: #b45309;
+  --color-warning-800: #92400e;
+  --color-warning-900: #78350f;
+  --color-info-50: #eff6ff;
+  --color-info-100: #dbeafe;
+  --color-info-500: #3b82f6;
+  --color-info-600: #2563eb;
+  --color-info-700: #1d4ed8;
+
   --radius-sm: 2px;
   --radius-md: 4px;
   --radius-lg: 6px;
@@ -198,25 +248,59 @@ textarea {
 }
 
 
+/* Chart roles (validated reference palette: slot 1 blue, slot 2 orange; dark steps for the dark surface). */
+:root {
+  --viz-1: #2a78d6;
+  --viz-2: #eb6834;
+  --viz-neutral: #a8a7a2;
+  --viz-grid: rgba(100, 59, 137, 0.1);
+  --viz-muted: #6b6578;
+}
+:root[data-theme="dark"] {
+  --viz-1: #3987e5;
+  --viz-2: #d95926;
+  --viz-neutral: #6b6a66;
+  --viz-grid: rgba(255, 255, 255, 0.08);
+  --viz-muted: #a9a3b5;
+}
+
+/* Side drawers anchored to the left edge: slide in from the left, slide back out to the left. */
+@keyframes drawer-left-in { from { transform: translateX(-100%); } to { transform: translateX(0); } }
+@keyframes drawer-left-out { from { transform: translateX(0); } to { transform: translateX(-100%); } }
+@keyframes drawer-backdrop-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes drawer-backdrop-out { from { opacity: 1; } to { opacity: 0; } }
+
+.drawer-left-in { animation: drawer-left-in 0.32s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.drawer-left-out { animation: drawer-left-out 0.22s cubic-bezier(0.55, 0, 1, 0.45) both; }
+.drawer-backdrop-in { animation: drawer-backdrop-in 0.32s ease-out both; }
+.drawer-backdrop-out { animation: drawer-backdrop-out 0.22s ease-in both; }
+
 /* Landing page motion */
 @keyframes landing-rise {
   from { opacity: 0; transform: translateY(18px); }
   to { opacity: 1; transform: translateY(0); }
 }
 
-@keyframes landing-float {
-  0%, 100% { transform: translate(0, 0) scale(1); }
-  50% { transform: translate(0, 24px) scale(1.06); }
-}
-
 .landing-rise { animation: landing-rise 0.7s cubic-bezier(0.22, 1, 0.36, 1) both; }
 .landing-rise-delay { animation-delay: 0.15s; }
-.landing-bubble { animation: landing-rise 0.5s ease-out both; animation-delay: 0.5s; }
+.landing-bubble { animation: landing-rise 0.5s cubic-bezier(0.22, 1, 0.36, 1) both; animation-delay: 0.5s; }
 .landing-bubble-2 { animation-delay: 0.9s; }
 .landing-bubble-3 { animation-delay: 1.3s; }
-.landing-blob { animation: landing-float 12s ease-in-out infinite; }
-.landing-blob-delay { animation-delay: -6s; }
 
 @media (prefers-reduced-motion: reduce) {
-  .landing-rise, .landing-bubble, .landing-blob { animation: none; }
+  .landing-rise, .landing-bubble { animation: none; }
+}
+
+/* Landing: tint secondary text from the brand hue instead of slate, theme browser surfaces */
+.landing {
+  --color-labbaik-text-muted: #5f566b;
+}
+:root[data-theme="dark"] .landing {
+  --color-labbaik-text-muted: #bfc3d6;
+}
+.landing ::selection {
+  background: rgba(100, 59, 137, 0.22);
+}
+:root[data-theme="dark"] .landing ::selection {
+  background: rgba(178, 146, 221, 0.35);
 }

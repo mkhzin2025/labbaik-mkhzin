@@ -31,8 +31,9 @@ export class ReviewsController {
   @ApiResponse({ status: 200, description: 'AI reply suggestion.', schema: { example: examples.review.suggestion } })
   @ApiUnauthorizedResponse({ schema: { example: examples.errors.unauthorized } })
   @ApiNotFoundResponse({ schema: { example: { message: 'Review not found', error: 'Not Found', statusCode: 404 } } })
-  async getSuggestion(@Param('id') id: string) {
-    const suggestion = await this.reviewsService.getAiSuggestion(id);
+  async getSuggestion(@Param('id') id: string, @Request() req) {
+    const store = await this.storesService.findByOwner(req.user.id);
+    const suggestion = await this.reviewsService.getAiSuggestion(id, store.id);
     return { suggestion };
   }
 
@@ -43,8 +44,9 @@ export class ReviewsController {
   @ApiResponse({ status: 201, description: 'Review reply saved.', schema: { example: { ...examples.review.item, ...examples.review.reply, status: 'replied' } } })
   @ApiUnauthorizedResponse({ schema: { example: examples.errors.unauthorized } })
   @ApiNotFoundResponse({ schema: { example: { message: 'Review not found', error: 'Not Found', statusCode: 404 } } })
-  async reply(@Param('id') id: string, @Body('reply') reply: string) {
-    return this.reviewsService.replyToReview(id, reply);
+  async reply(@Param('id') id: string, @Body('reply') reply: string, @Request() req) {
+    const store = await this.storesService.findByOwner(req.user.id);
+    return this.reviewsService.replyToReview(id, store.id, reply);
   }
 
   // SIMULATOR ENDPOINT

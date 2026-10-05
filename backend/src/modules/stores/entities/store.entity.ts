@@ -25,6 +25,10 @@ export class Store {
   @Column({ type: 'jsonb', default: [] })
   customTags: string[];
 
+  /** Canned replies shared by the team; typed in the inbox with "/shortcut". */
+  @Column({ type: 'jsonb', default: [] })
+  quickReplies: { id: string; shortcut: string; text: string }[];
+
   @Column({ type: 'jsonb', nullable: true })
   workingHours: {
     start: string; // HH:mm

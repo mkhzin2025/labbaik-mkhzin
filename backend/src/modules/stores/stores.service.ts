@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Store } from './entities/store.entity';
@@ -6,11 +6,23 @@ import { CreateStoreDto, UpdateStoreDto } from './dto/store.dto';
 import { User } from '../users/entities/user.entity';
 
 @Injectable()
-export class StoresService {
+export class StoresService implements OnModuleInit {
+  private readonly logger = new Logger(StoresService.name);
+
   constructor(
     @InjectRepository(Store)
     private readonly storeRepository: Repository<Store>,
   ) {}
+
+  // Same convention as meta_whatsapp_connections.webhookMode: add new columns idempotently on boot
+  // (see STORE-QUICK-REPLIES-MIGRATION.sql for running it by hand).
+  async onModuleInit() {
+    try {
+      await this.storeRepository.query(`ALTER TABLE stores ADD COLUMN IF NOT EXISTS "quickReplies" jsonb NOT NULL DEFAULT '[]'::jsonb;`);
+    } catch (e: any) {
+      this.logger.warn(`Auto-migration for quickReplies skipped or failed: ${e.message}`);
+    }
+  }
 
   async create(createStoreDto: CreateStoreDto, owner: User, organizationId?: string) {
     const existingStore = await this.storeRepository.findOne({

@@ -18,6 +18,7 @@ import PrivacyPolicyPage from './pages/PrivacyPolicyPage';
 import TermsPage from './pages/TermsPage';
 import AccountDeletionPage from './pages/AccountDeletionPage';
 import AccountDeletionAdminPage from './pages/AccountDeletionAdminPage';
+import AnalyticsPage from './pages/AnalyticsPage';
 import { ToastProvider } from './components/Toast';
 import { ThemeProvider } from './context/ThemeContext';
 import './index.css';
@@ -62,7 +63,7 @@ function App() {
                     <Route path="billing" element={<BillingPage />} />
                     <Route path="billing-admin" element={<BillingAdminPage />} />
                     <Route path="deletion-requests" element={<AccountDeletionAdminPage />} />
-                    <Route path="analytics" element={<div className="p-16 text-3xl font-black text-center text-neutral-900 dark:text-white">التقارير المتقدمة <br /><span className="text-neutral-500 dark:text-neutral-400 text-sm font-bold block mt-4 italic opacity-80">قريباً في المرحلة الثانية</span></div>} />
+                    <Route path="analytics" element={<AnalyticsPage />} />
                     <Route path="settings" element={<SettingsPage />} />
                   </Routes>
                 </DashboardLayout>

@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { Mail, Lock, Eye, EyeOff, Sun, Moon } from 'lucide-react';
 import LogoImage from '../assets/logos/logo.png';
 import LogoAltImage from '../assets/logos/logo-alt.png';
-import BackgroundImage from '../assets/login-bg.png';
+import BackgroundImage from '../assets/login-bg.webp';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { Alert } from '../components/ui/Alert';
@@ -60,9 +60,7 @@ export default function LoginPage() {
         <button
           type="button"
           onClick={toggleTheme}
-          className="flex items-center gap-2.5 px-3.5 py-2 rounded-2xl border transition-all duration-200 shadow-sm backdrop-blur-md cursor-pointer
-            bg-white/85 hover:bg-white border-purple-200/70 text-neutral-700 hover:text-neutral-900 hover:shadow-md hover:scale-[1.02] active:scale-95
-            dark:bg-white/10 dark:hover:bg-white/15 dark:border-white/15 dark:text-neutral-200 dark:hover:text-white"
+          className="flex items-center gap-2.5 h-10 px-3.5 rounded-xl border border-labbaik-border bg-labbaik-surface text-neutral-700 dark:text-neutral-200 hover:text-labbaik-blue dark:hover:text-white transition-colors cursor-pointer"
           aria-label={theme === 'light' ? 'تفعيل الوضع الداكن' : 'تفعيل الوضع الفاتح'}
           title={theme === 'light' ? 'تفعيل الوضع الداكن' : 'تفعيل الوضع الفاتح'}
         >
@@ -82,20 +80,16 @@ export default function LoginPage() {
 
       {/* Content Container */}
       <div className="relative z-10 w-full max-w-md">
-        <div className="rounded-2xl border transition-all duration-300 p-6 sm:p-8 backdrop-blur-xl
-          bg-white/95 border-purple-100/90 shadow-2xl shadow-purple-900/10
-          dark:bg-[#18263d]/90 dark:border-white/15 dark:shadow-2xl">
+        <div className="rounded-2xl border border-labbaik-border bg-labbaik-surface p-6 sm:p-8 shadow-[0_24px_48px_-24px_rgba(15,10,30,0.35)]">
           {/* Header */}
           <div className="mb-8 text-center">
-            <div className="mb-6 inline-block">
-              <img
-                src={theme === 'light' ? LogoAltImage : LogoImage}
-                alt="Labbaik Logo"
-                className="h-20 w-auto object-contain transition-all duration-300"
-              />
-            </div>
+            <img
+              src={theme === 'light' ? LogoAltImage : LogoImage}
+              alt="لبيك"
+              className="mx-auto mb-6 h-20 w-auto object-contain"
+            />
             <h1 className="text-2xl font-bold text-neutral-900 dark:text-white mb-2">أهلاً بك في لبيك</h1>
-            <p className="text-sm text-neutral-500 dark:text-neutral-400">
+            <p className="text-sm text-labbaik-text-muted">
               نظام الرد والتواصل الذكي المتكامل
             </p>
           </div>
@@ -114,6 +108,9 @@ export default function LoginPage() {
               type="email"
               label="البريد الإلكتروني"
               placeholder="أدخل بريدك الإلكتروني"
+              autoComplete="email"
+              dir="ltr"
+              className="text-right placeholder:text-right"
               icon={<Mail className="h-5 w-5" />}
               required
               value={email}
@@ -127,6 +124,8 @@ export default function LoginPage() {
                 type={showPassword ? 'text' : 'password'}
                 label="كلمة المرور"
                 placeholder="أدخل كلمة المرور"
+                autoComplete="current-password"
+                className="pl-12"
                 icon={<Lock className="h-5 w-5" />}
                 required
                 value={password}
@@ -136,9 +135,10 @@ export default function LoginPage() {
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
-                className="absolute left-3 top-[38px] text-neutral-400 hover:text-neutral-700 dark:hover:text-white transition-colors"
+                className="absolute left-1 top-7.5 grid h-11 w-11 place-items-center rounded-lg text-labbaik-text-muted hover:text-neutral-900 dark:hover:text-white transition-colors cursor-pointer"
+                aria-label={showPassword ? 'إخفاء كلمة المرور' : 'إظهار كلمة المرور'}
+                aria-pressed={showPassword}
                 title={showPassword ? 'إخفاء كلمة المرور' : 'إظهار كلمة المرور'}
-                tabIndex={-1}
               >
                 {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
               </button>
@@ -159,8 +159,8 @@ export default function LoginPage() {
 
           {/* Footer */}
           <div className="mt-6 text-center">
-            <p className="text-xs text-neutral-500 dark:text-neutral-400 font-medium">
-              © 2026 Labbaik System • جميع الحقوق محفوظة
+            <p className="text-xs text-labbaik-text-muted font-medium">
+              © {new Date().getFullYear()} Labbaik System • جميع الحقوق محفوظة
             </p>
           </div>
         </div>

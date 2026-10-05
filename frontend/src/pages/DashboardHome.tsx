@@ -26,8 +26,104 @@ import {
   BarChart,
   Bar
 } from 'recharts';
-import { Card, CardBody, StatCard, Skeleton, ErrorState } from '@/components/ui';
+import { Card, CardBody, StatCard, ErrorState } from '@/components/ui';
 import { toEnglishDigits, formatNumber } from '@/lib/utils';
+
+// Same cards, sizes and grid as the loaded page, so nothing shifts when the numbers arrive.
+const cardShell = 'rounded-2xl border border-purple-100/70 bg-labbaik-surface dark:border-white/10';
+const bone = 'rounded-md bg-labbaik-page dark:bg-white/5 animate-pulse';
+
+function DashboardSkeleton() {
+  return (
+    <div className="space-y-8" dir="rtl" aria-busy="true" aria-label="جاري تحميل لوحة القيادة">
+      {/* Header: title, subtitle, status pill */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+        <div>
+          <div className={`${bone} h-9 lg:h-10 w-64`} />
+          <div className={`${bone} h-5 w-96 max-w-full mt-3`} />
+        </div>
+        <div className={`${bone} h-9 w-52 rounded-full`} />
+      </div>
+
+      {/* Primary stat cards (StatCard) */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-5">
+        {Array.from({ length: 4 }, (_, i) => (
+          <div key={i} className={`${cardShell} p-4 sm:p-5 space-y-3`}>
+            <div className={`${bone} h-12 w-12 rounded-2xl`} />
+            <div className="space-y-2">
+              <div className={`${bone} h-3 w-24`} />
+              <div className={`${bone} h-7 w-20`} />
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Performance cards */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 lg:gap-5">
+        <div className={`${cardShell} p-5 sm:p-6 space-y-5`}>
+          <div className="flex justify-between items-start">
+            <div className={`${bone} h-12 w-12 rounded-2xl`} />
+            <div className={`${bone} h-3 w-12`} />
+          </div>
+          <div className="space-y-2">
+            <div className={`${bone} h-4 w-32`} />
+            <div className={`${bone} h-8 w-24`} />
+          </div>
+          <div className={`${bone} h-3 w-4/5`} />
+        </div>
+        <div className={`${cardShell} p-5 sm:p-6 space-y-5`}>
+          <div className={`${bone} h-3 w-20`} />
+          {[0, 1].map((i) => (
+            <div key={i} className="space-y-2">
+              <div className="flex justify-between"><div className={`${bone} h-3 w-20`} /><div className={`${bone} h-3 w-14`} /></div>
+              <div className={`${bone} h-2 w-full rounded-full`} />
+            </div>
+          ))}
+        </div>
+        <div className={`${cardShell} p-5 sm:p-6 flex flex-col items-center justify-center gap-4`}>
+          <div className={`${bone} h-16 w-16 rounded-2xl`} />
+          <div className={`${bone} h-4 w-40`} />
+          <div className={`${bone} h-3 w-48`} />
+        </div>
+      </div>
+
+      {/* Charts: timeline (2/3), sentiment donut (1/3), channels (full width) */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-5">
+        <div className={`${cardShell} lg:col-span-2 p-5 sm:p-6 space-y-6`}>
+          <div className={`${bone} h-6 w-56`} />
+          <div className="h-64 md:h-80 flex items-end gap-3 border-b border-labbaik-border pb-2">
+            {[40, 55, 35, 70, 50, 80, 60].map((h, i) => (
+              <div key={i} className={`${bone} flex-1 rounded-t-md rounded-b-none`} style={{ height: `${h}%` }} />
+            ))}
+          </div>
+        </div>
+        <div className={`${cardShell} p-5 sm:p-6 space-y-6`}>
+          <div className={`${bone} h-6 w-44`} />
+          <div className="h-48 md:h-64 grid place-items-center">
+            <div className="h-40 w-40 rounded-full border-[20px] border-labbaik-page dark:border-white/5 animate-pulse" />
+          </div>
+          <div className="space-y-3">
+            {[0, 1, 2].map((i) => (
+              <div key={i} className="flex items-center justify-between">
+                <div className="flex items-center gap-2"><div className={`${bone} h-2.5 w-2.5 rounded-full`} /><div className={`${bone} h-3 w-14`} /></div>
+                <div className={`${bone} h-3 w-12`} />
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className={`${cardShell} lg:col-span-3 p-5 sm:p-6 space-y-6`}>
+          <div className={`${bone} h-6 w-52`} />
+          <div className="h-40 md:h-56 flex items-end justify-around gap-6 px-6">
+            {[70, 30, 20, 10].map((h, i) => (
+              <div key={i} className={`${bone} w-full max-w-40 rounded-t-lg rounded-b-none`} style={{ height: `${h}%` }} />
+            ))}
+          </div>
+        </div>
+      </div>
+      <span className="sr-only">جاري تحميل الإحصاءات...</span>
+    </div>
+  );
+}
 
 interface DashboardStats {
   totalConversations: number;
@@ -68,65 +164,7 @@ export default function DashboardHome() {
     return () => window.clearTimeout(request);
   }, []);
 
-  if (loading) {
-    return (
-      <div className="space-y-8 animate-fade-in" dir="rtl">
-        {/* Loading skeleton for header */}
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
-          <div className="space-y-3">
-            <div className="h-10 w-52 bg-neutral-200/80 dark:bg-neutral-800/80 rounded-2xl animate-pulse"></div>
-            <div className="h-5 w-80 bg-neutral-200/80 dark:bg-neutral-800/80 rounded-xl animate-pulse"></div>
-          </div>
-          <div className="h-11 w-48 bg-neutral-200/80 dark:bg-neutral-800/80 rounded-2xl animate-pulse"></div>
-        </div>
-
-        {/* Loading skeleton for primary stats */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-5">
-          {Array.from({ length: 4 }, (_, index) => (
-            <div key={index} className="space-y-5 py-4">
-              <div className="flex justify-between">
-                <Skeleton width={48} height={48} className="rounded-2xl" />
-                <Skeleton width={24} height={24} className="rounded-lg" />
-              </div>
-              <div className="space-y-3">
-                <Skeleton width="50%" height="0.875rem" className="rounded-md" />
-                <Skeleton width="75%" height="2rem" className="rounded-lg" />
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {/* Loading skeleton for performance cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 lg:gap-5">
-          {Array.from({ length: 3 }, (_, index) => (
-            <div key={index} className="space-y-5 py-4">
-              <div className="flex justify-between">
-                <Skeleton width={48} height={48} className="rounded-2xl" />
-                <Skeleton width={72} height={12} className="rounded-md" />
-              </div>
-              <div className="space-y-3">
-                <Skeleton width="50%" height="0.875rem" className="rounded-md" />
-                <Skeleton width="60%" height="2rem" className="rounded-lg" />
-              </div>
-              <Skeleton width="80%" height="0.75rem" className="rounded-md" />
-            </div>
-          ))}
-        </div>
-
-        {/* Loading skeleton for charts */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-5">
-          <div className="lg:col-span-2 py-4 space-y-6">
-            <div className="h-7 w-48 bg-neutral-200/80 dark:bg-neutral-800/80 rounded-xl animate-pulse"></div>
-            <div className="h-64 md:h-80 w-full bg-neutral-100 dark:bg-neutral-800/40 rounded-2xl animate-pulse"></div>
-          </div>
-          <div className="py-4 space-y-6">
-            <div className="h-7 w-40 bg-neutral-200/80 dark:bg-neutral-800/80 rounded-xl animate-pulse"></div>
-            <div className="h-48 md:h-64 w-full bg-neutral-100 dark:bg-neutral-800/40 rounded-2xl animate-pulse"></div>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  if (loading) return <DashboardSkeleton />;
 
   if (error) {
     return (

@@ -1,6 +1,9 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
 
+export const CONVERSATION_STATUSES = ['open', 'pending', 'snoozed', 'closed'] as const;
+export type ConversationStatus = (typeof CONVERSATION_STATUSES)[number];
+
 @Schema({ timestamps: true })
 export class Message extends Document {
   @Prop({ required: true })
@@ -20,6 +23,10 @@ export class Message extends Document {
 
   @Prop({ default: Date.now })
   timestamp: number;
+
+  // true = typed by a team member, false = automatic (AI/flow). Older messages predate the field and leave it unset.
+  @Prop()
+  isManual?: boolean;
 }
 
 export const MessageSchema = SchemaFactory.createForClass(Message);
@@ -44,8 +51,15 @@ export class Conversation extends Document {
   @Prop({ nullable: true })
   customerName: string; // WhatsApp profile name or the customer's saved name
 
-  @Prop({ default: 'open' })
-  status: string;
+  // Workflow state shown in the inbox: open → pending (waiting on someone) → snoozed (hidden until snoozedUntil) → closed.
+  @Prop({ default: 'open', enum: CONVERSATION_STATUSES })
+  status: ConversationStatus;
+
+  @Prop({ type: Date, default: null })
+  snoozedUntil: Date | null;
+
+  @Prop({ type: Date })
+  statusUpdatedAt: Date;
 
   @Prop({ type: [MessageSchema], default: [] })
   messages: Message[];

@@ -1,7 +1,7 @@
 import { Injectable, Logger, NotFoundException, InternalServerErrorException, OnModuleInit } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import { Conversation } from './schemas/conversation.schema';
+import { Conversation, ConversationStatus } from './schemas/conversation.schema';
 import { MessagingService } from '../channels/messaging.service';
 import { ChannelsService } from '../channels/channels.service';
 import { CustomersService } from '../customers/customers.service';
@@ -104,10 +104,45 @@ export class ConversationsService implements OnModuleInit {
 
     if (messageData.from !== 'me') updateQuery.$inc = { unreadCount: 1 };
 
+    // A customer writing again reopens a snoozed or closed conversation.
+    const fromCustomer = messageData.from !== 'me' && messageData.from !== 'system';
+    if (fromCustomer) {
+      updateQuery.$set.status = 'open';
+      updateQuery.$set.snoozedUntil = null;
+    }
+
+    // One thread per customer: match it whatever its status, so closing never spawns a duplicate conversation.
     return this.conversationModel.findOneAndUpdate(
-      { customerPhone, storeId, platform, status: 'open' },
+      { customerPhone, storeId, platform },
       updateQuery,
-      { upsert: true, returnDocument: 'after' }
+      { upsert: true, returnDocument: 'after', sort: { lastMessageAt: -1 } }
+    );
+  }
+
+  /** Sets the workflow status of a conversation (open / pending / snoozed / closed). */
+  async setStatus(id: string, status: ConversationStatus, snoozedUntil?: Date | null) {
+    const update: Record<string, unknown> = {
+      status,
+      statusUpdatedAt: new Date(),
+      snoozedUntil: status === 'snoozed' ? snoozedUntil : null,
+    };
+    if (status === 'closed') update.unreadCount = 0;
+    const conversation = await this.conversationModel.findByIdAndUpdate(id, { $set: update }, { returnDocument: 'after' }).lean().exec();
+    if (!conversation) throw new NotFoundException('Conversation not found');
+    this.eventsGateway.server.to(`store_${conversation.storeId}`).emit('conversation_status', {
+      conversationId: String(conversation._id),
+      status: conversation.status,
+      snoozedUntil: conversation.snoozedUntil || null,
+    });
+    return { id: String(conversation._id), status: conversation.status, snoozedUntil: conversation.snoozedUntil || null };
+  }
+
+  /** Snoozes are lazy: anything past its wake-up time is reopened before a list is read. */
+  private async wakeSnoozed(storeIds: string[]) {
+    if (!storeIds.length) return;
+    await this.conversationModel.updateMany(
+      { storeId: { $in: storeIds }, status: 'snoozed', snoozedUntil: { $lte: new Date() } },
+      { $set: { status: 'open', snoozedUntil: null, statusUpdatedAt: new Date() } },
     );
   }
 
@@ -165,19 +200,37 @@ export class ConversationsService implements OnModuleInit {
   }
 
   async findAllByStore(storeId: string) {
+    await this.wakeSnoozed([storeId]);
     return this.withCustomerNames(await this.conversationModel.find({ storeId }).sort({ lastMessageAt: -1 }).lean().exec());
   }
 
   async findAllByStores(storeIds: string[]) {
     if (!storeIds.length) return [];
+    await this.wakeSnoozed(storeIds);
     return this.withCustomerNames(await this.conversationModel.find({ storeId: { $in: storeIds } }).sort({ lastMessageAt: -1 }).lean().exec());
   }
 
   // A name saved on the customer record (possibly edited by the team) wins over the WhatsApp profile name.
+  // Enriches inbox rows with the CRM view of the customer: saved name plus their categories and tags.
   private async withCustomerNames<T extends { customerId?: string; customerName?: string }>(conversations: T[]) {
     try {
-      const names = await this.customersService.findNamesByIds(conversations.map((conv) => conv.customerId || ''));
-      return conversations.map((conv) => ({ ...conv, customerName: (conv.customerId && names.get(conv.customerId)) || conv.customerName || null }));
+      const ids = conversations.map((conv) => conv.customerId || '');
+      const [names, labels] = await Promise.all([
+        this.customersService.findNamesByIds(ids),
+        this.customersService.findLabelsByIds(ids).catch((error) => {
+          this.logger.warn(`Could not load customer labels: ${error?.message}`);
+          return new Map();
+        }),
+      ]);
+      return conversations.map((conv) => {
+        const label = conv.customerId ? labels.get(conv.customerId) : undefined;
+        return {
+          ...conv,
+          customerName: (conv.customerId && names.get(conv.customerId)) || conv.customerName || null,
+          customerCategories: label?.categories || [],
+          customerTags: label?.tags || [],
+        };
+      });
     } catch (error) {
       this.logger.warn(`Could not load customer names: ${error?.message}`);
       return conversations;
@@ -203,6 +256,121 @@ export class ConversationsService implements OnModuleInit {
     }
     
     return conversation;
+  }
+
+  /**
+   * Reporting for the analytics page. Everything is measured from stored messages; nothing is estimated.
+   * `tzOffsetMinutes` (minutes east of UTC) buckets days and hours in the viewer's local time.
+   */
+  async getAnalytics(storeIds: string[], days: number, tzOffsetMinutes: number) {
+    const DAY = 86_400_000;
+    const shift = tzOffsetMinutes * 60_000;
+    const now = Date.now();
+    // Period = the last `days` local calendar days including today; the previous period is the same length before it.
+    const todayStartLocal = Math.floor((now + shift) / DAY) * DAY;
+    const periodStart = todayStartLocal - (days - 1) * DAY - shift;
+    const prevStart = periodStart - days * DAY;
+
+    const empty = {
+      period: { days, from: new Date(periodStart).toISOString(), to: new Date(now).toISOString() },
+      totals: { activeConversations: 0, newConversations: 0, incoming: 0, autoReplies: 0, teamReplies: 0, unclassifiedReplies: 0, waitingNow: 0 },
+      previous: { activeConversations: 0, incoming: 0 },
+      responseTime: { medianSeconds: null as number | null, within5MinShare: null as number | null, samples: 0 },
+      daily: [] as { date: string; incoming: number; auto: number; team: number }[],
+      hourly: Array.from({ length: 7 }, () => Array(24).fill(0)) as number[][],
+      platforms: [] as { platform: string; conversations: number }[],
+      sentiment: { positive: 0, neutral: 0, negative: 0 },
+      manualTrackingSince: null as string | null,
+    };
+    if (!storeIds.length) return empty;
+
+    const conversations = await this.conversationModel
+      .find(
+        { storeId: { $in: storeIds }, $or: [{ lastMessageAt: { $gte: new Date(prevStart) } }, { lastMessageAt: { $exists: false } }] },
+        { platform: 1, lastSentiment: 1, 'messages.from': 1, 'messages.type': 1, 'messages.timestamp': 1, 'messages.isManual': 1 },
+      )
+      .lean()
+      .exec();
+
+    const dayKey = (t: number) => new Date(Math.floor((t + shift) / DAY) * DAY).toISOString().slice(0, 10);
+    const daily = new Map<string, { date: string; incoming: number; auto: number; team: number }>();
+    for (let i = 0; i < days; i++) {
+      const key = dayKey(periodStart + i * DAY);
+      daily.set(key, { date: key, incoming: 0, auto: 0, team: 0 });
+    }
+
+    const result = empty;
+    const responseSeconds: number[] = [];
+    const platformCount = new Map<string, number>();
+    let firstManualAt: number | null = null;
+    const isCustomer = (m: any) => m.from !== 'me' && m.from !== 'system' && m.type !== 'system_error';
+    const time = (m: any) => new Date(m.timestamp).getTime();
+
+    for (const conv of conversations as any[]) {
+      const messages = (conv.messages || []).filter((m: any) => Number.isFinite(time(m)));
+      if (!messages.length) continue;
+      const firstAt = time(messages[0]);
+      let activeNow = false;
+      let activePrev = false;
+
+      for (let i = 0; i < messages.length; i++) {
+        const m = messages[i];
+        const t = time(m);
+        if (m.from === 'me' && m.isManual === true && (firstManualAt === null || t < firstManualAt)) firstManualAt = t;
+        if (t >= prevStart && t < periodStart) {
+          activePrev = true;
+          if (isCustomer(m)) result.previous.incoming++;
+          continue;
+        }
+        if (t < periodStart) continue;
+        activeNow = true;
+        const bucket = daily.get(dayKey(t));
+        if (isCustomer(m)) {
+          result.totals.incoming++;
+          if (bucket) bucket.incoming++;
+          const local = new Date(t + shift);
+          result.hourly[local.getUTCDay()][local.getUTCHours()]++;
+          // Response time: from a customer message that follows a non-customer message (start of a wait) to the next reply.
+          const startsWait = i === 0 || !isCustomer(messages[i - 1]);
+          if (startsWait) {
+            const reply = messages.slice(i + 1).find((n: any) => n.from === 'me');
+            if (reply) {
+              const seconds = (time(reply) - t) / 1000;
+              if (seconds >= 0 && seconds < 86_400) responseSeconds.push(seconds);
+            }
+          }
+        } else if (m.from === 'me') {
+          if (m.isManual === true) { result.totals.teamReplies++; if (bucket) bucket.team++; }
+          else if (m.isManual === false) { result.totals.autoReplies++; if (bucket) bucket.auto++; }
+          else { result.totals.unclassifiedReplies++; if (bucket) bucket.auto++; }
+        }
+      }
+
+      if (activeNow) {
+        result.totals.activeConversations++;
+        platformCount.set(conv.platform, (platformCount.get(conv.platform) || 0) + 1);
+        const s = conv.lastSentiment as 'positive' | 'neutral' | 'negative';
+        if (s in result.sentiment) result.sentiment[s]++;
+        else result.sentiment.neutral++;
+      }
+      if (activePrev) result.previous.activeConversations++;
+      if (firstAt >= periodStart) result.totals.newConversations++;
+      if (isCustomer(messages[messages.length - 1])) result.totals.waitingNow++;
+    }
+
+    responseSeconds.sort((a, b) => a - b);
+    if (responseSeconds.length) {
+      const mid = Math.floor(responseSeconds.length / 2);
+      result.responseTime = {
+        medianSeconds: Math.round(responseSeconds.length % 2 ? responseSeconds[mid] : (responseSeconds[mid - 1] + responseSeconds[mid]) / 2),
+        within5MinShare: responseSeconds.filter((s) => s <= 300).length / responseSeconds.length,
+        samples: responseSeconds.length,
+      };
+    }
+    result.daily = [...daily.values()];
+    result.platforms = [...platformCount.entries()].map(([platform, conversations]) => ({ platform, conversations })).sort((a, b) => b.conversations - a.conversations);
+    result.manualTrackingSince = firstManualAt ? new Date(firstManualAt).toISOString() : null;
+    return result;
   }
 
   async getStats(storeId: string) {
@@ -276,7 +444,7 @@ export class ConversationsService implements OnModuleInit {
 
   async isAiEnabled(customerPhone: string, storeId: string, platform: string): Promise<boolean> {
     customerPhone = this.normalizeCustomerPhone(customerPhone, platform);
-    const conversation = await this.conversationModel.findOne({ customerPhone, storeId, platform, status: 'open' });
+    const conversation = await this.conversationModel.findOne({ customerPhone, storeId, platform }).sort({ lastMessageAt: -1 });
     if (!conversation) return true;
     if (conversation.aiEnabled === false && conversation.aiDisabledUntil) {
       const now = new Date();

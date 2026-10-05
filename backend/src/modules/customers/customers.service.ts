@@ -23,6 +23,27 @@ export type CustomerFilters = {
   storeIds?: string[];
 };
 
+export type CustomerSegment = 'all' | 'categorized' | 'uncategorized' | 'tagged' | 'untagged';
+export type CustomerSortKey = 'fullName' | 'phoneNumber' | 'createdAt' | 'updatedAt';
+
+export type CustomerPageOptions = {
+  page: number;
+  limit: number;
+  segment?: CustomerSegment;
+  sort?: CustomerSortKey;
+  dir?: 'asc' | 'desc';
+};
+
+const SORT_COLUMNS: Record<CustomerSortKey, string> = {
+  fullName: 'customer.fullName',
+  phoneNumber: 'customer.phoneNumber',
+  createdAt: 'customer.createdAt',
+  updatedAt: 'customer.updatedAt',
+};
+
+const HAS_CATEGORY = 'EXISTS (SELECT 1 FROM customer_category_links ccl WHERE ccl."customerId" = customer.id)';
+const HAS_TAG = 'EXISTS (SELECT 1 FROM customer_tag_links ctl WHERE ctl."customerId" = customer.id)';
+
 @Injectable()
 export class CustomersService {
   constructor(
@@ -79,6 +100,39 @@ export class CustomersService {
     return names;
   }
 
+  /**
+   * Active categories and tags for a batch of customers, keyed by customer id (for inbox badges).
+   * Two flat queries on the link tables, so cost scales with the conversations shown, not the customer base.
+   */
+  async findLabelsByIds(ids: string[]) {
+    const unique = Array.from(new Set(ids.filter(Boolean)));
+    const labels = new Map<string, { categories: { id: string; name: string; color: string }[]; tags: { id: string; name: string; color: string }[] }>();
+    if (!unique.length) return labels;
+    const [categories, tags] = await Promise.all([
+      this.customerRepository.query(
+        `SELECT l."customerId", c.id, c.name, c.color FROM customer_category_links l
+         JOIN customer_categories c ON c.id = l."categoryId"
+         WHERE l."customerId" = ANY($1::uuid[]) AND c."isActive" = true
+         ORDER BY c."sortOrder" ASC, c.name ASC`,
+        [unique],
+      ),
+      this.customerRepository.query(
+        `SELECT l."customerId", t.id, t.name, t.color FROM customer_tag_links l
+         JOIN customer_tags t ON t.id = l."tagId"
+         WHERE l."customerId" = ANY($1::uuid[]) AND t."isActive" = true
+         ORDER BY t.name ASC`,
+        [unique],
+      ),
+    ]);
+    const entry = (id: string) => {
+      if (!labels.has(id)) labels.set(id, { categories: [], tags: [] });
+      return labels.get(id)!;
+    };
+    for (const row of categories) entry(row.customerId).categories.push({ id: row.id, name: row.name, color: row.color });
+    for (const row of tags) entry(row.customerId).tags.push({ id: row.id, name: row.name, color: row.color });
+    return labels;
+  }
+
   async findAllByStore(storeId: string, filters: CustomerFilters = {}) {
     return this.findAllScoped(undefined, storeId, filters);
   }
@@ -121,6 +175,139 @@ export class CustomersService {
       await this.migrateLegacyTags([customer], customer.storeId, customer.store?.organizationId || organizationId);
     }
     return this.reloadWithRelations(customers.map((customer) => customer.id));
+  }
+
+  /**
+   * One page of customers plus per-segment totals for the same filters, so the UI can show
+   * accurate counts without loading every customer.
+   */
+  async findPage(scope: { organizationId?: string; storeId?: string }, filters: CustomerFilters, options: CustomerPageOptions) {
+    const base = () => this.filteredQuery(scope, filters);
+
+    const [all, categorized, tagged] = await Promise.all([
+      base().getCount(),
+      base().andWhere(HAS_CATEGORY).getCount(),
+      base().andWhere(HAS_TAG).getCount(),
+    ]);
+    const counts: Record<CustomerSegment, number> = {
+      all,
+      categorized,
+      uncategorized: all - categorized,
+      tagged,
+      untagged: all - tagged,
+    };
+
+    const page = base();
+    switch (options.segment) {
+      case 'categorized': page.andWhere(HAS_CATEGORY); break;
+      case 'uncategorized': page.andWhere(`NOT ${HAS_CATEGORY}`); break;
+      case 'tagged': page.andWhere(HAS_TAG); break;
+      case 'untagged': page.andWhere(`NOT ${HAS_TAG}`); break;
+    }
+
+    const column = SORT_COLUMNS[options.sort || 'updatedAt'] || SORT_COLUMNS.updatedAt;
+    const direction = options.dir === 'asc' ? 'ASC' : 'DESC';
+    const rows = await page
+      .select(['customer.id', 'customer.storeId'])
+      .orderBy(column, direction, 'NULLS LAST')
+      .addOrderBy('customer.id', 'ASC')
+      .offset((options.page - 1) * options.limit)
+      .limit(options.limit)
+      .getMany();
+
+    const ids = rows.map((row) => row.id);
+    const loaded = await this.reloadWithRelations(ids);
+    const byId = new Map(loaded.map((customer) => [customer.id, customer]));
+    const items = ids.map((id) => byId.get(id)).filter((customer): customer is Customer => Boolean(customer));
+    for (const customer of items) {
+      await this.migrateLegacyTags([customer], customer.storeId, customer.store?.organizationId || scope.organizationId);
+    }
+
+    return {
+      items,
+      total: counts[options.segment || 'all'] ?? all,
+      page: options.page,
+      limit: options.limit,
+      counts,
+    };
+  }
+
+  /** Adds or removes categories/tags on many customers of one branch at once. */
+  async bulkUpdateTaxonomy(storeId: string, organizationId: string, dto: { customerIds: string[]; mode: 'add' | 'remove'; categoryIds?: string[]; tagIds?: string[] }) {
+    const customers = await this.getCustomersByIdsForStore(storeId, dto.customerIds);
+    const customerIds = customers.map((customer) => customer.id);
+    const categories = dto.categoryIds?.length ? await this.resolveCategories(organizationId, storeId, dto.categoryIds) : [];
+    const tags = dto.tagIds?.length ? await this.resolveTags(organizationId, storeId, dto.tagIds) : [];
+
+    await this.customerRepository.manager.transaction(async (manager) => {
+      for (const [table, column, items] of [
+        ['customer_category_links', 'categoryId', categories],
+        ['customer_tag_links', 'tagId', tags],
+      ] as const) {
+        for (const item of items) {
+          if (dto.mode === 'add') {
+            await manager.query(
+              `INSERT INTO ${table} ("customerId", "${column}") SELECT unnest($1::uuid[]), $2 ON CONFLICT DO NOTHING`,
+              [customerIds, item.id],
+            );
+          } else {
+            await manager.query(`DELETE FROM ${table} WHERE "${column}" = $1 AND "customerId" = ANY($2::uuid[])`, [item.id, customerIds]);
+          }
+        }
+      }
+      await manager.getRepository(Customer).update({ id: In(customerIds) }, { updatedAt: new Date() });
+    });
+
+    return { success: true, updated: customerIds.length };
+  }
+
+  private filteredQuery(scope: { organizationId?: string; storeId?: string }, filters: CustomerFilters) {
+    const query = this.customerRepository.createQueryBuilder('customer').leftJoin('customer.store', 'store');
+
+    if (scope.storeId) query.where('customer.storeId = :storeId', { storeId: scope.storeId });
+    else if (scope.organizationId) query.where('store.organizationId = :organizationId', { organizationId: scope.organizationId });
+    else throw new BadRequestException('Organization or branch scope is required');
+
+    if (filters.storeIds?.length) {
+      query.andWhere('customer.storeId IN (:...storeIds)', { storeIds: [...new Set(filters.storeIds)] });
+    }
+
+    const term = filters.search?.trim();
+    if (term) {
+      // Local numbers (05…) should match stored international ones (+9665…), so leading zeros are ignored.
+      const digits = term.replace(/[^0-9]/g, '').replace(/^0+/, '');
+      query.andWhere(new Brackets((qb) => {
+        qb.where('LOWER(COALESCE(customer.fullName, \'\')) LIKE :search', { search: `%${term.toLowerCase()}%` })
+          .orWhere('LOWER(COALESCE(customer.email, \'\')) LIKE :search');
+        if (digits) qb.orWhere('COALESCE(customer.phoneNumber, \'\') LIKE :phoneSearch', { phoneSearch: `%${digits}%` });
+      }));
+    }
+
+    if (filters.categoryIds?.length) {
+      query.andWhere('EXISTS (SELECT 1 FROM customer_category_links fcl WHERE fcl."customerId" = customer.id AND fcl."categoryId" IN (:...categoryIds))', { categoryIds: filters.categoryIds });
+    }
+    if (filters.tagIds?.length) {
+      query.andWhere('EXISTS (SELECT 1 FROM customer_tag_links ftl WHERE ftl."customerId" = customer.id AND ftl."tagId" IN (:...tagIds))', { tagIds: filters.tagIds });
+    }
+    if (filters.whatsappOnly) query.andWhere("COALESCE(customer.phoneNumber, customer.whatsappId, '') <> ''");
+
+    return query;
+  }
+
+  /** How many customers of a branch carry each category/tag, for the taxonomy manager. */
+  async getTaxonomyUsage(storeId: string) {
+    const [categories, tags] = await Promise.all([
+      this.customerRepository.query(
+        'SELECT l."categoryId" AS id, COUNT(*)::int AS count FROM customer_category_links l JOIN customers c ON c.id = l."customerId" WHERE c."storeId" = $1 GROUP BY l."categoryId"',
+        [storeId],
+      ),
+      this.customerRepository.query(
+        'SELECT l."tagId" AS id, COUNT(*)::int AS count FROM customer_tag_links l JOIN customers c ON c.id = l."customerId" WHERE c."storeId" = $1 GROUP BY l."tagId"',
+        [storeId],
+      ),
+    ]);
+    const toMap = (rows: { id: string; count: number }[]) => Object.fromEntries(rows.map((row) => [row.id, row.count]));
+    return { categories: toMap(categories), tags: toMap(tags) };
   }
 
   async findOne(id: string, storeId: string) {

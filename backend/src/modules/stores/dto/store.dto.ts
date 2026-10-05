@@ -1,6 +1,24 @@
-import { IsNotEmpty, IsString, IsOptional, IsUrl, IsEnum, IsObject } from 'class-validator';
+import { IsNotEmpty, IsString, IsOptional, IsUrl, IsEnum, IsObject, IsArray, ArrayMaxSize, ValidateNested, MaxLength, Matches } from 'class-validator';
+import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { examples } from '../../../common/swagger/api-examples';
+
+export class QuickReplyDto {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(64)
+  id: string;
+
+  // Typed after "/" in the composer: letters (Arabic or Latin), digits, "_" or "-", no spaces.
+  @IsString()
+  @Matches(/^[\p{L}\p{N}_-]{1,32}$/u, { message: 'shortcut must be 1-32 letters, digits, _ or -' })
+  shortcut: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(1000)
+  text: string;
+}
 
 export class CreateStoreDto {
   @ApiProperty({ example: examples.store.create.name })
@@ -69,6 +87,14 @@ export class UpdateStoreDto {
   @IsString({ each: true })
   @IsOptional()
   customTags?: string[];
+
+  @ApiPropertyOptional({ type: [QuickReplyDto] })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(200)
+  @ValidateNested({ each: true })
+  @Type(() => QuickReplyDto)
+  quickReplies?: QuickReplyDto[];
 
   @ApiPropertyOptional({ example: examples.store.create.phoneNumber })
   @IsString()

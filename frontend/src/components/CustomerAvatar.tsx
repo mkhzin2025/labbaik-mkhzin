@@ -1,6 +1,6 @@
 import { User as UserIcon } from 'lucide-react';
 
-const PALETTE = ['#7c3aed', '#2563eb', '#0891b2', '#059669', '#d97706', '#dc2626', '#db2777', '#4f46e5'];
+const PALETTE = ['#7c3aed', '#2563eb', '#0e7490', '#047857', '#b45309', '#dc2626', '#be185d', '#4f46e5'];
 
 const colorFor = (seed: string) => {
   let hash = 0;

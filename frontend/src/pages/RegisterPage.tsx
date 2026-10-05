@@ -4,7 +4,7 @@ import { Building2, User, Mail, Phone, Lock, Eye, EyeOff, Store, Sun, Moon, Arro
 import api from '../api/client';
 import LogoImage from '../assets/logos/logo.png';
 import LogoAltImage from '../assets/logos/logo-alt.png';
-import BackgroundImage from '../assets/login-bg.png';
+import BackgroundImage from '../assets/login-bg.webp';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { Alert } from '../components/ui/Alert';

@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Review } from './entities/review.entity';
@@ -23,9 +23,10 @@ export class ReviewsService {
     });
   }
 
-  async findOne(id: string) {
+  /** Scoped to the caller's store so one store can never read or answer another store's reviews. */
+  async findOne(id: string, storeId: string) {
     const review = await this.reviewRepository.findOne({
-      where: { id },
+      where: { id, store: { id: storeId } },
       relations: ['store'],
     });
     if (!review) throw new NotFoundException('Review not found');
@@ -33,8 +34,8 @@ export class ReviewsService {
   }
 
   // Generate an AI suggestion for a review
-  async getAiSuggestion(reviewId: string) {
-    const review = await this.findOne(reviewId);
+  async getAiSuggestion(reviewId: string, storeId: string) {
+    const review = await this.findOne(reviewId, storeId);
     
     return this.aiService.generateReviewReply(
       review.reviewerName,
@@ -45,12 +46,14 @@ export class ReviewsService {
   }
 
   // Submit a reply to a review
-  async replyToReview(reviewId: string, replyText: string) {
-    const review = await this.findOne(reviewId);
-    
+  async replyToReview(reviewId: string, storeId: string, replyText: string) {
+    const text = String(replyText || '').trim();
+    if (!text) throw new BadRequestException('Reply text is required');
+    const review = await this.findOne(reviewId, storeId);
+
     // In production, this would call Google Business Profile API to post the reply
     // For now, we simulate success and save locally
-    review.reply = replyText;
+    review.reply = text;
     review.status = 'replied';
     
     return this.reviewRepository.save(review);

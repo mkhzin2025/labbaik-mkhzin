@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsEmail, IsArray, ValidateIf, IsUUID, IsHexColor, IsBoolean, IsInt, Min, IsEnum } from 'class-validator';
+import { IsString, IsOptional, IsEmail, IsArray, ValidateIf, IsUUID, IsHexColor, IsBoolean, IsInt, Min, IsEnum, IsIn, ArrayNotEmpty, ArrayMaxSize } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { examples } from '../../../common/swagger/api-examples';
@@ -102,6 +102,30 @@ export class UpdateCustomerCategoryDto {
   @Min(0)
   @Type(() => Number)
   sortOrder?: number;
+}
+
+export class BulkCustomerTaxonomyDto {
+  @IsUUID('4')
+  storeId: string;
+
+  @IsArray()
+  @ArrayNotEmpty()
+  @ArrayMaxSize(500)
+  @IsUUID('4', { each: true })
+  customerIds: string[];
+
+  @IsIn(['add', 'remove'])
+  mode: 'add' | 'remove';
+
+  @IsOptional()
+  @IsArray()
+  @IsUUID('4', { each: true })
+  categoryIds?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @IsUUID('4', { each: true })
+  tagIds?: string[];
 }
 
 export class CreateCustomerTagDto {
