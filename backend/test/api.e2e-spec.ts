@@ -1,4 +1,4 @@
-import { CanActivate, ExecutionContext, INestApplication } from '@nestjs/common';
+import { CanActivate, ExecutionContext, INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import request from 'supertest';
 import { AuthController } from '../src/modules/auth/auth.controller';
@@ -22,6 +22,8 @@ import { UsersService } from '../src/modules/users/users.service';
 import { WebhooksController } from '../src/modules/webhooks/webhooks.controller';
 import { WebhooksService } from '../src/modules/webhooks/webhooks.service';
 import { JwtAuthGuard } from '../src/modules/auth/guards/jwt-auth.guard';
+import { OrganizationsService } from '../src/modules/organizations/organizations.service';
+import { WhatsAppMediaService } from '../src/modules/channels/whatsapp-media.service';
 
 const user = {
   id: 'user-1',
@@ -76,7 +78,7 @@ const flow = {
 };
 
 const conversation = {
-  _id: 'conversation-1',
+  _id: '64b7f0c2a1b2c3d4e5f60718',
   customerPhone: '+966500000000',
   storeId: store.id,
   platform: 'whatsapp',
@@ -151,8 +153,23 @@ describe('API routes (e2e)', () => {
     delete: jest.fn(),
   };
 
+  const organizationsService = {
+    getForUser: jest.fn(),
+    getStoreForUser: jest.fn(),
+    listStoresForUser: jest.fn(),
+    assertStoreAccessibleByUser: jest.fn(),
+    assertRequestedStoresAccessible: jest.fn(),
+  };
+
+  const whatsAppMediaService = {
+    getWhatsAppUploadRoot: jest.fn(),
+  };
+
   const conversationsService = {
-    findAllByStore: jest.fn(),
+    findPage: jest.fn(),
+    countInbox: jest.fn(),
+    findMessages: jest.fn(),
+    withCustomerName: jest.fn(),
     getStats: jest.fn(),
     findOne: jest.fn(),
     markAsRead: jest.fn(),
@@ -192,6 +209,8 @@ describe('API routes (e2e)', () => {
         { provide: FlowsService, useValue: flowsService },
         { provide: ConversationsService, useValue: conversationsService },
         { provide: WebhooksService, useValue: webhooksService },
+        { provide: OrganizationsService, useValue: organizationsService },
+        { provide: WhatsAppMediaService, useValue: whatsAppMediaService },
       ],
     })
       .overrideGuard(JwtAuthGuard)
@@ -199,6 +218,7 @@ describe('API routes (e2e)', () => {
       .compile();
 
     app = moduleFixture.createNestApplication();
+    app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }));
     await app.init();
   });
 
@@ -231,7 +251,14 @@ describe('API routes (e2e)', () => {
     flowsService.create.mockImplementation((_store, data) => Promise.resolve(updated(flow, data)));
     flowsService.update.mockImplementation((_id, _storeId, data) => Promise.resolve(updated(flow, data)));
     flowsService.delete.mockResolvedValue(flow);
-    conversationsService.findAllByStore.mockResolvedValue([conversation]);
+    organizationsService.getForUser.mockResolvedValue({ id: 'org-1' });
+    organizationsService.getStoreForUser.mockResolvedValue({ store });
+    organizationsService.listStoresForUser.mockResolvedValue({ stores: [store] });
+    organizationsService.assertStoreAccessibleByUser.mockResolvedValue(undefined);
+    conversationsService.findPage.mockResolvedValue({ items: [conversation], nextCursor: null });
+    conversationsService.countInbox.mockResolvedValue({ active: 1, snoozed: 0, closed: 0, unread: 1, needsReply: 0 });
+    conversationsService.findMessages.mockResolvedValue({ messages: [], total: 0, start: 0, hasMore: false });
+    conversationsService.withCustomerName.mockImplementation((conv) => Promise.resolve(conv));
     conversationsService.getStats.mockResolvedValue({ totalConversations: 1, totalMessages: 0 });
     conversationsService.findOne.mockResolvedValue(conversation);
     conversationsService.markAsRead.mockResolvedValue(updated(conversation, { unreadCount: 0 }));
@@ -350,7 +377,22 @@ describe('API routes (e2e)', () => {
   });
 
   it('reads conversations, stats, and conversation actions', async () => {
-    await request(app.getHttpServer()).get('/conversations').expect(200).expect([conversation]);
+    await request(app.getHttpServer()).get('/conversations').expect(200).expect({ items: [conversation], nextCursor: null });
+    await request(app.getHttpServer())
+      .get('/conversations')
+      .query({ scope: 'organization', view: 'active', tab: 'unread', platform: 'whatsapp', search: 'ali', limit: 20, cursor: 'abc' })
+      .expect(200);
+    expect(conversationsService.findPage).toHaveBeenLastCalledWith(
+      [store.id],
+      { view: 'active', tab: 'unread', platform: 'whatsapp', tag: undefined, search: 'ali' },
+      { limit: 20, cursor: 'abc' },
+    );
+    await request(app.getHttpServer()).get('/conversations').query({ limit: 500 }).expect(400);
+    await request(app.getHttpServer()).get('/conversations').query({ scope: 'organization', storeId: 'other-store' }).expect(403);
+    await request(app.getHttpServer()).get('/conversations/counts').query({ view: 'closed' }).expect(200).expect(({ body }) => expect(body.active).toBe(1));
+    await request(app.getHttpServer()).get(`/conversations/${conversation._id}/messages`).query({ limit: 30, before: 60 }).expect(200);
+    expect(conversationsService.findMessages).toHaveBeenLastCalledWith(conversation._id, store.id, { limit: 30, before: 60 });
+    await request(app.getHttpServer()).get('/conversations/not-an-id/messages').expect(404);
     await request(app.getHttpServer()).get('/conversations/stats').expect(200).expect({ totalConversations: 1, totalMessages: 0 });
     await request(app.getHttpServer()).get(`/conversations/${conversation._id}`).expect(200).expect(conversation);
     await request(app.getHttpServer()).patch(`/conversations/${conversation._id}/read`).expect(200).expect(({ body }) => {

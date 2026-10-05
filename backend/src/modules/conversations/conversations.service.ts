@@ -1,6 +1,6 @@
-import { Injectable, Logger, NotFoundException, InternalServerErrorException, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, InternalServerErrorException, OnModuleInit, BadRequestException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import { Conversation, ConversationStatus } from './schemas/conversation.schema';
 import { MessagingService } from '../channels/messaging.service';
 import { ChannelsService } from '../channels/channels.service';
@@ -9,6 +9,47 @@ import { EventsGateway } from '../events/events.gateway';
 import { BillingService } from '../billing/billing.service';
 import { MetaUsageType } from '../billing/entities/pricing-rule.entity';
 import { normalizePhoneNumber } from '../../common/utils/phone.util';
+
+export type InboxView = 'active' | 'snoozed' | 'closed';
+export type InboxTab = 'all' | 'unread' | 'needs_reply';
+export interface InboxFilters {
+  view?: InboxView;
+  tab?: InboxTab;
+  platform?: string;
+  tag?: string;
+  search?: string;
+}
+
+const INBOX_PAGE_DEFAULT = 30;
+const INBOX_PAGE_MAX = 100;
+const MESSAGES_PAGE_DEFAULT = 30;
+const MESSAGES_PAGE_MAX = 100;
+
+const clampLimit = (value: number | undefined, fallback: number, max: number) =>
+  Number.isFinite(value) && (value as number) > 0 ? Math.min(Math.floor(value as number), max) : fallback;
+
+const escapeRegex = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+// Opaque keyset cursor: the (lastMessageAt, _id) of the last row on the previous page.
+const encodeCursor = (lastMessageAt: Date | null | undefined, id: string) =>
+  Buffer.from(JSON.stringify({ t: lastMessageAt ? new Date(lastMessageAt).toISOString() : null, id })).toString('base64url');
+
+const decodeCursor = (cursor: string): { t: Date | null; id: Types.ObjectId } => {
+  try {
+    const { t, id } = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'));
+    const time = t === null ? null : new Date(t);
+    if (time && Number.isNaN(time.getTime())) throw new Error('bad time');
+    return { t: time, id: new Types.ObjectId(String(id)) };
+  } catch {
+    throw new BadRequestException('Invalid cursor');
+  }
+};
+
+// Rows strictly after the cursor in (lastMessageAt desc, _id desc) order; rows without lastMessageAt sort last.
+const afterCursor = ({ t, id }: { t: Date | null; id: Types.ObjectId }) =>
+  t === null
+    ? { lastMessageAt: null, _id: { $lt: id } }
+    : { $or: [{ lastMessageAt: { $lt: t } }, { lastMessageAt: t, _id: { $lt: id } }, { lastMessageAt: null }] };
 
 @Injectable()
 export class ConversationsService implements OnModuleInit {
@@ -40,6 +81,35 @@ export class ConversationsService implements OnModuleInit {
     } catch (error) {
       this.logger.error('Failed to merge duplicate WhatsApp conversations', error?.stack);
     }
+    try {
+      await this.backfillAwaitingReply();
+    } catch (error) {
+      this.logger.error('Failed to backfill awaitingReply', error?.stack);
+    }
+  }
+
+  /** One-off for conversations stored before `awaitingReply` existed: derive it from the last message. */
+  private async backfillAwaitingReply() {
+    const last = { $arrayElemAt: ['$messages', -1] };
+    await this.conversationModel.updateMany(
+      { awaitingReply: { $exists: false } },
+      [{
+        $set: {
+          awaitingReply: {
+            $and: [
+              { $gt: [{ $size: { $ifNull: ['$messages', []] } }, 0] },
+              { $not: [{ $in: [{ $getField: { field: 'from', input: last } }, ['me', 'system']] }] },
+              { $ne: [{ $getField: { field: 'type', input: last } }, 'system_error'] },
+            ],
+          },
+        },
+      }],
+      { updatePipeline: true },
+    );
+  }
+
+  private static isCustomerMessage(message: { from?: string; type?: string }) {
+    return message.from !== 'me' && message.from !== 'system' && message.type !== 'system_error';
   }
 
   private normalizeCustomerPhone(customerPhone: string, platform: string) {
@@ -93,6 +163,7 @@ export class ConversationsService implements OnModuleInit {
       $set: { 
         lastMessage: messageData.text,
         lastMessageAt: new Date(),
+        awaitingReply: ConversationsService.isCustomerMessage(messageData),
       }
     };
 
@@ -199,15 +270,90 @@ export class ConversationsService implements OnModuleInit {
     return this.conversationModel.findByIdAndUpdate(id, { unreadCount: 0 }, { returnDocument: 'after' });
   }
 
-  async findAllByStore(storeId: string) {
-    await this.wakeSnoozed([storeId]);
-    return this.withCustomerNames(await this.conversationModel.find({ storeId }).sort({ lastMessageAt: -1 }).lean().exec());
+  /**
+   * One inbox page, newest activity first. Rows carry only their last message (for the preview/ticks);
+   * the thread itself is paged separately through findMessages.
+   */
+  async findPage(storeIds: string[], filters: InboxFilters, options: { limit?: number; cursor?: string } = {}) {
+    if (!storeIds.length) return { items: [], nextCursor: null };
+    const limit = clampLimit(options.limit, INBOX_PAGE_DEFAULT, INBOX_PAGE_MAX);
+    if (!options.cursor) await this.wakeSnoozed(storeIds);
+
+    const query = this.inboxQuery(storeIds, filters);
+    if (options.cursor) (query.$and ||= []).push(afterCursor(decodeCursor(options.cursor)));
+
+    const rows = await this.conversationModel
+      .find(query, { messages: { $slice: -1 } })
+      .sort({ lastMessageAt: -1, _id: -1 })
+      .limit(limit + 1)
+      .lean()
+      .exec();
+    const items = rows.slice(0, limit);
+    const last = items[items.length - 1];
+    return {
+      items: await this.withCustomerNames(items),
+      nextCursor: rows.length > limit && last ? encodeCursor(last.lastMessageAt, String(last._id)) : null,
+    };
   }
 
-  async findAllByStores(storeIds: string[]) {
-    if (!storeIds.length) return [];
+  /** Badge counts for the status tabs, plus unread / needs-reply inside the selected status tab. */
+  async countInbox(storeIds: string[], filters: InboxFilters) {
+    if (!storeIds.length) return { active: 0, snoozed: 0, closed: 0, unread: 0, needsReply: 0 };
     await this.wakeSnoozed(storeIds);
-    return this.withCustomerNames(await this.conversationModel.find({ storeId: { $in: storeIds } }).sort({ lastMessageAt: -1 }).lean().exec());
+    const base = { ...filters, tab: undefined };
+    const count = (query: Record<string, any>) => this.conversationModel.countDocuments(query).exec();
+    const current = this.inboxQuery(storeIds, { ...base, view: filters.view || 'active' });
+    const [active, snoozed, closed, unread, needsReply] = await Promise.all([
+      count(this.inboxQuery(storeIds, { ...base, view: 'active' })),
+      count(this.inboxQuery(storeIds, { ...base, view: 'snoozed' })),
+      count(this.inboxQuery(storeIds, { ...base, view: 'closed' })),
+      count({ ...current, unreadCount: { $gt: 0 } }),
+      count({ ...current, awaitingReply: true }),
+    ]);
+    return { active, snoozed, closed, unread, needsReply };
+  }
+
+  /**
+   * A window of a conversation's messages, read from the end. `before` is the `start` of the previously
+   * loaded window (exclusive); omit it for the latest messages. Messages are only ever appended, so indexes stay stable.
+   */
+  async findMessages(id: string, storeId: string, options: { limit?: number; before?: number } = {}) {
+    const limit = clampLimit(options.limit, MESSAGES_PAGE_DEFAULT, MESSAGES_PAGE_MAX);
+    const [meta] = await this.conversationModel.aggregate<{ total: number }>([
+      { $match: { _id: new Types.ObjectId(id), storeId } },
+      { $project: { total: { $size: { $ifNull: ['$messages', []] } } } },
+    ]);
+    if (!meta) throw new NotFoundException('Conversation not found');
+    const end = options.before === undefined ? meta.total : Math.min(Math.max(options.before, 0), meta.total);
+    const start = Math.max(0, end - limit);
+    if (end === start) return { messages: [], total: meta.total, start, hasMore: start > 0 };
+    const doc = await this.conversationModel
+      .findOne({ _id: id, storeId }, { storeId: 1, messages: { $slice: [start, end - start] } })
+      .lean()
+      .exec();
+    return { messages: doc?.messages || [], total: meta.total, start, hasMore: start > 0 };
+  }
+
+  private inboxQuery(storeIds: string[], filters: InboxFilters) {
+    const query: Record<string, any> = { storeId: storeIds.length === 1 ? storeIds[0] : { $in: storeIds } };
+    if (filters.platform) query.platform = filters.platform;
+    if (filters.tag) query.tags = filters.tag;
+    if (filters.view === 'active') query.status = { $nin: ['snoozed', 'closed'] };
+    else if (filters.view) query.status = filters.view;
+    if (filters.tab === 'unread') query.unreadCount = { $gt: 0 };
+    else if (filters.tab === 'needs_reply') query.awaitingReply = true;
+    const search = filters.search?.trim();
+    if (search) {
+      const pattern = new RegExp(escapeRegex(search), 'i');
+      query.$and = [{ $or: [{ customerName: pattern }, { customerPhone: pattern }, { lastMessage: pattern }] }];
+    }
+    return query;
+  }
+
+  /** Inbox row for a single conversation: no messages, customer name and CRM labels resolved. */
+  async withCustomerName<T extends { customerId?: string; customerName?: string }>(conversation: T) {
+    const [row] = await this.withCustomerNames([conversation]);
+    return row;
   }
 
   // A name saved on the customer record (possibly edited by the team) wins over the WhatsApp profile name.
@@ -237,9 +383,10 @@ export class ConversationsService implements OnModuleInit {
     }
   }
 
+  /** The conversation without its messages (use findMessages for those). */
   async findOne(id: string) {
-    const conversation = await this.conversationModel.findById(id).exec();
-    
+    const conversation = await this.conversationModel.findById(id).select('-messages').lean().exec();
+
     // Auto-Repair: Link customer if missing
     if (conversation && !conversation.customerId) {
       try {
@@ -250,8 +397,8 @@ export class ConversationsService implements OnModuleInit {
           instagramId: conversation.platform === 'instagram' ? conversation.customerPhone : undefined,
           facebookId: conversation.platform === 'facebook' ? conversation.customerPhone : undefined,
         }, conversation.platform);
+        await this.conversationModel.updateOne({ _id: conversation._id }, { $set: { customerId: customer.id } });
         conversation.customerId = customer.id;
-        await conversation.save();
       } catch (e) {}
     }
     

@@ -52,7 +52,7 @@ export class Conversation extends Document {
   customerName: string; // WhatsApp profile name or the customer's saved name
 
   // Workflow state shown in the inbox: open → pending (waiting on someone) → snoozed (hidden until snoozedUntil) → closed.
-  @Prop({ default: 'open', enum: CONVERSATION_STATUSES })
+  @Prop({ type: String, default: 'open', enum: CONVERSATION_STATUSES })
   status: ConversationStatus;
 
   @Prop({ type: Date, default: null })
@@ -91,6 +91,13 @@ export class Conversation extends Document {
 
   @Prop()
   lastMessageAt: Date;
+
+  // Denormalized from the last message so the inbox can filter "needs reply" without loading messages.
+  @Prop({ default: false })
+  awaitingReply: boolean;
 }
 
 export const ConversationSchema = SchemaFactory.createForClass(Conversation);
+// Inbox pages: newest first per store (and per status tab), with _id as the cursor tie-breaker.
+ConversationSchema.index({ storeId: 1, lastMessageAt: -1, _id: -1 });
+ConversationSchema.index({ storeId: 1, status: 1, lastMessageAt: -1, _id: -1 });

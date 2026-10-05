@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
 import CustomerAvatar from '../components/CustomerAvatar';
 import api from '../api/client';
@@ -78,7 +78,9 @@ interface Conversation {
   customerName?: string | null;
   lastMessage: string;
   lastMessageAt: string;
-  messages: Message[];
+  // Inbox rows carry only their last message (for the preview); the thread is paged in separately.
+  messages?: Message[];
+  awaitingReply?: boolean;
   status: ConvStatus | string;
   snoozedUntil?: string | null;
   // CRM labels of the linked customer (from the customers module), distinct from conversation topic tags.
@@ -91,6 +93,24 @@ interface Conversation {
 }
 
 interface CustomerLabel { id: string; name: string; color: string }
+
+interface InboxCounts { active: number; snoozed: number; closed: number; unread: number; needsReply: number }
+interface InboxPage { items: Conversation[]; nextCursor: string | null }
+interface MessagesPage { messages: Message[]; total: number; start: number; hasMore: boolean }
+
+const LIST_PAGE_SIZE = 30;
+const MESSAGES_PAGE_SIZE = 30;
+const SEARCH_DEBOUNCE_MS = 350;
+const EMPTY_COUNTS: InboxCounts = { active: 0, snoozed: 0, closed: 0, unread: 0, needsReply: 0 };
+
+const fetchListPage = (params: Record<string, string | undefined>, cursor?: string) =>
+  api.get<InboxPage>('/conversations', { params: { ...params, limit: LIST_PAGE_SIZE, cursor } }).then(({ data }) => data);
+
+// Appends rows not already present; `head` wins when the same conversation is in both.
+const mergeUnique = (head: Conversation[], tail: Conversation[]) => {
+  const ids = new Set(head.map((c) => c._id));
+  return [...head, ...tail.filter((c) => !ids.has(c._id))];
+};
 
 // Same visual language as the customers page: categories are squared chips, tags are "#" pills; text stays neutral.
 function CustomerLabelChip({ label, kind, size = 'sm' }: { label: CustomerLabel; kind: 'category' | 'tag'; size?: 'sm' | 'md' }) {
@@ -413,11 +433,51 @@ export default function ConversationsPage() {
   const [newTagInput, setNewTagInput] = useState('');
   const [customTags, setCustomTags] = useState<string[]>([]);
   
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [listError, setListError] = useState<'first' | 'more' | null>(null);
+  const [listReloadKey, setListReloadKey] = useState(0);
+  const [counts, setCounts] = useState<InboxCounts>(EMPTY_COUNTS);
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+
+  // The open thread: a window [messagesStart, end) of the stored messages, grown upwards on scroll.
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [messagesStart, setMessagesStart] = useState(0);
+  const [hasOlderMessages, setHasOlderMessages] = useState(false);
+  const [messagesLoading, setMessagesLoading] = useState(false);
+  const [messagesError, setMessagesError] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+
   const socketRef = useRef<Socket | null>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
   const selectedChatRef = useRef<Conversation | null>(null);
   const filterRef = useRef<HTMLDivElement>(null);
+  const listScrollRef = useRef<HTMLDivElement>(null);
+  const listSentinelRef = useRef<HTMLDivElement>(null);
+  const messagesScrollRef = useRef<HTMLDivElement>(null);
+  // Bumped on every new list / thread load so late responses from an older one are dropped.
+  const listRequestRef = useRef(0);
+  const countsRequestRef = useRef(0);
+  const chatRequestRef = useRef(0);
+  const loadingMoreRef = useRef(false);
+  const loadingOlderRef = useRef(false);
+  const scrollIntentRef = useRef<{ kind: 'bottom'; smooth: boolean } | { kind: 'keep'; height: number; top: number } | null>(null);
+  const realtimeSyncRef = useRef<{ timer?: number; head: boolean }>({ head: false });
+  const conversationsRef = useRef<Conversation[]>([]);
+  conversationsRef.current = conversations;
   const { showToast } = useToast();
+
+  // Everything the server filters on. Changing any of it reloads the list from the first page.
+  const listParams = useMemo(() => ({
+    scope: 'organization' as const,
+    view: statusView,
+    tab: listTab,
+    platform: selectedPlatform || undefined,
+    tag: selectedTag || undefined,
+    storeId: selectedStoreId === 'all' ? undefined : selectedStoreId,
+    search: debouncedSearch || undefined,
+  }), [statusView, listTab, selectedPlatform, selectedTag, selectedStoreId, debouncedSearch]);
+  const listParamsRef = useRef(listParams);
+  listParamsRef.current = listParams;
   
   const defaultTags = ['طلب_جديد', 'استفسار_سعر', 'شكوى', 'موقع_المحل', 'سؤال_عام'];
   const platforms = [
@@ -460,16 +520,159 @@ export default function ConversationsPage() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedSearch(searchText.trim()), SEARCH_DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [searchText]);
+
+  const loadCounts = useCallback(() => {
+    const request = ++countsRequestRef.current;
+    // Counts cover every tab of the current status view, so the tab itself is not sent.
+    const filters = { ...listParamsRef.current, tab: undefined };
+    api.get<InboxCounts>('/conversations/counts', { params: filters })
+      .then(({ data }) => { if (request === countsRequestRef.current) setCounts(data); })
+      .catch(() => { /* badges keep their last values */ });
+  }, []);
+
+  useEffect(() => {
+    const request = ++listRequestRef.current;
+    setLoading(true);
+    setListError(null);
+    fetchListPage(listParams)
+      .then((page) => {
+        if (request !== listRequestRef.current) return;
+        setConversations(page.items);
+        setNextCursor(page.nextCursor);
+        listScrollRef.current?.scrollTo({ top: 0 });
+      })
+      .catch(() => { if (request === listRequestRef.current) setListError('first'); })
+      .finally(() => { if (request === listRequestRef.current) setLoading(false); });
+    loadCounts();
+  }, [listParams, listReloadKey, loadCounts]);
+
+  const loadMore = async () => {
+    if (!nextCursor || loadingMoreRef.current) return;
+    const request = listRequestRef.current;
+    loadingMoreRef.current = true;
+    setLoadingMore(true);
+    setListError(null);
+    try {
+      const page = await fetchListPage(listParamsRef.current, nextCursor);
+      if (request !== listRequestRef.current) return;
+      setConversations((prev) => mergeUnique(prev, page.items));
+      setNextCursor(page.nextCursor);
+    } catch {
+      if (request === listRequestRef.current) setListError('more');
+    } finally {
+      loadingMoreRef.current = false;
+      setLoadingMore(false);
+    }
+  };
+  const loadMoreRef = useRef(loadMore);
+  loadMoreRef.current = loadMore;
+
+  // Infinite scroll: fetch the next page as the end of the list comes into view.
+  useEffect(() => {
+    const sentinel = listSentinelRef.current;
+    if (!sentinel || !nextCursor || loading || listError) return;
+    const observer = new IntersectionObserver(
+      (entries) => { if (entries.some((entry) => entry.isIntersecting)) void loadMoreRef.current(); },
+      { root: listScrollRef.current, rootMargin: '300px 0px' },
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [nextCursor, loading, listError]);
+
+  // Realtime events are coalesced: counts refresh, and an unknown conversation pulls the first page back in.
+  const scheduleRealtimeSync = (needsHead: boolean) => {
+    const sync = realtimeSyncRef.current;
+    sync.head ||= needsHead;
+    window.clearTimeout(sync.timer);
+    sync.timer = window.setTimeout(() => {
+      const refreshHead = sync.head;
+      sync.head = false;
+      loadCounts();
+      if (!refreshHead) return;
+      const request = listRequestRef.current;
+      fetchListPage(listParamsRef.current)
+        .then((page) => { if (request === listRequestRef.current) setConversations((prev) => mergeUnique(page.items, prev)); })
+        .catch(() => {});
+    }, 400);
+  };
+  useEffect(() => () => window.clearTimeout(realtimeSyncRef.current.timer), []);
+
+  // Open a conversation → load its latest messages.
+  useEffect(() => {
+    const id = selectedChat?._id;
+    const request = ++chatRequestRef.current;
+    setMessages([]);
+    setMessagesStart(0);
+    setHasOlderMessages(false);
+    setMessagesError(false);
+    loadingOlderRef.current = false;
+    setLoadingOlder(false);
+    if (!id || id.startsWith('temp')) { setMessagesLoading(false); return; }
+    setMessagesLoading(true);
+    api.get<MessagesPage>(`/conversations/${id}/messages`, { params: { limit: MESSAGES_PAGE_SIZE } })
+      .then(({ data }) => {
+        if (request !== chatRequestRef.current) return;
+        scrollIntentRef.current = { kind: 'bottom', smooth: false };
+        setMessages(data.messages);
+        setMessagesStart(data.start);
+        setHasOlderMessages(data.hasMore);
+      })
+      .catch(() => { if (request === chatRequestRef.current) setMessagesError(true); })
+      .finally(() => { if (request === chatRequestRef.current) setMessagesLoading(false); });
+  }, [selectedChat?._id]);
+
+  const loadOlderMessages = async () => {
+    const id = selectedChatRef.current?._id;
+    if (!id || !hasOlderMessages || loadingOlderRef.current) return;
+    const request = chatRequestRef.current;
+    loadingOlderRef.current = true;
+    setLoadingOlder(true);
+    try {
+      const { data } = await api.get<MessagesPage>(`/conversations/${id}/messages`, { params: { limit: MESSAGES_PAGE_SIZE, before: messagesStart } });
+      if (request !== chatRequestRef.current) return;
+      const el = messagesScrollRef.current;
+      if (el) scrollIntentRef.current = { kind: 'keep', height: el.scrollHeight, top: el.scrollTop };
+      setMessages((prev) => [...data.messages, ...prev]);
+      setMessagesStart(data.start);
+      setHasOlderMessages(data.hasMore);
+    } catch {
+      if (request === chatRequestRef.current) showToast('تعذر تحميل الرسائل الأقدم.', 'error');
+    } finally {
+      if (request === chatRequestRef.current) {
+        loadingOlderRef.current = false;
+        setLoadingOlder(false);
+      }
+    }
+  };
+  const loadOlderRef = useRef(loadOlderMessages);
+  loadOlderRef.current = loadOlderMessages;
+
+  // Applied before paint: jump to the bottom on open, follow new messages, or keep position when older ones are prepended.
+  useLayoutEffect(() => {
+    const el = messagesScrollRef.current;
+    const intent = scrollIntentRef.current;
+    if (!el || !intent) return;
+    scrollIntentRef.current = null;
+    if (intent.kind === 'keep') el.scrollTop = el.scrollHeight - intent.height + intent.top;
+    else el.scrollTo({ top: el.scrollHeight, behavior: intent.smooth ? 'smooth' : 'auto' });
+  }, [messages]);
+
+  // A short first page may not overflow, so there is nothing to scroll up from: keep loading until it does.
+  useEffect(() => {
+    const el = messagesScrollRef.current;
+    if (el && hasOlderMessages && !messagesLoading && !loadingOlder && el.scrollHeight <= el.clientHeight + 40) void loadOlderRef.current();
+  }, [messages, hasOlderMessages, messagesLoading, loadingOlder]);
+
+  const isNearBottom = () => {
+    const el = messagesScrollRef.current;
+    return !el || el.scrollHeight - el.scrollTop - el.clientHeight < 150;
   };
 
   useEffect(() => {
-    scrollToBottom();
-  }, [selectedChat?.messages?.length]);
-
-  useEffect(() => {
-    fetchConversations();
     fetchStores();
     fetchStoreTags();
     setupSocket();
@@ -494,15 +697,8 @@ export default function ConversationsPage() {
     } catch (e) {}
   };
 
-  const fetchConversations = async () => {
-    try {
-      const { data } = await api.get('/conversations', { params: { scope: 'organization' } });
-      setConversations(Array.isArray(data) ? data : []);
-      setLoading(false);
-    } catch (error) {
-      setLoading(false);
-    }
-  };
+  // Socket listeners are bound once; they call through this ref so they always see the current render.
+  const socketHandlersRef = useRef<Record<'message' | 'status' | 'convStatus', (payload: unknown) => void>>(null!);
 
   const setupSocket = () => {
     const token = localStorage.getItem('access_token');
@@ -511,19 +707,19 @@ export default function ConversationsPage() {
       auth: { token },
       query: { token }
     });
-    socketRef.current.on('new_message', (payload) => {
-      handleIncomingRealtimeMessage(payload);
-    });
-    socketRef.current.on('message_status', (payload) => {
-      handleMessageStatus(payload);
-    });
+    socketRef.current.on('new_message', (payload) => socketHandlersRef.current.message(payload));
+    socketRef.current.on('message_status', (payload) => socketHandlersRef.current.status(payload));
     // Another teammate (or another tab) changed a conversation's status.
-    socketRef.current.on('conversation_status', (payload) => {
-      if (!payload?.conversationId) return;
-      const patch = { status: payload.status, snoozedUntil: payload.snoozedUntil || null };
-      setConversations((prev) => prev.map((c) => (c._id === payload.conversationId ? { ...c, ...patch } : c)));
-      setSelectedChat((current) => (current && current._id === payload.conversationId ? { ...current, ...patch } : current));
-    });
+    socketRef.current.on('conversation_status', (payload) => socketHandlersRef.current.convStatus(payload));
+  };
+
+  const handleConversationStatus = (payload: { conversationId?: string; status?: string; snoozedUntil?: string | null } | null) => {
+    if (!payload?.conversationId) return;
+    const id = payload.conversationId;
+    const patch = { status: payload.status || 'open', snoozedUntil: payload.snoozedUntil || null };
+    setConversations((prev) => prev.map((c) => (c._id === id ? { ...c, ...patch } : c)));
+    setSelectedChat((current) => (current && current._id === id ? { ...current, ...patch } : current));
+    scheduleRealtimeSync(false);
   };
 
   const changeStatus = async (next: ConvStatus, until?: Date) => {
@@ -535,13 +731,14 @@ export default function ConversationsPage() {
       const patch = { status: data.status, snoozedUntil: data.snoozedUntil || null, ...(next === 'closed' ? { unreadCount: 0 } : {}) };
       setConversations((prev) => prev.map((c) => (c._id === id ? { ...c, ...patch } : c)));
       setSelectedChat((current) => (current && current._id === id ? { ...current, ...patch } : current));
-      const messages: Record<ConvStatus, string> = {
+      loadCounts();
+      const notices: Record<ConvStatus, string> = {
         open: 'أُعيد فتح المحادثة.',
         pending: 'المحادثة معلّقة.',
         snoozed: `أُجّلت المحادثة حتى ${formatSnoozeUntil(data.snoozedUntil)}.`,
         closed: 'أُغلقت المحادثة. ستُفتح تلقائيًا إذا راسل العميل.',
       };
-      showToast(messages[next], 'success');
+      showToast(notices[next], 'success');
     } catch (error: any) {
       showToast(error?.response?.data?.message || 'تعذر تغيير حالة المحادثة.', 'error');
     } finally {
@@ -568,7 +765,7 @@ export default function ConversationsPage() {
       ...conversation,
       messages: updateMessages(conversation.messages || []),
     })));
-    setSelectedChat((current) => current ? { ...current, messages: updateMessages(current.messages || []) } : current);
+    setMessages(updateMessages);
   };
 
   const handleIncomingRealtimeMessage = (payload: any) => {
@@ -592,60 +789,54 @@ export default function ConversationsPage() {
       showToast(newMessage.text || 'حدث خطأ في إرسال الرسالة', 'error');
     }
 
-    setConversations(prev => {
-      const existingIdx = prev.findIndex(c => c.customerPhone === targetPhone && (!targetStoreId || c.storeId === targetStoreId));
-      const isCurrentlyOpen = selectedChatRef.current?.customerPhone === targetPhone && (!targetStoreId || selectedChatRef.current?.storeId === targetStoreId);
+    const isTarget = (c: Conversation | null) => Boolean(c) && c!.customerPhone === targetPhone && (!targetStoreId || c!.storeId === targetStoreId);
+    const isCurrentlyOpen = isTarget(selectedChatRef.current);
+    // Mirrors the server: a customer message reopens a snoozed/closed conversation.
+    const reopen = !isOwnOrSystem ? { status: 'open', snoozedUntil: null } : {};
 
-      if (existingIdx !== -1) {
-        const updatedList = [...prev];
-        const oldTags = updatedList[existingIdx].tags || [];
-        const newTags = payload.tags || [];
-        
-        const updatedConv = {
-          ...updatedList[existingIdx],
+    // Only rows already loaded are patched; a conversation outside the loaded pages comes back
+    // through a first-page refetch, so it shows up only if it matches the current filters.
+    const known = conversationsRef.current.some(isTarget);
+    if (known) {
+      setConversations(prev => {
+        const idx = prev.findIndex(isTarget);
+        if (idx === -1) return prev;
+        const current = prev[idx];
+        const updatedConv: Conversation = {
+          ...current,
           lastMessage: payload.text || `[${payload.type || 'message'}]`,
           lastMessageAt: new Date().toISOString(),
-          lastSentiment: payload.sentiment || updatedList[existingIdx].lastSentiment,
-          customerId: payload.customerId || updatedList[existingIdx].customerId,
-          customerName: updatedList[existingIdx].customerName || payload.customerName,
-          tags: Array.from(new Set([...oldTags, ...newTags])),
-          messages: [...(updatedList[existingIdx].messages || []), newMessage],
-          unreadCount: (!isOwnOrSystem && !isCurrentlyOpen) ? (updatedList[existingIdx].unreadCount || 0) + 1 : (updatedList[existingIdx].unreadCount || 0),
-          // Mirrors the server: a customer message reopens a snoozed/closed conversation.
-          ...(!isOwnOrSystem ? { status: 'open', snoozedUntil: null } : {}),
-        };
-        updatedList.splice(existingIdx, 1);
-        return [updatedConv, ...updatedList];
-      } else {
-        const newConv: Conversation = {
-          _id: `temp-${Date.now()}`,
-          customerPhone: targetPhone,
-          storeId: targetStoreId || '',
-          platform: payload.platform || 'whatsapp',
-          customerId: payload.customerId,
-          customerName: payload.customerName,
-          lastMessage: payload.text || `[${payload.type || 'message'}]`,
-          lastMessageAt: new Date().toISOString(),
+          lastSentiment: payload.sentiment || current.lastSentiment,
+          customerId: payload.customerId || current.customerId,
+          customerName: current.customerName || payload.customerName,
+          tags: Array.from(new Set([...(current.tags || []), ...(payload.tags || [])])),
           messages: [newMessage],
-          status: 'open',
-          tags: payload.tags || [],
-          unreadCount: isCurrentlyOpen ? 0 : 1
+          awaitingReply: isCustomerMessage(newMessage),
+          unreadCount: (!isOwnOrSystem && !isCurrentlyOpen) ? (current.unreadCount || 0) + 1 : (current.unreadCount || 0),
+          ...reopen,
         };
-        return [newConv, ...prev];
-      }
-    });
-
-    if (selectedChatRef.current && selectedChatRef.current.customerPhone === targetPhone && (!targetStoreId || selectedChatRef.current.storeId === targetStoreId)) {
-      setSelectedChat(prev => {
-        if (!prev) return null;
-        return { ...prev, messages: [...(prev.messages || []), newMessage], ...(!isOwnOrSystem ? { status: 'open', snoozedUntil: null } : {}) };
+        return [updatedConv, ...prev.slice(0, idx), ...prev.slice(idx + 1)];
       });
     }
+    scheduleRealtimeSync(!known);
+
+    if (isCurrentlyOpen) {
+      if (newMessage.from === 'me' || isNearBottom()) scrollIntentRef.current = { kind: 'bottom', smooth: true };
+      setMessages(prev => [...prev, newMessage]);
+      setSelectedChat(prev => (prev ? { ...prev, ...reopen } : prev));
+    }
+  };
+
+  socketHandlersRef.current = {
+    message: handleIncomingRealtimeMessage,
+    status: handleMessageStatus,
+    convStatus: (payload) => handleConversationStatus(payload as Parameters<typeof handleConversationStatus>[0]),
   };
 
   const selectConversation = async (conv: Conversation) => {
     setSelectedChat({ ...conv, unreadCount: 0 });
     setShowTagEditor(false);
+    if (Number(conv.unreadCount) > 0) setCounts(prev => ({ ...prev, unread: Math.max(0, prev.unread - 1) }));
     setConversations(prev => prev.map(c => c._id === conv._id ? { ...c, unreadCount: 0 } : c));
     try { if (conv._id && !conv._id.startsWith('temp')) await api.patch(`/conversations/${conv._id}/read`); } catch (e) {}
   };
@@ -687,15 +878,15 @@ export default function ConversationsPage() {
 
   // After editing a customer in the profile drawer, pull fresh CRM labels without touching loaded messages.
   const refreshCustomerLabels = async () => {
+    const id = selectedChatRef.current?._id;
+    if (!id) return;
     try {
-      const { data } = await api.get('/conversations', { params: { scope: 'organization' } });
-      const byId = new Map<string, Conversation>((Array.isArray(data) ? data : []).map((c: Conversation) => [c._id, c]));
-      const merge = (c: Conversation): Conversation => {
-        const fresh = byId.get(c._id);
-        return fresh ? { ...c, customerName: fresh.customerName, customerCategories: fresh.customerCategories, customerTags: fresh.customerTags } : c;
-      };
-      setConversations((prev) => prev.map(merge));
-      setSelectedChat((current) => (current ? merge(current) : current));
+      const { data } = await api.get<Conversation>(`/conversations/${id}`);
+      const patch = { customerName: data.customerName, customerCategories: data.customerCategories, customerTags: data.customerTags };
+      // The same customer can have threads on other channels or branches; refresh them all.
+      const sameCustomer = (c: Conversation) => c._id === data._id || (Boolean(data.customerId) && c.customerId === data.customerId);
+      setConversations((prev) => prev.map((c) => (sameCustomer(c) ? { ...c, ...patch } : c)));
+      setSelectedChat((current) => (current && sameCustomer(current) ? { ...current, ...patch } : current));
     } catch {
       /* labels stay as they were */
     }
@@ -754,28 +945,23 @@ export default function ConversationsPage() {
     return map[tag] || 'bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 border-indigo-500/20';
   };
 
-  const filteredBase = conversations.filter(c => {
-    const tagMatch = !selectedTag || c.tags?.includes(selectedTag);
-    const platformMatch = !selectedPlatform || c.platform === selectedPlatform;
-    const storeMatch = selectedStoreId === 'all' || c.storeId === selectedStoreId;
-    const q = searchText.trim().toLowerCase();
-    const searchMatch = !q || [c.customerName, c.customerPhone, c.lastMessage].some(v => String(v || '').toLowerCase().includes(q));
-    return tagMatch && platformMatch && storeMatch && searchMatch;
-  });
   const viewOf = (c: Conversation): StatusView => {
     const s = normalizeStatus(c, now);
     return s === 'snoozed' ? 'snoozed' : s === 'closed' ? 'closed' : 'active';
   };
-  const statusCounts = filteredBase.reduce((acc, c) => { acc[viewOf(c)]++; return acc; }, { active: 0, snoozed: 0, closed: 0 } as Record<StatusView, number>);
-  const scopedConversations = filteredBase.filter((c) => viewOf(c) === statusView);
-  const lastMessageOf = (c: Conversation) => c.messages?.[c.messages.length - 1];
-  const needsReply = (c: Conversation) => isCustomerMessage(lastMessageOf(c));
-  const unreadTotal = scopedConversations.filter(c => Number(c.unreadCount) > 0).length;
-  const needsReplyTotal = scopedConversations.filter(needsReply).length;
-  const filteredConversations =
-    listTab === 'unread' ? scopedConversations.filter(c => Number(c.unreadCount) > 0)
-    : listTab === 'needs_reply' ? scopedConversations.filter(needsReply)
-    : scopedConversations;
+  const needsReply = (c: Conversation) => c.awaitingReply ?? isCustomerMessage(c.messages?.[c.messages.length - 1]);
+  // The server already filtered every loaded row; this only drops rows that local changes
+  // (status change, read, realtime update) moved out of the current view. Search stays server-side.
+  const filteredConversations = conversations.filter((c) =>
+    viewOf(c) === statusView
+    && (!selectedTag || Boolean(c.tags?.includes(selectedTag)))
+    && (!selectedPlatform || c.platform === selectedPlatform)
+    && (selectedStoreId === 'all' || c.storeId === selectedStoreId)
+    && (listTab !== 'unread' || Number(c.unreadCount) > 0)
+    && (listTab !== 'needs_reply' || needsReply(c)));
+  const statusCounts: Record<StatusView, number> = { active: counts.active, snoozed: counts.snoozed, closed: counts.closed };
+  const unreadTotal = counts.unread;
+  const needsReplyTotal = counts.needsReply;
 
   const allTags = Array.from(new Set([...defaultTags, ...customTags]));
 
@@ -886,7 +1072,7 @@ export default function ConversationsPage() {
             ))}
           </div>
           <div className="flex items-center gap-1.5" role="tablist" aria-label="عرض المحادثات">
-            {([['all', 'الكل', scopedConversations.length], ['unread', 'غير مقروءة', unreadTotal], ['needs_reply', 'تحتاج رداً', needsReplyTotal]] as const).map(([key, label, count]) => (
+            {([['all', 'الكل', statusCounts[statusView]], ['unread', 'غير مقروءة', unreadTotal], ['needs_reply', 'تحتاج رداً', needsReplyTotal]] as const).map(([key, label, count]) => (
               <button
                 type="button"
                 role="tab"
@@ -901,8 +1087,14 @@ export default function ConversationsPage() {
             ))}
           </div>
         </div>
-        <div className="flex-1 overflow-y-auto custom-scrollbar">
-          {loading ? <ConversationListSkeleton /> : filteredConversations.length === 0 ? (
+        <div ref={listScrollRef} aria-busy={loading || loadingMore} className={`flex-1 overflow-y-auto custom-scrollbar transition-opacity ${loading && conversations.length > 0 ? 'opacity-60' : ''}`}>
+          {loading && conversations.length === 0 ? <ConversationListSkeleton /> : listError === 'first' ? (
+            <div className="p-10 text-center space-y-3">
+              <AlertTriangle size={28} className="mx-auto text-labbaik-text-muted" />
+              <p className="text-labbaik-text-muted font-bold text-sm">تعذر تحميل المحادثات.</p>
+              <button type="button" onClick={() => setListReloadKey((k) => k + 1)} className="h-9 px-4 rounded-lg border border-labbaik-border text-sm font-bold text-neutral-800 dark:text-neutral-100 hover:border-labbaik-blue/40 cursor-pointer">إعادة المحاولة</button>
+            </div>
+          ) : filteredConversations.length === 0 && !nextCursor ? (
             <div className="p-10 text-center space-y-3">
               <MessageCircle size={32} className="mx-auto text-labbaik-text-muted" />
               <p className="text-labbaik-text-muted font-bold text-sm">
@@ -914,7 +1106,7 @@ export default function ConversationsPage() {
             const selected = selectedChat?._id === conv._id;
             const lastMsg = conv.messages?.[conv.messages.length - 1];
             const lastFromMe = lastMsg?.from === 'me';
-            const waiting = isCustomerMessage(lastMsg);
+            const waiting = needsReply(conv);
             return (
               <button
                 type="button"
@@ -994,6 +1186,20 @@ export default function ConversationsPage() {
               </button>
             );
           })}
+          {nextCursor && listError !== 'first' && (
+            <div ref={listSentinelRef} className="flex flex-col items-center gap-2 px-4 py-4">
+              {listError === 'more' ? (
+                <>
+                  <p className="text-xs font-bold text-labbaik-text-muted">تعذر تحميل المزيد.</p>
+                  <button type="button" onClick={() => void loadMore()} className="h-8 px-3 rounded-lg border border-labbaik-border text-xs font-bold text-neutral-800 dark:text-neutral-100 hover:border-labbaik-blue/40 cursor-pointer">إعادة المحاولة</button>
+                </>
+              ) : loadingMore ? (
+                <span className="flex items-center gap-2 text-xs font-bold text-labbaik-text-muted"><Loader2 size={14} className="animate-spin" /> جاري تحميل المزيد...</span>
+              ) : (
+                <button type="button" onClick={() => void loadMore()} className="h-8 px-3 rounded-lg text-xs font-bold text-labbaik-text-muted hover:text-labbaik-blue hover:bg-labbaik-blue/10 cursor-pointer">تحميل المزيد</button>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
@@ -1065,10 +1271,30 @@ export default function ConversationsPage() {
                 )}
               </div>
             </div>
-            <div className="flex-1 overflow-y-auto px-4 lg:px-8 py-6 space-y-2.5 custom-scrollbar">
-              {selectedChat.messages?.map((msg, idx) => (
+            <div
+              ref={messagesScrollRef}
+              onScroll={(e) => { if (e.currentTarget.scrollTop < 120) void loadOlderRef.current(); }}
+              aria-busy={messagesLoading || loadingOlder}
+              className="flex-1 overflow-y-auto px-4 lg:px-8 py-6 space-y-2.5 custom-scrollbar"
+            >
+              {hasOlderMessages && (
+                <div className="flex justify-center pb-1">
+                  {loadingOlder ? (
+                    <span className="flex items-center gap-2 text-xs font-bold text-labbaik-text-muted"><Loader2 size={14} className="animate-spin" /> جاري تحميل الرسائل الأقدم...</span>
+                  ) : (
+                    <button type="button" onClick={() => void loadOlderMessages()} className="h-8 px-3 rounded-full bg-labbaik-surface text-xs font-bold text-labbaik-text-muted hover:text-labbaik-blue cursor-pointer">تحميل رسائل أقدم</button>
+                  )}
+                </div>
+              )}
+              {messagesLoading && (
+                <div className="flex justify-center py-10"><Loader2 size={20} className="animate-spin text-labbaik-text-muted" /><span className="sr-only">جاري تحميل الرسائل...</span></div>
+              )}
+              {messagesError && (
+                <div className="py-10 text-center text-sm font-bold text-labbaik-text-muted">تعذر تحميل الرسائل. أعد فتح المحادثة للمحاولة مجددًا.</div>
+              )}
+              {messages.map((msg, idx) => (
                 msg.type === 'system_error' ? (
-                  <div key={idx} className="flex justify-center py-1">
+                  <div key={msg._id || `live-${msg.timestamp}-${idx}`} className="flex justify-center py-1">
                     <div role="alert" className="max-w-[90%] rounded-xl border border-red-500/30 bg-red-50 dark:bg-red-500/10 px-4 py-3 text-red-800 dark:text-red-200">
                       <div className="flex items-start gap-2.5">
                         <AlertTriangle size={16} className="mt-0.5 shrink-0" />
@@ -1080,7 +1306,7 @@ export default function ConversationsPage() {
                     </div>
                   </div>
                 ) : (
-                <div key={idx} className={`flex ${msg.from === 'me' ? 'justify-start' : 'justify-end'}`}>
+                <div key={msg._id || `live-${msg.timestamp}-${idx}`} className={`flex ${msg.from === 'me' ? 'justify-start' : 'justify-end'}`}>
                   <div className={`max-w-[85%] lg:max-w-[65%] px-3.5 py-2.5 rounded-2xl ${msg.from === 'me' ? 'bg-labbaik-blue text-labbaik-on-accent rounded-tr-sm' : 'bg-labbaik-surface text-neutral-900 dark:text-white rounded-tl-sm'}`}>
                     <div className="flex justify-between items-start gap-3">
                       <p className="text-sm leading-relaxed whitespace-pre-wrap break-words">{msg.text}</p>
@@ -1095,7 +1321,6 @@ export default function ConversationsPage() {
                 </div>
                 )
               ))}
-              <div ref={messagesEndRef} />
             </div>
             <div className="px-4 lg:px-6 py-3 border-t border-labbaik-border bg-labbaik-surface">
               <Composer key={selectedChat._id} onSend={sendText} />

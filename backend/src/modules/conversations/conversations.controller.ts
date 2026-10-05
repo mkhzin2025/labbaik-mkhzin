@@ -7,9 +7,50 @@ import { WhatsAppMediaService } from '../channels/whatsapp-media.service';
 import { createReadStream, existsSync } from 'fs';
 import { basename, join } from 'path';
 import { OrganizationsService } from '../organizations/organizations.service';
-import { IsIn, IsISO8601, IsOptional } from 'class-validator';
+import { IsIn, IsInt, IsISO8601, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
+import { Type } from 'class-transformer';
 import { CONVERSATION_STATUSES } from './schemas/conversation.schema';
 import type { ConversationStatus } from './schemas/conversation.schema';
+import type { InboxFilters, InboxTab, InboxView } from './conversations.service';
+
+export class InboxFilterQueryDto {
+  @IsOptional() @IsIn(['organization', 'store'])
+  scope?: 'organization' | 'store';
+
+  @IsOptional() @IsString()
+  storeId?: string;
+
+  @IsOptional() @IsIn(['active', 'snoozed', 'closed'])
+  view?: InboxView;
+
+  @IsOptional() @IsIn(['all', 'unread', 'needs_reply'])
+  tab?: InboxTab;
+
+  @IsOptional() @IsIn(['whatsapp', 'instagram', 'facebook', 'google_maps'])
+  platform?: string;
+
+  @IsOptional() @IsString() @MaxLength(100)
+  tag?: string;
+
+  @IsOptional() @IsString() @MaxLength(100)
+  search?: string;
+}
+
+export class InboxPageQueryDto extends InboxFilterQueryDto {
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(100)
+  limit?: number;
+
+  @IsOptional() @IsString() @MaxLength(500)
+  cursor?: string;
+}
+
+export class MessagesPageQueryDto {
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(100)
+  limit?: number;
+
+  @IsOptional() @Type(() => Number) @IsInt() @Min(0)
+  before?: number;
+}
 
 export class UpdateConversationStatusDto {
   @IsIn(CONVERSATION_STATUSES as unknown as string[])
@@ -31,15 +72,17 @@ export class ConversationsController {
     private readonly whatsAppMediaService: WhatsAppMediaService,
   ) {}
 
+  /** Paged inbox: `{ items, nextCursor }`. Pass `nextCursor` back as `cursor` for the next page. */
   @Get()
-  async findAll(@Request() req: any, @Query('storeId') storeId?: string, @Query('scope') scope?: 'organization' | 'store') {
-    const organization = await this.organizationsService.getForUser(req.user.id, req.user.organizationId);
-    if (scope === 'organization') {
-      const { stores } = await this.organizationsService.listStoresForUser(req.user.id, organization.id);
-      return this.conversationsService.findAllByStores(stores.map((store) => store.id));
-    }
-    const { store } = await this.organizationsService.getStoreForUser(req.user.id, organization.id, storeId);
-    return this.conversationsService.findAllByStore(store.id);
+  async findAll(@Request() req: any, @Query() query: InboxPageQueryDto) {
+    const storeIds = await this.resolveStoreIds(req, query.scope, query.storeId);
+    return this.conversationsService.findPage(storeIds, this.toFilters(query), { limit: query.limit, cursor: query.cursor });
+  }
+
+  @Get('counts')
+  async getCounts(@Request() req: any, @Query() query: InboxFilterQueryDto) {
+    const storeIds = await this.resolveStoreIds(req, query.scope, query.storeId);
+    return this.conversationsService.countInbox(storeIds, this.toFilters(query));
   }
 
   @Get('stats')
@@ -70,7 +113,14 @@ export class ConversationsController {
 
   @Get(':id')
   async findOne(@Param('id') id: string, @Request() req: any) {
-    return this.requireOwnedConversation(id, req);
+    return this.conversationsService.withCustomerName(await this.requireOwnedConversation(id, req));
+  }
+
+  /** Messages oldest → newest, read from the end. Pass the returned `start` as `before` to load older ones. */
+  @Get(':id/messages')
+  async findMessages(@Param('id') id: string, @Query() query: MessagesPageQueryDto, @Request() req: any) {
+    const conversation: any = await this.requireOwnedConversation(id, req);
+    return this.conversationsService.findMessages(id, conversation.storeId, { limit: query.limit, before: query.before });
   }
 
   @Patch(':id/read')
@@ -111,7 +161,26 @@ export class ConversationsController {
     return this.conversationsService.sendMessage(id, conversation.storeId, text);
   }
 
+  private toFilters(query: InboxFilterQueryDto): InboxFilters {
+    return { view: query.view, tab: query.tab, platform: query.platform, tag: query.tag, search: query.search };
+  }
+
+  // scope=organization covers every branch the user can access, narrowed to `storeId` when given.
+  private async resolveStoreIds(req: any, scope?: 'organization' | 'store', storeId?: string) {
+    const organization = await this.organizationsService.getForUser(req.user.id, req.user.organizationId);
+    if (scope === 'organization') {
+      const { stores } = await this.organizationsService.listStoresForUser(req.user.id, organization.id);
+      const accessible = stores.map((store) => store.id);
+      if (!storeId) return accessible;
+      if (!accessible.includes(storeId)) throw new ForbiddenException('Branch is outside your access');
+      return [storeId];
+    }
+    const { store } = await this.organizationsService.getStoreForUser(req.user.id, organization.id, storeId);
+    return [store.id];
+  }
+
   private async requireOwnedConversation(id: string, req: any) {
+    if (!/^[0-9a-f]{24}$/i.test(id)) throw new NotFoundException('Conversation not found');
     const conversation: any = await this.conversationsService.findOne(id);
     if (!conversation) throw new NotFoundException('Conversation not found');
     const organization = await this.organizationsService.getForUser(req.user.id, req.user.organizationId);
