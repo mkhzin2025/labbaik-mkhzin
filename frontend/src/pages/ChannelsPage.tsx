@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import api from '../api/client';
 import { useToast } from '../components/Toast';
 import { CheckCircle2, Loader2, Settings, Unlink } from 'lucide-react';
-import { FaWhatsapp, FaInstagram, FaFacebook, FaMapMarkerAlt } from 'react-icons/fa';
+import { FaWhatsapp, FaInstagram, FaFacebook, FaMapMarkerAlt, FaTelegram, FaTiktok, FaEnvelope } from 'react-icons/fa';
 
 interface Channel {
   id: string;
@@ -12,22 +12,27 @@ interface Channel {
   credentials?: { displayPhoneNumber?: string; phoneNumberId?: string } & Record<string, unknown>;
 }
 
-type PlatformId = Channel['type'];
+// Display-only platforms (telegram, tiktok, email) have no backend channel type yet.
+type PlatformId = Channel['type'] | 'telegram' | 'tiktok' | 'email';
 
 interface Platform {
   id: PlatformId;
   name: string;
   icon: ReactNode;
+  tint: string;
   desc: string;
 }
 
 // Only WhatsApp is wired end to end; Instagram/Facebook send through a simulator on the server today
-// and Google Maps has no integration, so those are shown as "coming soon" rather than a connect form.
+// and the rest have no integration, so those are shown as "coming soon" rather than a connect form.
 const PLATFORMS: Platform[] = [
-  { id: 'whatsapp', name: 'واتساب بيزنس', icon: <FaWhatsapp size={22} className="text-[#25d366]" />, desc: 'استقبل رسائل عملائك وردّ عليها من رقمك الرسمي عبر WhatsApp Cloud API من Meta.' },
-  { id: 'instagram', name: 'إنستغرام', icon: <FaInstagram size={22} className="text-[#e1306c]" />, desc: 'الرسائل المباشرة في حساب متجرك على إنستغرام.' },
-  { id: 'facebook', name: 'فيسبوك مسنجر', icon: <FaFacebook size={22} className="text-[#1877f2]" />, desc: 'رسائل صفحة متجرك على فيسبوك من مكان واحد.' },
-  { id: 'google_maps', name: 'جوجل ماب', icon: <FaMapMarkerAlt size={22} className="text-[#ea4335]" />, desc: 'استقبال مراجعات خرائط جوجل والرد عليها.' },
+  { id: 'whatsapp', name: 'واتساب بيزنس', icon: <FaWhatsapp size={22} className="text-[#25d366]" />, tint: 'bg-[#25d366]/12', desc: 'استقبل رسائل عملائك وردّ عليها من رقمك الرسمي عبر WhatsApp Cloud API من Meta.' },
+  { id: 'instagram', name: 'إنستغرام', icon: <FaInstagram size={24} className="text-[#e1306c]" />, tint: 'bg-[#e1306c]/10', desc: 'الرسائل المباشرة في حساب متجرك على إنستغرام.' },
+  { id: 'facebook', name: 'فيسبوك مسنجر', icon: <FaFacebook size={24} className="text-[#1877f2]" />, tint: 'bg-[#1877f2]/10', desc: 'رسائل صفحة متجرك على فيسبوك من مكان واحد.' },
+  { id: 'telegram', name: 'تيليجرام', icon: <FaTelegram size={24} className="text-[#229ed9]" />, tint: 'bg-[#229ed9]/10', desc: 'محادثات عملائك عبر بوت متجرك على تيليجرام.' },
+  { id: 'tiktok', name: 'تيك توك', icon: <FaTiktok size={22} className="text-neutral-900 dark:text-white" />, tint: 'bg-neutral-500/10', desc: 'الرسائل المباشرة وتعليقات حساب متجرك على تيك توك.' },
+  { id: 'email', name: 'البريد الإلكتروني', icon: <FaEnvelope size={22} className="text-labbaik-text-muted" />, tint: 'bg-labbaik-text-muted/10', desc: 'استقبل رسائل البريد في صندوق المحادثات وردّ عليها.' },
+  { id: 'google_maps', name: 'جوجل ماب', icon: <FaMapMarkerAlt size={22} className="text-[#ea4335]" />, tint: 'bg-[#ea4335]/10', desc: 'استقبال مراجعات خرائط جوجل والرد عليها.' },
 ];
 
 const errorMessage = (error: unknown, fallback: string) =>
@@ -135,31 +140,40 @@ export default function ChannelsPage() {
           </section>
 
           {/* Other platforms */}
-          <section className="rounded-xl border border-labbaik-border bg-labbaik-surface">
-            <h2 className="px-5 pt-4 pb-2 text-sm font-black text-neutral-900 dark:text-white">قنوات أخرى</h2>
-            <ul className="divide-y divide-labbaik-border">
+          <section className="space-y-3 pt-2">
+            <h2 className="text-sm font-black text-neutral-900 dark:text-white">قنوات أخرى</h2>
+            <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               {others.map((platform) => {
                 const linked = connectedOf(platform.id);
                 return (
-                  <li key={platform.id} className="flex items-center gap-4 px-5 py-3.5">
-                    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-labbaik-page">{platform.icon}</span>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-bold text-neutral-900 dark:text-white">{platform.name}</p>
-                      <p className="text-xs text-labbaik-text-muted">{platform.desc}</p>
-                    </div>
-                    {linked.length > 0 ? (
-                      confirmUnlink === linked[0].id ? (
-                        <span className="flex items-center gap-1 shrink-0">
-                          <button type="button" disabled={unlinking} onClick={() => void unlink(linked[0], platform.name)} className="h-8 px-2.5 rounded-md bg-red-600 text-white text-xs font-black hover:bg-red-700 disabled:opacity-50 cursor-pointer">تأكيد</button>
-                          <button type="button" onClick={() => setConfirmUnlink(null)} className="h-8 px-2 rounded-md text-xs font-bold text-labbaik-text-muted cursor-pointer">إلغاء</button>
+                  <li key={platform.id} className="flex flex-col rounded-xl border border-labbaik-border bg-labbaik-surface p-4 transition-colors hover:border-labbaik-blue/30">
+                    <div className="flex items-start justify-between gap-3">
+                      <span className={`grid h-12 w-12 shrink-0 place-items-center rounded-xl ${platform.tint}`}>{platform.icon}</span>
+                      {linked.length > 0 ? (
+                        <span className="inline-flex items-center gap-1 h-6 px-2 rounded-md bg-emerald-500/15 text-emerald-800 dark:text-emerald-300 text-[11px] font-bold">
+                          <CheckCircle2 size={12} /> متصل
                         </span>
                       ) : (
-                        <button type="button" onClick={() => setConfirmUnlink(linked[0].id)} className="shrink-0 inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-xs font-bold text-labbaik-text-muted hover:text-red-600 hover:bg-red-500/10 cursor-pointer">
-                          <Unlink size={14} /> فك الربط
-                        </button>
-                      )
-                    ) : (
-                      <span className="shrink-0 inline-flex items-center h-6 px-2 rounded-md bg-labbaik-blue/10 text-labbaik-blue dark:text-purple-300 text-[11px] font-bold">قريبًا</span>
+                        <span className="inline-flex items-center h-6 px-2 rounded-md bg-labbaik-blue/10 text-labbaik-blue dark:text-purple-300 text-[11px] font-bold">قريبًا</span>
+                      )}
+                    </div>
+                    <p className="mt-3 font-black text-neutral-900 dark:text-white">{platform.name}</p>
+                    <p className="mt-1 flex-1 text-xs leading-relaxed text-labbaik-text-muted">{platform.desc}</p>
+                    {linked.length > 0 && (
+                      <div className="mt-4 pt-3 border-t border-labbaik-border">
+                        {confirmUnlink === linked[0].id ? (
+                          <span className="flex items-center gap-1">
+                            <button type="button" disabled={unlinking} onClick={() => void unlink(linked[0], platform.name)} className="h-8 px-2.5 rounded-md bg-red-600 text-white text-xs font-black hover:bg-red-700 disabled:opacity-50 cursor-pointer">
+                              {unlinking ? <Loader2 size={13} className="animate-spin" /> : 'تأكيد فك الربط'}
+                            </button>
+                            <button type="button" onClick={() => setConfirmUnlink(null)} className="h-8 px-2 rounded-md text-xs font-bold text-labbaik-text-muted hover:text-neutral-900 dark:hover:text-white cursor-pointer">إلغاء</button>
+                          </span>
+                        ) : (
+                          <button type="button" onClick={() => setConfirmUnlink(linked[0].id)} className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-xs font-bold text-labbaik-text-muted hover:text-red-600 hover:bg-red-500/10 cursor-pointer">
+                            <Unlink size={14} /> فك الربط
+                          </button>
+                        )}
+                      </div>
                     )}
                   </li>
                 );
