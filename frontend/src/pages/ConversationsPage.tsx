@@ -1306,14 +1306,14 @@ export default function ConversationsPage() {
                     </div>
                   </div>
                 ) : (
-                <div key={msg._id || `live-${msg.timestamp}-${idx}`} className={`flex ${msg.from === 'me' ? 'justify-start' : 'justify-end'}`}>
-                  <div className={`max-w-[85%] lg:max-w-[65%] px-3.5 py-2.5 rounded-2xl ${msg.from === 'me' ? 'bg-labbaik-blue text-labbaik-on-accent rounded-tr-sm' : 'bg-labbaik-surface text-neutral-900 dark:text-white rounded-tl-sm'}`}>
+                <div key={msg._id || `live-${msg.timestamp}-${idx}`} className={`flex ${msg.from === 'me' ? 'justify-end' : 'justify-start'}`}>
+                  <div className={`max-w-[85%] lg:max-w-[65%] px-3.5 py-2.5 rounded-2xl ${msg.from === 'me' ? 'bg-labbaik-blue text-labbaik-on-accent rounded-tl-sm' : 'bg-labbaik-surface text-neutral-900 dark:text-white rounded-tr-sm'}`}>
                     <div className="flex justify-between items-start gap-3">
                       <p className="text-sm leading-relaxed whitespace-pre-wrap break-words">{msg.text}</p>
                       {msg.from !== 'me' && getSentimentIcon(msg.sentiment)}
                     </div>
                     <MessageExtras msg={msg} />
-                    <div className={`flex items-center gap-2 mt-1 ${msg.from === 'me' ? 'justify-start text-white/80' : 'justify-end text-labbaik-text-muted'}`}>
+                    <div className={`flex items-center gap-2 mt-1 ${msg.from === 'me' ? 'justify-end text-white/80' : 'justify-start text-labbaik-text-muted'}`}>
                       <span className="text-[11px] font-bold tabular-nums">{safeFormatDate(msg.timestamp || Date.now(), 'HH:mm')}</span>
                       {renderMessageStatus(msg)}
                     </div>
