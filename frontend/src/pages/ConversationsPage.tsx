@@ -3,7 +3,7 @@ import { io, Socket } from 'socket.io-client';
 import CustomerAvatar from '../components/CustomerAvatar';
 import api from '../api/client';
 import { getApiBaseUrl } from '../api/baseUrl';
-import CustomerProfile from '../components/CustomerProfile';
+import CustomerProfile, { type CustomerTransferResult } from '../components/CustomerProfile';
 import { useToast } from '../components/Toast';
 import {
   Search, 
@@ -892,6 +892,14 @@ export default function ConversationsPage() {
     }
   };
 
+  // The open thread follows the customer to the new branch (possibly merged into a thread that already lived there).
+  const handleCustomerTransferred = (result: CustomerTransferResult) => {
+    const current = selectedChatRef.current;
+    const nextId = result.conversations.find((item) => item.from === current?._id)?.to;
+    if (current && nextId) setSelectedChat({ ...current, _id: nextId, storeId: result.toStoreId, customerId: result.customer.id });
+    setListReloadKey((key) => key + 1);
+  };
+
   // Rethrows on failure so the composer can put the unsent text back.
   const sendText = async (text: string) => {
     if (!selectedChat) return;
@@ -1339,6 +1347,7 @@ export default function ConversationsPage() {
           customerId={selectedChat.customerId}
           onClose={() => setShowProfile(false)}
           onUpdated={() => void refreshCustomerLabels()}
+          onTransferred={handleCustomerTransferred}
         />
       )}
 

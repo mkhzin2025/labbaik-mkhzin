@@ -349,6 +349,70 @@ export class CustomersService {
     return this.findOne(saved.id, storeId);
   }
 
+  /**
+   * Moves a customer to another branch of the same organization. When that branch already holds a
+   * record for the same contact, the two are merged into it and the source record is removed.
+   * Branch-scoped categories/tags of the old branch are dropped; organization-wide ones are kept.
+   */
+  async transferToStore(id: string, organizationId: string, targetStoreId: string) {
+    const source = await this.findOneInOrganization(id, organizationId);
+    if (source.storeId === targetStoreId) throw new BadRequestException('Customer is already in this branch');
+    const fromStoreId = source.storeId;
+    const fitsTarget = <T extends { scope: CustomerTaxonomyScope; storeId: string | null }>(item: T) =>
+      item.scope === CustomerTaxonomyScope.ORGANIZATION || item.storeId === targetStoreId;
+    const existing = await this.findSameContactInStore(source, targetStoreId);
+
+    const keptId = await this.customerRepository.manager.transaction(async (manager) => {
+      const repo = manager.getRepository(Customer);
+      if (!existing) {
+        source.storeId = targetStoreId;
+        source.store = { id: targetStoreId } as Store;
+        source.categories = (source.categories || []).filter(fitsTarget);
+        source.tags = (source.tags || []).filter(fitsTarget);
+        await repo.save(source);
+        return source.id;
+      }
+      const identifier = source.phoneNumber || source.whatsappId || '';
+      if (this.isPlaceholderName(existing.fullName, identifier) && !this.isPlaceholderName(source.fullName, identifier)) existing.fullName = source.fullName;
+      existing.email = existing.email || source.email;
+      existing.phoneNumber = existing.phoneNumber || source.phoneNumber;
+      existing.whatsappId = existing.whatsappId || source.whatsappId;
+      existing.instagramId = existing.instagramId || source.instagramId;
+      existing.facebookId = existing.facebookId || source.facebookId;
+      existing.notes = [existing.notes, source.notes].filter((note) => note?.trim()).join('\n\n') || existing.notes;
+      const byId = <T extends { id: string }>(items: T[]) => Array.from(new Map(items.map((item) => [item.id, item])).values());
+      existing.categories = byId([...(existing.categories || []), ...(source.categories || []).filter(fitsTarget)]);
+      existing.tags = byId([...(existing.tags || []), ...(source.tags || []).filter(fitsTarget)]);
+      await repo.save(existing);
+      await repo.delete(source.id);
+      return existing.id;
+    });
+
+    // Inbound routing follows the most recently updated record, so the new branch must be the newest.
+    await this.customerRepository.update(keptId, { updatedAt: new Date() });
+    const customer = (await this.reloadWithRelations([keptId]))[0];
+    return { customer, fromStoreId, removedCustomerId: existing ? source.id : null };
+  }
+
+  private async findSameContactInStore(customer: Customer, storeId: string) {
+    const query = this.customerRepository.createQueryBuilder('customer')
+      .leftJoinAndSelect('customer.categories', 'category')
+      .leftJoinAndSelect('customer.tags', 'tag')
+      .where('customer.storeId = :storeId', { storeId })
+      .andWhere('customer.id <> :id', { id: customer.id });
+    const phone = this.normalizePhone(customer.phoneNumber || customer.whatsappId || '');
+    if (phone) {
+      query.andWhere("REGEXP_REPLACE(COALESCE(customer.phoneNumber, customer.whatsappId, ''), '[^0-9]', '', 'g') = :phone", { phone });
+    } else if (customer.instagramId) {
+      query.andWhere('customer.instagramId = :instagramId', { instagramId: customer.instagramId });
+    } else if (customer.facebookId) {
+      query.andWhere('customer.facebookId = :facebookId', { facebookId: customer.facebookId });
+    } else {
+      return null;
+    }
+    return query.getOne();
+  }
+
   async updateInOrganization(id: string, organizationId: string, updateData: UpdateCustomerDto) {
     const customer = await this.findOneInOrganization(id, organizationId);
     return this.update(id, customer.storeId, updateData);

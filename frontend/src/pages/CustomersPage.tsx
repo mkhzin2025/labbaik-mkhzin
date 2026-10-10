@@ -487,6 +487,7 @@ export default function CustomersPage() {
           customerId={selectedCustomerId}
           onClose={() => setSelectedCustomerId(null)}
           onUpdated={() => { void fetchCustomers(); void loadTaxonomy(storeId); }}
+          onTransferred={(result) => { setSelectedCustomerId(result.customer.id); void fetchCustomers(); void loadTaxonomy(storeId); }}
         />
       )}
 

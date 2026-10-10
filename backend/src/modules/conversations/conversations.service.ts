@@ -190,6 +190,56 @@ export class ConversationsService implements OnModuleInit {
     );
   }
 
+  /**
+   * Moves a customer — and their conversations — to another branch. A conversation that collides with
+   * one the customer already has in the target branch is merged into it, so each branch keeps one thread.
+   */
+  async transferCustomer(customerId: string, organizationId: string, targetStoreId: string) {
+    const original = await this.customersService.findOneInOrganization(customerId, organizationId);
+    const { customer, fromStoreId } = await this.customersService.transferToStore(customerId, organizationId, targetStoreId);
+    const phone = normalizePhoneNumber(original.phoneNumber || original.whatsappId || '');
+    const match: Record<string, unknown>[] = [{ customerId }];
+    if (phone) match.push({ platform: 'whatsapp', customerPhone: phone });
+    if (original.instagramId) match.push({ platform: 'instagram', customerPhone: original.instagramId });
+    if (original.facebookId) match.push({ platform: 'facebook', customerPhone: original.facebookId });
+
+    const sources = await this.conversationModel.find({ storeId: fromStoreId, $or: match }).exec();
+    const moved: { from: string; to: string }[] = [];
+    for (const source of sources) {
+      const target = await this.conversationModel.findOne({
+        _id: { $ne: source._id }, storeId: targetStoreId, platform: source.platform, customerPhone: source.customerPhone,
+      }).exec();
+      if (!target) {
+        await this.conversationModel.updateOne({ _id: source._id }, { $set: { storeId: targetStoreId, customerId: customer.id } });
+        moved.push({ from: String(source._id), to: String(source._id) });
+        continue;
+      }
+      const messages = [...(target.messages || []), ...(source.messages || [])]
+        .sort((a: any, b: any) => (Number(a.timestamp) || 0) - (Number(b.timestamp) || 0));
+      const latest = [target, source].sort((a, b) => new Date(b.lastMessageAt || 0).getTime() - new Date(a.lastMessageAt || 0).getTime())[0];
+      await this.conversationModel.updateOne({ _id: target._id }, {
+        $set: {
+          messages,
+          customerId: customer.id,
+          unreadCount: (target.unreadCount || 0) + (source.unreadCount || 0),
+          tags: Array.from(new Set([...(target.tags || []), ...(source.tags || [])])),
+          lastMessage: latest.lastMessage,
+          lastMessageAt: latest.lastMessageAt,
+          awaitingReply: latest.awaitingReply,
+          status: latest.status,
+          snoozedUntil: latest.snoozedUntil,
+          metaConnectionId: target.metaConnectionId || source.metaConnectionId,
+        },
+      });
+      await this.conversationModel.deleteOne({ _id: source._id });
+      moved.push({ from: String(source._id), to: String(target._id) });
+    }
+
+    const event = { customerId: customer.id, previousCustomerId: customerId, fromStoreId, toStoreId: targetStoreId, conversations: moved };
+    this.eventsGateway.server.to(`store_${fromStoreId}`).to(`store_${targetStoreId}`).emit('customer_transferred', event);
+    return { customer, ...event };
+  }
+
   /** Sets the workflow status of a conversation (open / pending / snoozed / closed). */
   async setStatus(id: string, status: ConversationStatus, snoozedUntil?: Date | null) {
     const update: Record<string, unknown> = {

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import api from '../api/client';
 import {
+  ArrowLeftRight,
   Building2,
   Check,
   Copy,
@@ -37,6 +38,15 @@ interface Customer {
 
 type FormState = { fullName: string; email: string; notes: string; categoryIds: string[]; tagIds: string[] };
 
+export interface CustomerTransferResult {
+  customer: Customer;
+  previousCustomerId: string;
+  fromStoreId: string;
+  toStoreId: string;
+  /** Conversation ids before → after; they differ when a thread was merged into one in the target branch. */
+  conversations: { from: string; to: string }[];
+}
+
 const toForm = (data: Customer): FormState => ({
   fullName: data.fullName || '',
   email: data.email || '',
@@ -53,8 +63,16 @@ const errorMessage = (error: unknown, fallback: string) =>
 // Names like "WhatsApp 9665..." are generated placeholders, not real customer names.
 const isGeneratedName = (name?: string) => !name || /^(WhatsApp|العميل|عميل)\s/.test(name);
 
-export default function CustomerProfile({ customerId, onClose, onUpdated }: { customerId: string; onClose: () => void; onUpdated?: () => void }) {
+export default function CustomerProfile({ customerId, onClose, onUpdated, onTransferred }: {
+  customerId: string;
+  onClose: () => void;
+  onUpdated?: () => void;
+  onTransferred?: (result: CustomerTransferResult) => void;
+}) {
   const [customer, setCustomer] = useState<Customer | null>(null);
+  const [branches, setBranches] = useState<{ id: string; name: string }[]>([]);
+  const [targetStoreId, setTargetStoreId] = useState('');
+  const [transferring, setTransferring] = useState(false);
   const [categories, setCategories] = useState<TaxonomyItem[]>([]);
   const [tags, setTags] = useState<TaxonomyItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -83,6 +101,34 @@ export default function CustomerProfile({ customerId, onClose, onUpdated }: { cu
     })();
     return () => { active = false; };
   }, [customerId, showToast]);
+
+  useEffect(() => {
+    api.get('/stores')
+      .then(({ data }) => setBranches(Array.isArray(data) ? data : (data?.stores || [])))
+      .catch(() => setBranches([]));
+  }, []);
+
+  const handleTransfer = async () => {
+    if (!customer || !targetStoreId || targetStoreId === customer.storeId) return;
+    const targetName = branches.find((branch) => branch.id === targetStoreId)?.name || 'الفرع المحدد';
+    if (dirty && !window.confirm('لديك تعديلات غير محفوظة ستضيع عند النقل. هل تريد المتابعة؟')) return;
+    if (!window.confirm(`نقل العميل ومحادثاته إلى «${targetName}»؟\nرسائله القادمة ستصل إلى هذا الفرع.`)) return;
+    setTransferring(true);
+    try {
+      const { data } = await api.patch<CustomerTransferResult>(`/conversations/customers/${customer.id}/store`, { storeId: targetStoreId });
+      const taxonomy = await api.get('/customers/taxonomy', { params: { storeId: data.customer.storeId } }).catch(() => null);
+      setCustomer(data.customer);
+      setForm(toForm(data.customer));
+      if (taxonomy) { setCategories(taxonomy.data?.categories || []); setTags(taxonomy.data?.tags || []); }
+      setTargetStoreId('');
+      showToast(`تم نقل العميل إلى «${targetName}».`, 'success');
+      onTransferred?.(data);
+    } catch (error) {
+      showToast(errorMessage(error, 'تعذر نقل العميل.'), 'error');
+    } finally {
+      setTransferring(false);
+    }
+  };
 
   const dirty = useMemo(() => {
     if (!customer) return false;
@@ -207,6 +253,35 @@ export default function CustomerProfile({ customerId, onClose, onUpdated }: { cu
                   </div>
                 </dl>
               </section>
+
+              {/* Branch */}
+              {branches.length > 1 && (
+                <Field label="الفرع" icon={<Building2 size={13} />} htmlFor="customer-branch">
+                  <div className="flex items-center gap-2">
+                    <select
+                      id="customer-branch"
+                      value={targetStoreId || customer.storeId}
+                      onChange={(e) => setTargetStoreId(e.target.value === customer.storeId ? '' : e.target.value)}
+                      disabled={transferring}
+                      className={`${inputClass} flex-1 cursor-pointer`}
+                    >
+                      {!branches.some((branch) => branch.id === customer.storeId) && <option value={customer.storeId}>{customer.store?.name || 'فرع غير معروف'}</option>}
+                      {branches.map((branch) => (
+                        <option key={branch.id} value={branch.id}>{branch.name}{branch.id === customer.storeId ? ' (الحالي)' : ''}</option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => void handleTransfer()}
+                      disabled={!targetStoreId || transferring}
+                      className="inline-flex items-center gap-1.5 h-10 px-4 rounded-lg border border-labbaik-blue text-labbaik-blue text-sm font-black hover:bg-labbaik-blue hover:text-labbaik-on-accent disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-labbaik-blue cursor-pointer"
+                    >
+                      {transferring ? <Loader2 className="animate-spin" size={15} /> : <ArrowLeftRight size={15} />} نقل
+                    </button>
+                  </div>
+                  {targetStoreId && <p className="text-xs text-labbaik-text-muted">سينتقل العميل ومحادثاته، وتصل رسائله القادمة إلى الفرع الجديد.</p>}
+                </Field>
+              )}
 
               {/* Identity */}
               <section className="space-y-3">

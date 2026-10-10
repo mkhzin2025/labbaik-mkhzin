@@ -7,7 +7,8 @@ import { WhatsAppMediaService } from '../channels/whatsapp-media.service';
 import { createReadStream, existsSync } from 'fs';
 import { basename, join } from 'path';
 import { OrganizationsService } from '../organizations/organizations.service';
-import { IsIn, IsInt, IsISO8601, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
+import { CustomersService } from '../customers/customers.service';
+import { IsIn, IsInt, IsISO8601, IsOptional, IsString, IsUUID, Max, MaxLength, Min } from 'class-validator';
 import { Type } from 'class-transformer';
 import { CONVERSATION_STATUSES } from './schemas/conversation.schema';
 import type { ConversationStatus } from './schemas/conversation.schema';
@@ -61,6 +62,11 @@ export class UpdateConversationStatusDto {
   snoozedUntil?: string;
 }
 
+export class TransferCustomerDto {
+  @IsUUID()
+  storeId: string;
+}
+
 @ApiTags('Conversations')
 @ApiBearerAuth()
 @Controller('conversations')
@@ -70,6 +76,7 @@ export class ConversationsController {
     private readonly conversationsService: ConversationsService,
     private readonly organizationsService: OrganizationsService,
     private readonly whatsAppMediaService: WhatsAppMediaService,
+    private readonly customersService: CustomersService,
   ) {}
 
   /** Paged inbox: `{ items, nextCursor }`. Pass `nextCursor` back as `cursor` for the next page. */
@@ -100,6 +107,16 @@ export class ConversationsController {
     const period = [7, 30, 90].includes(Number(days)) ? Number(days) : 30;
     const offset = Math.max(-840, Math.min(840, Number.parseInt(tz || '0', 10) || 0));
     return this.conversationsService.getAnalytics(storeId ? [storeId] : accessible, period, offset);
+  }
+
+  /** Moves a customer and their conversations to another branch; the user needs access to both branches. */
+  @Patch('customers/:customerId/store')
+  async transferCustomer(@Param('customerId') customerId: string, @Body() dto: TransferCustomerDto, @Request() req: any) {
+    const organization = await this.organizationsService.getForUser(req.user.id, req.user.organizationId);
+    const customer = await this.customersService.findOneInOrganization(customerId, organization.id);
+    await this.organizationsService.assertStoreAccessibleByUser(req.user.id, organization.id, customer.storeId);
+    await this.organizationsService.assertStoreAccessibleByUser(req.user.id, organization.id, dto.storeId);
+    return this.conversationsService.transferCustomer(customerId, organization.id, dto.storeId);
   }
 
   @Get('attachments/:filename')
