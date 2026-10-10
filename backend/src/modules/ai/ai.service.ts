@@ -34,7 +34,7 @@ export class AiService implements OnModuleInit {
 
   async generateResponse(customerMessage: string, storeContext: any): Promise<string | null> {
     const systemPrompt = `
-      أنت "لبيك"، مساعد ذكاء اصطناعي ذكي لمتجر "${storeContext.name}".
+      أنت "تيل بوت"، مساعد ذكاء اصطناعي ذكي لمتجر "${storeContext.name}".
       
       قاعدة المعرفة الخاصة بالمتجر:
       """

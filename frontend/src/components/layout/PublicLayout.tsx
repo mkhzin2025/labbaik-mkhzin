@@ -2,8 +2,8 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import { Sun, Moon, ShieldCheck, Mail, ArrowRight } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
-import LogoImage from '../../assets/logos/logo.png';
-import LogoAltImage from '../../assets/logos/logo-alt.png';
+import LogoImage from '../../assets/logos/tael-bot-mark-inverse.svg';
+import LogoAltImage from '../../assets/logos/tael-bot-mark.svg';
 
 interface PublicLayoutProps {
   children: React.ReactNode;
@@ -20,7 +20,7 @@ export default function PublicLayout({ children }: PublicLayoutProps) {
           <Link to="/" className="flex items-center gap-3 group">
             <img
               src={theme === 'dark' ? LogoImage : LogoAltImage}
-              alt="Labbaik Logo"
+              alt="Tael Bot"
               className="h-9 sm:h-11 w-auto object-contain transition-transform group-hover:scale-105"
             />
             <div className="flex flex-col">
@@ -79,7 +79,7 @@ export default function PublicLayout({ children }: PublicLayoutProps) {
         <div className="max-w-6xl mx-auto px-4 sm:px-6 flex flex-col md:flex-row items-center justify-between gap-4 text-xs text-neutral-500">
           <div className="flex items-center gap-2">
             <ShieldCheck size={16} className="text-labbaik-blue" />
-            <span>منصة لبيك SaaS لإدارة قنوات المحادثات والرسائل الذكية.</span>
+            <span>منصة تيل بوت SaaS لإدارة قنوات المحادثات والرسائل الذكية.</span>
           </div>
 
           <div className="flex flex-wrap items-center gap-5 font-bold">
@@ -92,7 +92,7 @@ export default function PublicLayout({ children }: PublicLayoutProps) {
           </div>
 
           <div>
-            © {new Date().getFullYear()} لبيك (Labbaik). جميع الحقوق محفوظة.
+            © {new Date().getFullYear()} تيل بوت (Tael Bot). جميع الحقوق محفوظة.
           </div>
         </div>
       </footer>

@@ -24,8 +24,8 @@ async function bootstrap() {
   // app.setGlobalPrefix('api');
 
   const swaggerConfig = new DocumentBuilder()
-    .setTitle('Labbaik API')
-    .setDescription('API documentation for the Labbaik customer service automation platform.')
+    .setTitle('Tael Bot API')
+    .setDescription('API documentation for the Tael Bot customer service automation platform.')
     .setVersion('1.0')
     .addBearerAuth()
     .addSecurityRequirements('bearer')

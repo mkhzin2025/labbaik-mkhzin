@@ -273,7 +273,7 @@ export default function BillingPage() {
   const balance = Number(wallet?.balanceSar || 0);
   const lowBalance = balance <= Number(wallet?.lowBalanceThresholdSar || 0);
   const readiness = [
-    { ok: Boolean(currentPlan?.features?.metaLabbaik), label: 'باقة تدعم Meta لبيك', action: () => setTab('plans') },
+    { ok: Boolean(currentPlan?.features?.metaLabbaik), label: 'باقة تدعم Meta تيل بوت', action: () => setTab('plans') },
     { ok: Boolean(defaultMethod), label: 'بطاقة دفع محفوظة', action: () => setTab('wallet') },
     { ok: balance > 0, label: 'رصيد في المحفظة', action: () => setTab('wallet') },
   ];
@@ -284,7 +284,7 @@ export default function BillingPage() {
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-black text-neutral-900 dark:text-white">الباقات والفوترة</h1>
-          <p className="mt-1 text-sm text-labbaik-text-muted">اشتراك لبيك، ورصيد Meta لبيك، وطرق الدفع المحفوظة.</p>
+          <p className="mt-1 text-sm text-labbaik-text-muted">اشتراك تيل بوت، ورصيد Meta تيل بوت، وطرق الدفع المحفوظة.</p>
         </div>
         <button type="button" onClick={() => void refresh()} disabled={busy} className={secondaryButton}>
           {busy ? <Loader2 size={16} className="animate-spin" /> : <RefreshCcw size={16} />} تحديث
@@ -310,7 +310,7 @@ export default function BillingPage() {
         <div className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <Panel>
-              <p className="text-xs font-bold text-labbaik-text-muted">رصيد محفظة Meta لبيك</p>
+              <p className="text-xs font-bold text-labbaik-text-muted">رصيد محفظة Meta تيل بوت</p>
               <p className="mt-2 text-3xl font-black tabular-nums text-neutral-900 dark:text-white">{formatSar(wallet?.balanceSar)}</p>
               {lowBalance && <p className="mt-2 flex items-center gap-1.5 text-xs font-bold text-amber-700 dark:text-amber-300"><AlertTriangle size={14} /> الرصيد عند الحد المنخفض أو أقل</p>}
               <button type="button" onClick={() => setTab('wallet')} className="mt-3 text-sm font-bold text-labbaik-blue dark:text-purple-300 hover:underline cursor-pointer">شحن الرصيد</button>
@@ -343,8 +343,8 @@ export default function BillingPage() {
           <Panel>
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
               <div>
-                <h2 className="font-black text-neutral-900 dark:text-white">جاهزية Meta لبيك</h2>
-                <p className="mt-0.5 text-sm text-labbaik-text-muted">{ready ? 'كل المتطلبات مكتملة، ويمكن تفعيل الإرسال عبر Meta لبيك.' : 'أكمل المتطلبات التالية قبل تفعيل الإرسال عبر Meta لبيك.'}</p>
+                <h2 className="font-black text-neutral-900 dark:text-white">جاهزية Meta تيل بوت</h2>
+                <p className="mt-0.5 text-sm text-labbaik-text-muted">{ready ? 'كل المتطلبات مكتملة، ويمكن تفعيل الإرسال عبر Meta تيل بوت.' : 'أكمل المتطلبات التالية قبل تفعيل الإرسال عبر Meta تيل بوت.'}</p>
               </div>
               <ul className="flex flex-wrap gap-2">
                 {readiness.map((r) => (
@@ -378,7 +378,7 @@ export default function BillingPage() {
           {plans.map((plan: any) => {
             const active = currentPlan?.id === plan.id;
             const features = [
-              { on: plan.features?.metaLabbaik, label: 'الإرسال عبر Meta لبيك' },
+              { on: plan.features?.metaLabbaik, label: 'الإرسال عبر Meta تيل بوت' },
               { on: plan.features?.ai, label: 'الرد بالذكاء الاصطناعي' },
               { on: plan.features?.flows, label: 'التدفقات' },
             ];
@@ -421,7 +421,7 @@ export default function BillingPage() {
           <div className="space-y-4">
             <Panel>
               <h2 className="font-black text-neutral-900 dark:text-white">شحن المحفظة</h2>
-              <p className="mt-0.5 text-sm text-labbaik-text-muted">يُخصم من الرصيد تلقائيًا عند الإرسال عبر Meta لبيك. الرصيد الحالي <b className="tabular-nums text-neutral-900 dark:text-white">{formatSar(wallet?.balanceSar)}</b>.</p>
+              <p className="mt-0.5 text-sm text-labbaik-text-muted">يُخصم من الرصيد تلقائيًا عند الإرسال عبر Meta تيل بوت. الرصيد الحالي <b className="tabular-nums text-neutral-900 dark:text-white">{formatSar(wallet?.balanceSar)}</b>.</p>
 
               {defaultMethod && (
                 <div className="mt-4">
@@ -444,7 +444,7 @@ export default function BillingPage() {
                 ) : (
                   <div className="space-y-3">
                     <div className="flex items-center justify-between">
-                      <p className="flex items-center gap-1.5 text-xs font-bold text-emerald-800 dark:text-emerald-300"><Lock size={13} /> بيانات البطاقة تُرسل مباشرة إلى ميسر ولا تمر على خادم لبيك.</p>
+                      <p className="flex items-center gap-1.5 text-xs font-bold text-emerald-800 dark:text-emerald-300"><Lock size={13} /> بيانات البطاقة تُرسل مباشرة إلى ميسر ولا تمر على خادم تيل بوت.</p>
                       <button type="button" onClick={() => setShowCardForm(false)} aria-label="إغلاق نموذج البطاقة" className="grid h-8 w-8 place-items-center rounded-md text-labbaik-text-muted hover:text-neutral-900 dark:hover:text-white cursor-pointer"><X size={16} /></button>
                     </div>
                     <Field label="اسم حامل البطاقة" htmlFor="card-name">
@@ -555,7 +555,7 @@ export default function BillingPage() {
             </Panel>
 
             <Panel>
-              <h2 className="font-black text-neutral-900 dark:text-white">أسعار استخدام Meta لبيك</h2>
+              <h2 className="font-black text-neutral-900 dark:text-white">أسعار استخدام Meta تيل بوت</h2>
               <p className="mt-0.5 text-sm text-labbaik-text-muted">يُخصم السعر من المحفظة عند كل إرسال، ويُسترجع تلقائيًا إذا فشل الإرسال من Meta.</p>
               {(summary.pricingRules || []).length ? (
                 <ul className="mt-3 divide-y divide-labbaik-border rounded-lg border border-labbaik-border">

@@ -19,7 +19,7 @@ export default function AccountDeletionPage() {
   const [errorMessage, setErrorMessage] = useState('');
 
   useEffect(() => {
-    document.title = 'حذف الحساب والبيانات | لبيك';
+    document.title = 'حذف الحساب والبيانات | تيل بوت';
     const metaDesc = document.querySelector('meta[name="description"]');
     if (metaDesc) {
       metaDesc.setAttribute('content', 'تعليمات وطلب حذف حسابك وبياناتك من منصة لبيك');

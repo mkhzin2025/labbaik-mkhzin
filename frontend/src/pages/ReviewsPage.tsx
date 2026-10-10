@@ -157,7 +157,7 @@ export default function ReviewsPage() {
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-black text-neutral-900 dark:text-white">تقييمات جوجل ماب</h1>
-          <p className="mt-1 text-sm text-labbaik-text-muted">راجع ما يقوله العملاء عن متجرك، ورُد عليهم بمساعدة لبيك.</p>
+          <p className="mt-1 text-sm text-labbaik-text-muted">راجع ما يقوله العملاء عن متجرك، ورُد عليهم بمساعدة تيل بوت.</p>
         </div>
         {import.meta.env.DEV && (
           <button
@@ -286,7 +286,7 @@ export default function ReviewsPage() {
                             className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-labbaik-blue/30 text-xs font-bold text-labbaik-blue dark:text-purple-200 hover:bg-labbaik-blue/10 disabled:opacity-50 cursor-pointer"
                           >
                             {suggesting ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
-                            {replyText.trim() ? 'اقتراح آخر من لبيك' : 'اقترح ردًا بلبيك'}
+                            {replyText.trim() ? 'اقتراح آخر من تيل بوت' : 'اقترح ردًا بتيل بوت'}
                           </button>
                         </div>
                         <textarea
@@ -295,7 +295,7 @@ export default function ReviewsPage() {
                           value={replyText}
                           onChange={(e) => setReplyText(e.target.value)}
                           maxLength={4000}
-                          placeholder="اكتب ردًا مهذبًا وشخصيًا، أو اطلب اقتراحًا من لبيك ثم عدّله."
+                          placeholder="اكتب ردًا مهذبًا وشخصيًا، أو اطلب اقتراحًا من تيل بوت ثم عدّله."
                           className="w-full min-h-32 rounded-lg border border-labbaik-border bg-labbaik-surface p-3 text-sm leading-relaxed text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-labbaik-blue/30 focus:border-labbaik-blue placeholder:text-labbaik-text-muted resize-y"
                         />
                         <div className="flex items-center justify-between gap-2">

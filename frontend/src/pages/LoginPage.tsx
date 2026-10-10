@@ -2,8 +2,8 @@ import React, { useState } from 'react';
 import api from '../api/client';
 import { useNavigate } from 'react-router-dom';
 import { Mail, Lock, Eye, EyeOff, Sun, Moon } from 'lucide-react';
-import LogoImage from '../assets/logos/logo.png';
-import LogoAltImage from '../assets/logos/logo-alt.png';
+import LogoImage from '../assets/logos/tael-bot-mark-inverse.svg';
+import LogoAltImage from '../assets/logos/tael-bot-mark.svg';
 import BackgroundImage from '../assets/login-bg.webp';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
@@ -85,10 +85,10 @@ export default function LoginPage() {
           <div className="mb-8 text-center">
             <img
               src={theme === 'light' ? LogoAltImage : LogoImage}
-              alt="لبيك"
+              alt="تيل بوت"
               className="mx-auto mb-6 h-20 w-auto object-contain"
             />
-            <h1 className="text-2xl font-bold text-neutral-900 dark:text-white mb-2">أهلاً بك في لبيك</h1>
+            <h1 className="text-2xl font-bold text-neutral-900 dark:text-white mb-2">أهلاً بك في تيل بوت</h1>
             <p className="text-sm text-labbaik-text-muted">
               نظام الرد والتواصل الذكي المتكامل
             </p>
@@ -160,7 +160,7 @@ export default function LoginPage() {
           {/* Footer */}
           <div className="mt-6 text-center">
             <p className="text-xs text-labbaik-text-muted font-medium">
-              © {new Date().getFullYear()} Labbaik System • جميع الحقوق محفوظة
+              © {new Date().getFullYear()} Tael Bot • جميع الحقوق محفوظة
             </p>
           </div>
         </div>

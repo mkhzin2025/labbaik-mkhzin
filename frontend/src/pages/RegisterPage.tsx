@@ -2,8 +2,8 @@ import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Building2, User, Mail, Phone, Lock, Eye, EyeOff, Store, Sun, Moon, ArrowRight, Sparkles } from 'lucide-react';
 import api from '../api/client';
-import LogoImage from '../assets/logos/logo.png';
-import LogoAltImage from '../assets/logos/logo-alt.png';
+import LogoImage from '../assets/logos/tael-bot-mark-inverse.svg';
+import LogoAltImage from '../assets/logos/tael-bot-mark.svg';
 import BackgroundImage from '../assets/login-bg.webp';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
@@ -62,7 +62,7 @@ export default function RegisterPage() {
         localStorage.setItem('active_store_id', data.store.id);
       }
 
-      showToast(`أهلاً بك في لبيك! تم تسجيل ${data.organization?.name || 'مؤسستك'} بنجاح 🎉`, 'success');
+      showToast(`أهلاً بك في تيل بوت! تم تسجيل ${data.organization?.name || 'مؤسستك'} بنجاح 🎉`, 'success');
       navigate('/dashboard/settings?tab=meta');
     } catch (err: any) {
       const responseMessage = err?.response?.data?.message;
@@ -124,7 +124,7 @@ export default function RegisterPage() {
             <div className="mb-5 inline-block">
               <img
                 src={theme === 'light' ? LogoAltImage : LogoImage}
-                alt="Labbaik Logo"
+                alt="Tael Bot"
                 className="h-16 sm:h-20 w-auto object-contain transition-all duration-300"
               />
             </div>
@@ -133,7 +133,7 @@ export default function RegisterPage() {
               <span>تسجيل منشأة جديدة</span>
             </div>
             <h1 className="text-2xl sm:text-3xl font-black text-neutral-900 dark:text-white mb-2">
-              ابدأ مع لبيك لمؤسستك
+              ابدأ مع تيل بوت لمؤسستك
             </h1>
             <p className="text-sm text-neutral-600 dark:text-neutral-400 font-medium max-w-md mx-auto">
               أنشئ مساحة عمل خاصة بمنظمتك، اربط قنوات واتساب السحابية، وقم بإدارة فروعك بذكاء متكامل.
@@ -273,7 +273,7 @@ export default function RegisterPage() {
           {/* Footer */}
           <div className="mt-6 text-center">
             <p className="text-xs text-neutral-500 dark:text-neutral-500 font-medium">
-              © 2026 Labbaik System • جميع الحقوق محفوظة
+              © 2026 Tael Bot • جميع الحقوق محفوظة
             </p>
           </div>
         </div>
