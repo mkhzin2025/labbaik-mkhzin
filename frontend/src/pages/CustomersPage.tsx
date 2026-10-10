@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import api from '../api/client';
 import {
+  Building2,
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
@@ -79,6 +80,8 @@ const TAXONOMY_COLORS = ['#7c3aed', '#2563eb', '#0e7490', '#047857', '#b45309', 
 
 const VIEW_MODE_KEY = 'customers_view_mode';
 const PAGE_SIZE_KEY = 'customers_page_size';
+const BRANCH_FILTER_KEY = 'customers_branch';
+const ALL_BRANCHES = 'all';
 
 const readStored = <T,>(key: string, parse: (value: string | null) => T): T => {
   try { return parse(localStorage.getItem(key)); } catch { return parse(null); }
@@ -144,8 +147,9 @@ export default function CustomersPage() {
         const { data } = await api.get('/stores');
         const rows: Branch[] = data || [];
         setBranches(rows);
-        const saved = readStored('active_store_id', (v) => v);
-        setStoreId(rows.some((row) => row.id === saved) ? saved! : rows[0]?.id || '');
+        // Opens on every branch; a branch picked here is remembered for next time.
+        const saved = readStored(BRANCH_FILTER_KEY, (v) => v);
+        setStoreId(rows.length > 1 ? (saved && rows.some((row) => row.id === saved) ? saved : ALL_BRANCHES) : rows[0]?.id || '');
         if (!rows.length) setLoading(false);
       } catch (error) {
         showToast(errorMessage(error, 'تعذر تحميل الفروع.'), 'error');
@@ -156,10 +160,12 @@ export default function CustomersPage() {
 
   const loadTaxonomy = useCallback(async (branchId: string) => {
     if (!branchId) return;
+    // Across all branches only organization-wide categories/tags apply, and usage counts are per branch.
+    const all = branchId === ALL_BRANCHES;
     try {
       const [taxonomy, counts] = await Promise.all([
-        api.get('/customers/taxonomy', { params: { storeId: branchId } }),
-        api.get('/customers/taxonomy/usage', { params: { storeId: branchId } }),
+        api.get('/customers/taxonomy', { params: all ? {} : { storeId: branchId } }),
+        all ? Promise.resolve({ data: {} }) : api.get('/customers/taxonomy/usage', { params: { storeId: branchId } }),
       ]);
       setCategories(taxonomy.data?.categories || []);
       setTags(taxonomy.data?.tags || []);
@@ -171,7 +177,8 @@ export default function CustomersPage() {
 
   useEffect(() => {
     if (!storeId) return;
-    writeStored('active_store_id', storeId);
+    writeStored(BRANCH_FILTER_KEY, storeId);
+    if (storeId !== ALL_BRANCHES) writeStored('active_store_id', storeId);
     setCategoryFilter([]);
     setTagFilter([]);
     void loadTaxonomy(storeId);
@@ -184,7 +191,7 @@ export default function CustomersPage() {
     try {
       const { data } = await api.get<CustomerPage>('/customers', {
         params: {
-          storeId,
+          ...(storeId === ALL_BRANCHES ? { scope: 'organization' } : { storeId }),
           page,
           limit: pageSize,
           segment,
@@ -214,6 +221,8 @@ export default function CustomersPage() {
   const total = result?.total || 0;
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
   const activeBranch = useMemo(() => branches.find((branch) => branch.id === storeId), [branches, storeId]);
+  const allBranches = storeId === ALL_BRANCHES;
+  const branchName = (id?: string) => branches.find((branch) => branch.id === id)?.name || 'فرع غير معروف';
   const highlight = useMemo(() => new Set([...categoryFilter, ...tagFilter]), [categoryFilter, tagFilter]);
   const hasFilters = categoryFilter.length > 0 || tagFilter.length > 0 || segment !== 'all' || Boolean(search);
 
@@ -242,12 +251,20 @@ export default function CustomersPage() {
     if (!selection.size) return;
     setBulkBusy(true);
     try {
-      await api.patch('/customers/bulk', {
-        storeId,
-        customerIds: [...selection],
-        mode,
-        ...(kind === 'category' ? { categoryIds: [item.id] } : { tagIds: [item.id] }),
-      });
+      // Bulk edits are validated per branch, so a selection spanning branches is sent one branch at a time.
+      const byBranch = new Map<string, string[]>();
+      for (const customer of customers) {
+        if (!selection.has(customer.id)) continue;
+        byBranch.set(customer.storeId, [...(byBranch.get(customer.storeId) || []), customer.id]);
+      }
+      for (const [branchId, customerIds] of byBranch) {
+        await api.patch('/customers/bulk', {
+          storeId: branchId,
+          customerIds,
+          mode,
+          ...(kind === 'category' ? { categoryIds: [item.id] } : { tagIds: [item.id] }),
+        });
+      }
       const label = kind === 'category' ? 'الفئة' : 'التاق';
       showToast(mode === 'add' ? `تمت إضافة ${label} «${item.name}» إلى ${selection.size} عميل.` : `تمت إزالة ${label} «${item.name}» من ${selection.size} عميل.`, 'success');
       setSelection(new Set());
@@ -278,15 +295,17 @@ export default function CustomersPage() {
         <div>
           <h1 className="text-2xl font-black text-neutral-900 dark:text-white">العملاء</h1>
           <p className="mt-1 text-sm text-labbaik-text-muted">
-            <span className="tabular-nums font-bold">{counts.all.toLocaleString('en')}</span> عميل في {activeBranch?.name || 'الفرع'}
+            <span className="tabular-nums font-bold">{counts.all.toLocaleString('en')}</span> عميل في {allBranches ? 'كل الفروع' : activeBranch?.name || 'الفرع'}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {branches.length > 1 && <BranchSelector branches={branches} value={storeId} onChange={setStoreId} />}
+          {branches.length > 1 && <BranchSelector branches={branches} value={storeId} onChange={setStoreId} allLabel="كل الفروع" />}
           <button
             type="button"
             onClick={() => setShowTaxonomy(true)}
-            className="inline-flex items-center gap-2 h-10 px-4 rounded-lg border border-labbaik-border bg-labbaik-surface text-sm font-bold text-neutral-800 dark:text-neutral-100 hover:border-labbaik-blue/40 hover:text-labbaik-blue transition-colors cursor-pointer"
+            disabled={allBranches}
+            title={allBranches ? 'اختر فرعاً لإدارة فئاته وتاقاته' : undefined}
+            className="inline-flex items-center gap-2 h-10 px-4 rounded-lg border border-labbaik-border bg-labbaik-surface text-sm font-bold text-neutral-800 dark:text-neutral-100 hover:border-labbaik-blue/40 hover:text-labbaik-blue transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:border-labbaik-border disabled:hover:text-neutral-800 dark:disabled:hover:text-neutral-100"
           >
             <Settings2 size={16} /> الفئات والتاقات
           </button>
@@ -414,6 +433,9 @@ export default function CustomersPage() {
                             <button type="button" onClick={(e) => { e.stopPropagation(); setSelectedCustomerId(customer.id); }} className="block font-bold text-neutral-900 dark:text-white truncate max-w-56 text-right hover:text-labbaik-blue cursor-pointer">
                               {displayName(customer)}
                             </button>
+                            {allBranches && (
+                              <div className="flex items-center gap-1 text-xs font-bold text-labbaik-text-muted truncate max-w-56"><Building2 size={11} className="shrink-0" />{customer.store?.name || branchName(customer.storeId)}</div>
+                            )}
                             {customer.email && <div className="text-xs text-labbaik-text-muted truncate max-w-56">{customer.email}</div>}
                           </div>
                         </div>
@@ -448,6 +470,9 @@ export default function CustomersPage() {
                       <div className="min-w-0">
                         <h3 className="font-black text-neutral-900 dark:text-white truncate">{displayName(customer)}</h3>
                         <p className="text-xs font-bold tabular-nums text-labbaik-text-muted" dir="ltr" style={{ textAlign: 'right' }}>{customer.phoneNumber || '—'}</p>
+                        {allBranches && (
+                          <p className="flex items-center gap-1 text-xs font-bold text-labbaik-text-muted truncate"><Building2 size={11} className="shrink-0" />{customer.store?.name || branchName(customer.storeId)}</p>
+                        )}
                       </div>
                     </div>
                     <div className="mt-4 space-y-2">

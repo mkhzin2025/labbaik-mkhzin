@@ -46,6 +46,13 @@ export class Customer {
   @Column({ type: 'text', nullable: true })
   notes: string;
 
+  /** The customer asked not to receive marketing campaigns; bulk template sends skip their number. */
+  @Column({ default: false })
+  marketingOptOut: boolean;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  marketingOptOutAt: Date | null;
+
   @Column('uuid')
   @Index()
   storeId: string;

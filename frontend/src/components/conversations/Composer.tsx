@@ -17,6 +17,8 @@ const EMOJIS = [
 ];
 
 const SHORTCUT_RE = /^[\p{L}\p{N}_-]{1,32}$/u;
+const MIN_SUGGEST_CHARS = 2;
+const MAX_SUGGESTIONS = 5;
 const newId = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 
 interface ComposerProps {
@@ -61,14 +63,28 @@ export default function Composer({ onSend, disabled = false }: ComposerProps) {
 
   // "/" at the start of the box (no space yet) filters quick replies by what follows it.
   const slashQuery = /^\/(\S*)$/.exec(text)?.[1];
-  const quickOpen = panel === 'quick' || slashQuery !== undefined;
+  // Plain typing also suggests replies whose shortcut or text starts like the message, without taking over Enter.
+  const typedQuery = slashQuery === undefined && !text.includes('\n') && text.trim().length >= MIN_SUGGEST_CHARS ? text.trim().toLowerCase() : '';
+  const [dismissedFor, setDismissedFor] = useState<string | null>(null);
+  const [navigated, setNavigated] = useState(false);
+  const suggestions = useMemo(() => {
+    if (!typedQuery || typedQuery === dismissedFor) return [];
+    const starts = replies.filter((r) => r.shortcut.toLowerCase().startsWith(typedQuery) || r.text.toLowerCase().startsWith(typedQuery));
+    const contains = typedQuery.length >= 3
+      ? replies.filter((r) => !starts.includes(r) && (r.shortcut.toLowerCase().includes(typedQuery) || r.text.toLowerCase().includes(typedQuery)))
+      : [];
+    return [...starts, ...contains].filter((r) => r.text.trim().toLowerCase() !== typedQuery).slice(0, MAX_SUGGESTIONS);
+  }, [replies, typedQuery, dismissedFor]);
+  const suggesting = panel === 'none' && slashQuery === undefined && suggestions.length > 0;
+  const quickOpen = panel === 'quick' || slashQuery !== undefined || suggesting;
   const matches = useMemo(() => {
+    if (suggesting) return suggestions;
     const q = (slashQuery ?? '').toLowerCase();
     if (!q) return replies;
     return replies.filter((r) => r.shortcut.toLowerCase().includes(q) || r.text.toLowerCase().includes(q));
-  }, [replies, slashQuery]);
+  }, [replies, slashQuery, suggesting, suggestions]);
 
-  useEffect(() => { setActiveIndex(0); }, [slashQuery, panel]);
+  useEffect(() => { setActiveIndex(0); setNavigated(false); }, [slashQuery, typedQuery, panel]);
 
   const focusEnd = () => requestAnimationFrame(() => {
     const el = textareaRef.current;
@@ -78,7 +94,8 @@ export default function Composer({ onSend, disabled = false }: ComposerProps) {
   });
 
   const insertReply = (reply: QuickReply) => {
-    setText(slashQuery !== undefined ? reply.text : (text ? `${text}${text.endsWith(' ') || text.endsWith('\n') ? '' : ' '}${reply.text}` : reply.text));
+    // A suggestion replaces the words that triggered it; the notes button appends to what is already written.
+    setText(slashQuery !== undefined || suggesting ? reply.text : (text ? `${text}${text.endsWith(' ') || text.endsWith('\n') ? '' : ' '}${reply.text}` : reply.text));
     setPanel('none');
     focusEnd();
   };
@@ -113,12 +130,15 @@ export default function Composer({ onSend, disabled = false }: ComposerProps) {
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.nativeEvent.isComposing) return;
     if (quickOpen && matches.length) {
-      if (event.key === 'ArrowDown') { event.preventDefault(); setActiveIndex((i) => (i + 1) % matches.length); return; }
-      if (event.key === 'ArrowUp') { event.preventDefault(); setActiveIndex((i) => (i - 1 + matches.length) % matches.length); return; }
-      if (event.key === 'Enter' || event.key === 'Tab') { event.preventDefault(); insertReply(matches[activeIndex]); return; }
+      if (event.key === 'ArrowDown') { event.preventDefault(); setNavigated(true); setActiveIndex((i) => (i + 1) % matches.length); return; }
+      if (event.key === 'ArrowUp') { event.preventDefault(); setNavigated(true); setActiveIndex((i) => (i - 1 + matches.length) % matches.length); return; }
+      // While suggesting from plain typing, Enter still sends unless the user picked a suggestion with the arrows.
+      const enterPicks = event.key === 'Enter' && !event.shiftKey && (!suggesting || navigated);
+      if (event.key === 'Tab' || enterPicks) { event.preventDefault(); insertReply(matches[activeIndex]); return; }
     }
     if (event.key === 'Escape' && (quickOpen || panel !== 'none')) {
       event.preventDefault();
+      if (suggesting) setDismissedFor(typedQuery);
       setPanel('none');
       if (slashQuery !== undefined) setText('');
       return;
@@ -142,7 +162,7 @@ export default function Composer({ onSend, disabled = false }: ComposerProps) {
       {quickOpen && (
         <div className="absolute bottom-full mb-2 inset-x-0 rounded-xl border border-labbaik-border bg-labbaik-surface shadow-[0_16px_40px_-12px_rgba(15,10,30,0.35)] z-30 overflow-hidden" role="listbox" aria-label="الردود السريعة">
           <div className="flex items-center justify-between px-3 py-2 border-b border-labbaik-border">
-            <span className="flex items-center gap-1.5 text-xs font-bold text-labbaik-text-muted"><Zap size={13} /> الردود السريعة{slashQuery ? <span dir="ltr">· /{slashQuery}</span> : ''}</span>
+            <span className="flex items-center gap-1.5 text-xs font-bold text-labbaik-text-muted"><Zap size={13} /> {suggesting ? 'ردود سريعة مقترحة' : 'الردود السريعة'}{slashQuery ? <span dir="ltr">· /{slashQuery}</span> : ''}</span>
             <button type="button" onClick={() => { setManaging(true); setPanel('none'); }} className="inline-flex items-center gap-1 text-xs font-bold text-labbaik-blue dark:text-purple-300 hover:underline cursor-pointer">
               <Pencil size={12} /> إدارة
             </button>
@@ -170,7 +190,9 @@ export default function Composer({ onSend, disabled = false }: ComposerProps) {
               </li>
             )}
           </ul>
-          <p className="px-3 py-1.5 border-t border-labbaik-border text-[11px] text-labbaik-text-muted">↑↓ للتنقل · Enter للإدراج · Esc للإغلاق</p>
+          <p className="px-3 py-1.5 border-t border-labbaik-border text-[11px] text-labbaik-text-muted">
+            {suggesting ? 'Tab لإدراج المقترح · ↑↓ ثم Enter لاختيار غيره · Enter وحده يرسل ما كتبته · Esc للإخفاء' : '↑↓ للتنقل · Enter للإدراج · Esc للإغلاق'}
+          </p>
         </div>
       )}
 

@@ -27,7 +27,7 @@ import type { Branch } from '../components/customers/BranchSelector';
 type TemplateComponent = { type: string; text?: string; format?: string; buttons?: any[]; [key: string]: any };
 type Template = { id: string; name: string; language: string; category?: string; status?: string; components: TemplateComponent[] };
 type Taxonomy = { id: string; name: string; color: string; isActive: boolean; scope?: 'organization' | 'store'; storeId?: string | null };
-type Customer = { id: string; storeId: string; store?: Branch; fullName?: string; phoneNumber?: string; whatsappId?: string; email?: string; categories: Taxonomy[]; tags: Taxonomy[] };
+type Customer = { id: string; storeId: string; store?: Branch; fullName?: string; phoneNumber?: string; whatsappId?: string; email?: string; marketingOptOut?: boolean; categories: Taxonomy[]; tags: Taxonomy[] };
 type MetaConnection = { id: string; scope: 'organization' | 'store'; storeId?: string | null; defaultStoreId?: string | null; displayPhoneNumber?: string; phoneNumberId: string; status?: string };
 type AudienceMode = 'all' | 'segment' | 'manual';
 
@@ -201,10 +201,13 @@ export default function WhatsAppTemplatesPage() {
     return customers.filter((customer) => manualIds.includes(customer.id));
   }, [audienceMode, customers, categoryFilter, tagFilter, manualIds, matchesSegment]);
 
-  const recipients = useMemo(
+  const chosen = useMemo(
     () => (audienceMode === 'manual' ? baseAudience : baseAudience.filter((customer) => !excludedIds.includes(customer.id))),
     [audienceMode, baseAudience, excludedIds],
   );
+  // Customers who declined marketing never receive a campaign; the server enforces the same rule.
+  const recipients = useMemo(() => chosen.filter((customer) => !customer.marketingOptOut), [chosen]);
+  const optedOutCount = chosen.length - recipients.length;
   const recipientStats = dedupeStats(recipients);
 
   const listForPicker = useMemo(() => {
@@ -299,7 +302,7 @@ export default function WhatsAppTemplatesPage() {
           customerIds: recipients.map((c) => c.id),
           ...basePayload,
         });
-        showToast(`الإرسال: ${data.sent} ناجح، ${data.failed} فشل، وحُذف ${data.duplicatesRemoved || 0} تكرار.`, data.failed ? 'info' : 'success');
+        showToast(`الإرسال: ${data.sent} ناجح، ${data.failed} فشل، وحُذف ${data.duplicatesRemoved || 0} تكرار${data.optedOutSkipped ? `، واستُبعد ${data.optedOutSkipped} رافض للتسويق` : ''}.`, data.failed ? 'info' : 'success');
         setManualIds([]);
         setExcludedIds([]);
         if (isAuth) setOtpCode('');
@@ -566,8 +569,9 @@ export default function WhatsAppTemplatesPage() {
               ) : (
                 <div className="rounded-lg border border-labbaik-border p-3 space-y-2">
                   <p className="text-xs text-labbaik-text-muted leading-relaxed">{audienceSummary()}</p>
-                  <div className="grid grid-cols-3 gap-2 text-center">
-                    <Stat label="سجلات" value={recipients.length} />
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
+                    <Stat label="سجلات" value={chosen.length} />
+                    <Stat label="رفضوا التسويق" value={optedOutCount} />
                     <Stat label="مكرر" value={recipientStats.duplicates} />
                     <Stat label="سيستلمون" value={recipientStats.unique} highlight />
                   </div>

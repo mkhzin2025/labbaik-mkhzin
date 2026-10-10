@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 import api from '../api/client';
 import {
   ArrowLeftRight,
+  BellOff,
   Building2,
   Check,
   Copy,
@@ -30,13 +31,15 @@ interface Customer {
   phoneNumber: string;
   whatsappId?: string;
   notes: string;
+  marketingOptOut?: boolean;
+  marketingOptOutAt?: string | null;
   categories: TaxonomyItem[];
   tags: TaxonomyItem[];
   createdAt: string;
   updatedAt?: string;
 }
 
-type FormState = { fullName: string; email: string; notes: string; categoryIds: string[]; tagIds: string[] };
+type FormState = { fullName: string; email: string; notes: string; marketingOptOut: boolean; categoryIds: string[]; tagIds: string[] };
 
 export interface CustomerTransferResult {
   customer: Customer;
@@ -51,6 +54,7 @@ const toForm = (data: Customer): FormState => ({
   fullName: data.fullName || '',
   email: data.email || '',
   notes: data.notes || '',
+  marketingOptOut: Boolean(data.marketingOptOut),
   categoryIds: (data.categories || []).map((item) => item.id),
   tagIds: (data.tags || []).map((item) => item.id),
 });
@@ -78,7 +82,7 @@ export default function CustomerProfile({ customerId, onClose, onUpdated, onTran
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [form, setForm] = useState<FormState>({ fullName: '', email: '', notes: '', categoryIds: [], tagIds: [] });
+  const [form, setForm] = useState<FormState>({ fullName: '', email: '', notes: '', marketingOptOut: false, categoryIds: [], tagIds: [] });
   const { showToast } = useToast();
 
   useEffect(() => {
@@ -136,6 +140,7 @@ export default function CustomerProfile({ customerId, onClose, onUpdated, onTran
     return original.fullName !== form.fullName
       || original.email !== form.email
       || original.notes !== form.notes
+      || original.marketingOptOut !== form.marketingOptOut
       || !sameIds(original.categoryIds, form.categoryIds)
       || !sameIds(original.tagIds, form.tagIds);
   }, [customer, form]);
@@ -295,6 +300,33 @@ export default function CustomerProfile({ customerId, onClose, onUpdated, onTran
 
               <SelectionBlock title="الفئات" kind="category" icon={<FolderOpen size={14} />} items={categories} selected={form.categoryIds} onToggle={(id) => toggle('categoryIds', id)} />
               <SelectionBlock title="التاقات" kind="tag" icon={<TagIcon size={14} />} items={tags} selected={form.tagIds} onToggle={(id) => toggle('tagIds', id)} />
+
+              {/* Marketing consent */}
+              <label
+                htmlFor="customer-marketing-opt-out"
+                className={`flex items-start gap-3 rounded-lg border px-3 py-3 cursor-pointer transition-colors ${form.marketingOptOut ? 'border-red-500/40 bg-red-500/5' : 'border-labbaik-border hover:border-labbaik-blue/40'}`}
+              >
+                <span className="relative mt-0.5 inline-flex h-5 w-9 shrink-0">
+                  <input
+                    id="customer-marketing-opt-out"
+                    type="checkbox"
+                    role="switch"
+                    checked={form.marketingOptOut}
+                    onChange={(e) => setForm({ ...form, marketingOptOut: e.target.checked })}
+                    className="peer sr-only"
+                  />
+                  <span className="absolute inset-0 rounded-full bg-neutral-300 dark:bg-neutral-600 transition-colors peer-checked:bg-red-600 peer-focus-visible:ring-2 peer-focus-visible:ring-labbaik-blue/40" />
+                  <span className="absolute top-0.5 right-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform peer-checked:-translate-x-4" />
+                </span>
+                <span className="min-w-0">
+                  <span className="flex items-center gap-1.5 text-sm font-bold text-neutral-900 dark:text-white"><BellOff size={14} /> لا يرغب في الرسائل التسويقية</span>
+                  <span className="block mt-0.5 text-xs text-labbaik-text-muted">
+                    {form.marketingOptOut && customer.marketingOptOut && customer.marketingOptOutAt
+                      ? `مستبعد من الحملات منذ ${formatDate(customer.marketingOptOutAt)}، في كل الفروع.`
+                      : 'يُستبعد رقمه تلقائيًا من حملات القوالب في كل الفروع. المحادثات العادية لا تتأثر.'}
+                  </span>
+                </span>
+              </label>
 
               <Field label="ملاحظات الفريق" icon={<StickyNote size={13} />} htmlFor="customer-notes">
                 <textarea
