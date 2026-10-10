@@ -583,15 +583,26 @@ export class MetaWhatsAppService implements OnModuleInit {
   async findChannelForConnection(connection: MetaWhatsAppConnection, storeId?: string) {
     const targetStoreId = storeId || connection.storeId || connection.defaultStoreId;
     if (!targetStoreId) throw new NotFoundException('No branch is available for this WhatsApp connection');
-    const channel = await this.channelRepository.createQueryBuilder('channel')
+    const findChannel = () => this.channelRepository.createQueryBuilder('channel')
       .leftJoinAndSelect('channel.store', 'store')
       .leftJoinAndSelect('store.owner', 'owner')
       .where('store.id = :storeId', { storeId: targetStoreId })
       .andWhere('channel.type = :type', { type: ChannelType.WHATSAPP })
       .andWhere("channel.credentials->>'metaConnectionId' = :connectionId", { connectionId: connection.id })
       .getOne();
-    if (!channel) throw new NotFoundException('WhatsApp channel not found for connection and branch');
-    return channel;
+    const channel = await findChannel();
+    if (channel) return channel;
+
+    // Branches added after the organization number was saved have no channel yet; create it instead of dropping the message.
+    if (connection.scope === MetaConnectionScope.ORGANIZATION || connection.storeId === targetStoreId) {
+      const store = await this.organizationsService.assertStoreBelongsToOrganization(connection.organizationId, targetStoreId);
+      const secretConnection = await this.getConnectionWithSecrets(connection.id);
+      await this.upsertWhatsAppChannel(secretConnection, store.id);
+      this.logger.log(`Created missing WhatsApp channel for branch ${store.id} on connection ${connection.id}`);
+      const created = await findChannel();
+      if (created) return created;
+    }
+    throw new NotFoundException('WhatsApp channel not found for connection and branch');
   }
 
   private async getOwnedTemplate(userId: string, organizationId: string | undefined, templateId: string) {
@@ -661,25 +672,27 @@ export class MetaWhatsAppService implements OnModuleInit {
       ? [await this.organizationsService.assertStoreBelongsToOrganization(connection.organizationId, connection.storeId!)]
       : await this.organizationsService.listStoresByOrganization(connection.organizationId);
 
-    for (const store of stores) {
-      let channel = await this.channelRepository.createQueryBuilder('channel')
-        .leftJoin('channel.store', 'store')
-        .where('store.id = :storeId', { storeId: store.id })
-        .andWhere('channel.type = :type', { type: ChannelType.WHATSAPP })
-        .andWhere("channel.credentials->>'metaConnectionId' = :connectionId", { connectionId: connection.id })
-        .getOne();
-      const credentials = {
-        phoneNumberId: connection.phoneNumberId,
-        displayPhoneNumber: connection.displayPhoneNumber,
-        businessAccountId: connection.wabaId,
-        accessToken: secretConnection.accessToken,
-        metaConnectionId: connection.id,
-        metaScope: connection.scope,
-      };
-      if (!channel) channel = this.channelRepository.create({ type: ChannelType.WHATSAPP, status: ChannelStatus.ACTIVE, credentials, store: { id: store.id } as Store });
-      else { channel.status = ChannelStatus.ACTIVE; channel.credentials = credentials; }
-      await this.channelRepository.save(channel);
-    }
+    for (const store of stores) await this.upsertWhatsAppChannel(secretConnection, store.id);
+  }
+
+  private async upsertWhatsAppChannel(secretConnection: MetaWhatsAppConnection, storeId: string) {
+    let channel = await this.channelRepository.createQueryBuilder('channel')
+      .leftJoin('channel.store', 'store')
+      .where('store.id = :storeId', { storeId })
+      .andWhere('channel.type = :type', { type: ChannelType.WHATSAPP })
+      .andWhere("channel.credentials->>'metaConnectionId' = :connectionId", { connectionId: secretConnection.id })
+      .getOne();
+    const credentials = {
+      phoneNumberId: secretConnection.phoneNumberId,
+      displayPhoneNumber: secretConnection.displayPhoneNumber,
+      businessAccountId: secretConnection.wabaId,
+      accessToken: secretConnection.accessToken,
+      metaConnectionId: secretConnection.id,
+      metaScope: secretConnection.scope,
+    };
+    if (!channel) channel = this.channelRepository.create({ type: ChannelType.WHATSAPP, status: ChannelStatus.ACTIVE, credentials, store: { id: storeId } as Store });
+    else { channel.status = ChannelStatus.ACTIVE; channel.credentials = credentials; }
+    await this.channelRepository.save(channel);
   }
 
   private toPublicConnection(connection: MetaWhatsAppConnection) {
