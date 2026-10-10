@@ -26,8 +26,8 @@ import {
   Users,
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
-import LogoImage from '../assets/logos/tael-bot-mark-inverse.svg';
-import LogoAltImage from '../assets/logos/tael-bot-mark.svg';
+import LogoImage from '../assets/logos/tael-bot-glyph-white.svg';
+import LogoAltImage from '../assets/logos/tael-bot-glyph-purple.svg';
 
 type Lang = 'ar' | 'en';
 

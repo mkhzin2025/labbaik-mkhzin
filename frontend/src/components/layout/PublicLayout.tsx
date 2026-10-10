@@ -2,8 +2,8 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import { Sun, Moon, ShieldCheck, Mail, ArrowRight } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
-import LogoImage from '../../assets/logos/tael-bot-mark-inverse.svg';
-import LogoAltImage from '../../assets/logos/tael-bot-mark.svg';
+import LogoImage from '../../assets/logos/tael-bot-glyph-white.svg';
+import LogoAltImage from '../../assets/logos/tael-bot-glyph-purple.svg';
 
 interface PublicLayoutProps {
   children: React.ReactNode;

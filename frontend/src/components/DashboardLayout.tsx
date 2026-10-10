@@ -24,8 +24,8 @@ import {
   Trash2,
 } from 'lucide-react';
 
-import LogoImage from '../assets/logos/tael-bot-mark-inverse.svg';
-import LogoAltImage from '../assets/logos/tael-bot-mark.svg';
+import LogoImage from '../assets/logos/tael-bot-glyph-white.svg';
+import LogoAltImage from '../assets/logos/tael-bot-glyph-purple.svg';
 import NotificationCenter from './NotificationCenter';
 import CustomerAvatar from './CustomerAvatar';
 import { getApiBaseUrl } from '../api/baseUrl';
