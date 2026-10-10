@@ -60,7 +60,12 @@ export class CreateCustomerDto {
   notes?: string;
 }
 
-export class UpdateCustomerDto extends CreateCustomerDto {}
+export class UpdateCustomerDto extends CreateCustomerDto {
+  @ApiPropertyOptional({ description: 'Customer declined marketing campaigns; bulk template sends skip them.' })
+  @IsBoolean()
+  @IsOptional()
+  marketingOptOut?: boolean;
+}
 
 export class CreateCustomerCategoryDto {
   @IsEnum(CustomerTaxonomyScope)

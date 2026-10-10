@@ -393,8 +393,10 @@ export class MetaWhatsAppService implements OnModuleInit {
     }
 
     const deduped = this.customersService.deduplicateWhatsAppCustomers(customers);
+    // Campaigns never reach a number that opted out of marketing in any branch of the organization.
+    const optedOut = await this.customersService.findMarketingOptedOutPhones(organization.id, deduped.unique.map((recipient) => recipient.phone));
     const results: any[] = [];
-    const queue = [...deduped.unique];
+    const queue = deduped.unique.filter((recipient) => !optedOut.has(recipient.phone));
     const workers = Array.from({ length: Math.min(5, queue.length) }, async () => {
       while (queue.length) {
         const recipient = queue.shift();
@@ -424,7 +426,8 @@ export class MetaWhatsAppService implements OnModuleInit {
       scope: connection.scope,
       sourceRecords: deduped.sourceRecords,
       duplicatesRemoved: deduped.duplicateRecords,
-      total: deduped.uniqueRecipients,
+      optedOutSkipped: optedOut.size,
+      total: deduped.uniqueRecipients - optedOut.size,
       sent: results.filter((item) => item.success).length,
       failed: results.filter((item) => !item.success).length,
       results,

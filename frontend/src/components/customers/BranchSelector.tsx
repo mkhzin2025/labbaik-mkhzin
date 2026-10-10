@@ -11,11 +11,14 @@ export default function BranchSelector({
   value,
   onChange,
   className = '',
+  allLabel,
 }: {
   branches: Branch[];
   value: string;
   onChange: (storeId: string) => void;
   className?: string;
+  /** When set, adds a first option (value "all") covering every branch. */
+  allLabel?: string;
 }) {
   return (
     <div className={`relative min-w-[220px] ${className}`}>
@@ -25,6 +28,9 @@ export default function BranchSelector({
         onChange={(event) => onChange(event.target.value)}
         className="w-full appearance-none bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-white/10 rounded-2xl py-3.5 pr-11 pl-10 text-sm font-black text-neutral-900 dark:text-white outline-none focus:ring-2 focus:ring-labbaik-blue/30 shadow-sm"
       >
+        {allLabel && (
+          <option value="all" className="bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white">{allLabel}</option>
+        )}
         {branches.map((branch) => (
           <option key={branch.id} value={branch.id} className="bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white">
             {branch.name}

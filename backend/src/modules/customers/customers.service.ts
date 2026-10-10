@@ -1,5 +1,5 @@
 import { normalizePhoneNumber } from '../../common/utils/phone.util';
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Brackets, In, Repository } from 'typeorm';
 import { Customer } from './entities/customer.entity';
@@ -45,7 +45,9 @@ const HAS_CATEGORY = 'EXISTS (SELECT 1 FROM customer_category_links ccl WHERE cc
 const HAS_TAG = 'EXISTS (SELECT 1 FROM customer_tag_links ctl WHERE ctl."customerId" = customer.id)';
 
 @Injectable()
-export class CustomersService {
+export class CustomersService implements OnModuleInit {
+  private readonly logger = new Logger(CustomersService.name);
+
   constructor(
     @InjectRepository(Customer)
     private readonly customerRepository: Repository<Customer>,
@@ -54,6 +56,18 @@ export class CustomersService {
     @InjectRepository(CustomerTag)
     private readonly tagRepository: Repository<CustomerTag>,
   ) {}
+
+  // Same convention as StoresService: add new columns idempotently on boot
+  // (see CUSTOMER-MARKETING-OPT-OUT-MIGRATION.sql for running it by hand).
+  async onModuleInit() {
+    try {
+      await this.customerRepository.query(
+        'ALTER TABLE customers ADD COLUMN IF NOT EXISTS "marketingOptOut" boolean NOT NULL DEFAULT false, ADD COLUMN IF NOT EXISTS "marketingOptOutAt" timestamptz NULL;',
+      );
+    } catch (e: any) {
+      this.logger.warn(`Auto-migration for marketingOptOut skipped or failed: ${e.message}`);
+    }
+  }
 
   async findOrCreate(store: Store, identifier: string, data: Partial<CreateCustomerDto>, platform: string) {
     let customer = await this.findByIdentifier(store.id, identifier, platform);
@@ -337,8 +351,13 @@ export class CustomersService {
     const customer = await this.findOne(id, storeId);
     const organizationId = customer.store?.organizationId;
     if (!organizationId) throw new BadRequestException('Customer branch is not linked to an organization');
-    const { categoryIds, tagIds, tags, ...base } = updateData;
+    const { categoryIds, tagIds, tags, marketingOptOut, ...base } = updateData;
     Object.assign(customer, base);
+    const optOutChanged = marketingOptOut !== undefined && marketingOptOut !== customer.marketingOptOut;
+    if (optOutChanged) {
+      customer.marketingOptOut = marketingOptOut;
+      customer.marketingOptOutAt = marketingOptOut ? new Date() : null;
+    }
 
     if (categoryIds !== undefined) customer.categories = await this.resolveCategories(organizationId, storeId, categoryIds);
     if (tagIds !== undefined) customer.tags = await this.resolveTags(organizationId, storeId, tagIds);
@@ -346,7 +365,35 @@ export class CustomersService {
 
     if (tags !== undefined) customer.legacyTags = tags;
     const saved = await this.customerRepository.save(customer);
+    if (optOutChanged) await this.syncMarketingOptOut(organizationId, saved);
     return this.findOne(saved.id, storeId);
+  }
+
+  /** The opt-out belongs to the person, so it is copied to their records in the organization's other branches. */
+  private async syncMarketingOptOut(organizationId: string, customer: Customer) {
+    const phone = this.normalizePhone(customer.phoneNumber || customer.whatsappId || '');
+    if (!phone) return;
+    await this.customerRepository.query(
+      `UPDATE customers c SET "marketingOptOut" = $1, "marketingOptOutAt" = $2
+         FROM stores s
+        WHERE s.id = c."storeId" AND s."organizationId" = $3 AND c.id <> $4
+          AND REGEXP_REPLACE(COALESCE(c."phoneNumber", c."whatsappId", ''), '[^0-9]', '', 'g') = $5`,
+      [customer.marketingOptOut, customer.marketingOptOutAt, organizationId, customer.id, phone],
+    );
+  }
+
+  /** Normalized numbers among `phones` that opted out of marketing anywhere in the organization. */
+  async findMarketingOptedOutPhones(organizationId: string, phones: string[]) {
+    const normalized = [...new Set(phones.map((phone) => this.normalizePhone(phone)).filter(Boolean))];
+    if (!normalized.length) return new Set<string>();
+    const rows: { phone: string }[] = await this.customerRepository.query(
+      `SELECT DISTINCT REGEXP_REPLACE(COALESCE(c."phoneNumber", c."whatsappId", ''), '[^0-9]', '', 'g') AS phone
+         FROM customers c JOIN stores s ON s.id = c."storeId"
+        WHERE s."organizationId" = $1 AND c."marketingOptOut" = true
+          AND REGEXP_REPLACE(COALESCE(c."phoneNumber", c."whatsappId", ''), '[^0-9]', '', 'g') = ANY($2::text[])`,
+      [organizationId, normalized],
+    );
+    return new Set(rows.map((row) => row.phone));
   }
 
   /**
@@ -379,6 +426,10 @@ export class CustomersService {
       existing.whatsappId = existing.whatsappId || source.whatsappId;
       existing.instagramId = existing.instagramId || source.instagramId;
       existing.facebookId = existing.facebookId || source.facebookId;
+      if (source.marketingOptOut && !existing.marketingOptOut) {
+        existing.marketingOptOut = true;
+        existing.marketingOptOutAt = source.marketingOptOutAt;
+      }
       existing.notes = [existing.notes, source.notes].filter((note) => note?.trim()).join('\n\n') || existing.notes;
       const byId = <T extends { id: string }>(items: T[]) => Array.from(new Map(items.map((item) => [item.id, item])).values());
       existing.categories = byId([...(existing.categories || []), ...(source.categories || []).filter(fitsTarget)]);
