@@ -85,7 +85,7 @@ export class AccountDeletionService implements OnModuleInit {
 
     return {
       success: true,
-      message: 'إذا كانت البيانات المدخلة مرتبطة بحساب في لبيك، فسيتم إرسال تعليمات التحقق والمتابعة.',
+      message: 'إذا كانت البيانات المدخلة مرتبطة بحساب في تيل بوت، فسيتم إرسال تعليمات التحقق والمتابعة.',
     };
   }
 

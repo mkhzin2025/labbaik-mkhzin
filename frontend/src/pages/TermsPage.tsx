@@ -27,7 +27,7 @@ export default function TermsPage() {
   const [lang, setLang] = useState<'ar' | 'en'>('ar');
 
   useEffect(() => {
-    document.title = lang === 'ar' ? 'شروط الخدمة — لبيك' : 'Terms of Service | Labbaik';
+    document.title = lang === 'ar' ? 'شروط الخدمة — تيل بوت' : 'Terms of Service | Tael Bot';
     const metaDesc = document.querySelector('meta[name="description"]');
     if (metaDesc) {
       metaDesc.setAttribute(

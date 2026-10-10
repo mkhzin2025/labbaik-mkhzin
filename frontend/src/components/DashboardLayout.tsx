@@ -24,8 +24,8 @@ import {
   Trash2,
 } from 'lucide-react';
 
-import LogoImage from '../assets/logos/logo.png';
-import LogoAltImage from '../assets/logos/logo-alt.png';
+import LogoImage from '../assets/logos/tael-bot-mark-inverse.svg';
+import LogoAltImage from '../assets/logos/tael-bot-mark.svg';
 import NotificationCenter from './NotificationCenter';
 import CustomerAvatar from './CustomerAvatar';
 import { getApiBaseUrl } from '../api/baseUrl';
@@ -191,8 +191,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         aria-label="القائمة الجانبية"
       >
         <div className={`h-16 shrink-0 flex items-center border-b border-labbaik-border ${isCollapsed ? 'lg:justify-center px-4 lg:px-0 justify-between' : 'justify-between px-4'}`}>
-          <Link to="/dashboard" className={`${isCollapsed ? 'lg:hidden' : ''} flex items-center`} aria-label="لبيك - الرئيسية">
-            <img src={sidebarLogo} alt="" className="h-9 w-auto object-contain" />
+          <Link to="/dashboard" className={`${isCollapsed ? 'lg:hidden' : ''} flex items-center gap-2.5`} aria-label="تيل بوت - الرئيسية">
+            <img src={sidebarLogo} alt="" className="h-9 w-9 object-contain" />
+            <span className="flex flex-col leading-none">
+              <span className="text-base font-black text-neutral-900 dark:text-white">تيل بوت</span>
+              <span className="mt-1 text-[10px] font-bold tracking-wide text-labbaik-text-muted" dir="ltr">Tael Bot</span>
+            </span>
           </Link>
           <button
             type="button"

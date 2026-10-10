@@ -47,7 +47,7 @@ const StartNode = (_props: NodeProps<FlowNode>) => (
     <div className="flex flex-col items-center gap-3">
       <div className="p-3 bg-green-500/20 rounded-2xl"><PlayCircle size={24} className="text-green-400" /></div>
       <span className="text-xs font-black text-white uppercase tracking-widest">نقطة الانطلاق</span>
-      <p className="text-[10px] text-neutral-400 font-bold">هنا يبدأ لبيك الرد</p>
+      <p className="text-[10px] text-neutral-400 font-bold">هنا يبدأ تيل بوت الرد</p>
     </div>
     <Handle type="source" position={Position.Bottom} className="!bg-green-500 !w-4 !h-4 !border-labbaik-page shadow-lg" />
   </div>

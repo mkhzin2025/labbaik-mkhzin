@@ -217,7 +217,7 @@ export default function DashboardHome() {
             لوحة القيادة الذكية
           </h1>
           <p className="text-neutral-600 dark:text-neutral-400 mt-2 font-medium text-base leading-relaxed">
-            نظرة عامة على أداء "لبيك" ونجاعة الذكاء الاصطناعي في متجرك.
+            نظرة عامة على أداء "تيل بوت" ونجاعة الذكاء الاصطناعي في متجرك.
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -277,7 +277,7 @@ export default function DashboardHome() {
             <div className="space-y-5">
               <div>
                 <div className="flex justify-between items-center mb-2">
-                  <span className="text-xs font-semibold text-neutral-600 dark:text-neutral-400">لبيك (AI)</span>
+                  <span className="text-xs font-semibold text-neutral-600 dark:text-neutral-400">تيل بوت (AI)</span>
                   <span className="text-xs font-bold text-labbaik-blue">3 ثوانٍ</span>
                 </div>
                 <div className="h-2 w-full bg-neutral-100 dark:bg-neutral-800 rounded-full overflow-hidden border border-neutral-200/50 dark:border-transparent">

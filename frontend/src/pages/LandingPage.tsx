@@ -26,8 +26,8 @@ import {
   Users,
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
-import LogoImage from '../assets/logos/logo.png';
-import LogoAltImage from '../assets/logos/logo-alt.png';
+import LogoImage from '../assets/logos/tael-bot-mark-inverse.svg';
+import LogoAltImage from '../assets/logos/tael-bot-mark.svg';
 
 type Lang = 'ar' | 'en';
 
@@ -36,18 +36,18 @@ const CONTACT_EMAIL = 'info@mkhzin.com';
 
 const content = {
   ar: {
-    brand: 'لبيك',
+    brand: 'تيل بوت',
     tagline: 'نظام الرد والتواصل الذكي',
-    nav: { about: 'ما هو لبيك؟', whatsapp: 'WhatsApp Business', features: 'المميزات', data: 'استخدام البيانات', faq: 'الأسئلة الشائعة' },
+    nav: { about: 'ما هو تيل بوت؟', whatsapp: 'WhatsApp Business', features: 'المميزات', data: 'استخدام البيانات', faq: 'الأسئلة الشائعة' },
     login: 'تسجيل الدخول',
     switchLang: 'English',
     themeToLight: 'الوضع الفاتح',
     themeToDark: 'الوضع الداكن',
     hero: {
       badge: 'مبني على WhatsApp Business Platform',
-      title: 'لبيك - نظام الرد والتواصل الذكي',
+      title: 'تيل بوت - نظام الرد والتواصل الذكي',
       text: 'منصة تساعد المنشآت على إدارة محادثات العملاء عبر WhatsApp Business وتنظيم التواصل وخدمة العملاء من مكان واحد.',
-      secondary: 'تعرّف على لبيك',
+      secondary: 'تعرّف على تيل بوت',
     },
     mock: {
       title: 'صندوق المحادثات',
@@ -61,16 +61,16 @@ const content = {
       reply: 'اكتب ردك هنا...',
     },
     about: {
-      title: 'ما هو لبيك؟',
-      text: 'لبيك منصة لإدارة تواصل المنشآت مع عملائها، وتساعد فرق خدمة العملاء على استقبال المحادثات وتنظيمها ومتابعتها والرد عليها بكفاءة.',
+      title: 'ما هو تيل بوت؟',
+      text: 'تيل بوت منصة لإدارة تواصل المنشآت مع عملائها، وتساعد فرق خدمة العملاء على استقبال المحادثات وتنظيمها ومتابعتها والرد عليها بكفاءة.',
       points: ['استقبال المحادثات', 'تنظيمها ومتابعتها', 'الرد عليها بكفاءة'],
     },
     whatsapp: {
       title: 'تكامل WhatsApp Business',
-      text: 'يستخدم لبيك WhatsApp Business Platform لتمكين المنشآت من إرسال واستقبال رسائل العملاء وإدارة المحادثات وحالات الرسائل من خلال واجهة موحدة.',
+      text: 'يستخدم تيل بوت WhatsApp Business Platform لتمكين المنشآت من إرسال واستقبال رسائل العملاء وإدارة المحادثات وحالات الرسائل من خلال واجهة موحدة.',
       detail: 'يعتمد النظام على WhatsApp Cloud API الرسمي من Meta، ويتعامل فقط مع أرقام WhatsApp Business التي تربطها المنشأة بحسابها والمحادثات المصرّح بها.',
       items: [
-        { title: 'ربط رقم المنشأة', text: 'تربط المنشأة رقم WhatsApp Business الخاص بها بحسابها في لبيك.' },
+        { title: 'ربط رقم المنشأة', text: 'تربط المنشأة رقم WhatsApp Business الخاص بها بحسابها في تيل بوت.' },
         { title: 'استقبال الرسائل', text: 'تصل رسائل العملاء إلى صندوق محادثات موحد لفريق العمل.' },
         { title: 'الرد والمتابعة', text: 'يرد الفريق من المنصة ويتابع حالة كل رسالة: مُرسلة، مُستلمة، مقروءة.' },
       ],
@@ -88,7 +88,7 @@ const content = {
     },
     data: {
       title: 'استخدام البيانات',
-      text: 'تُستخدم بيانات WhatsApp Business فقط لتقديم خدمات المراسلة وإدارة المحادثات المطلوبة من العميل. لا يقوم لبيك ببيع بيانات العملاء أو استخدامها لأغراض إعلانية.',
+      text: 'تُستخدم بيانات WhatsApp Business فقط لتقديم خدمات المراسلة وإدارة المحادثات المطلوبة من العميل. لا يقوم تيل بوت ببيع بيانات العملاء أو استخدامها لأغراض إعلانية.',
       pills: ['لا بيع للبيانات', 'لا استخدام إعلاني', 'حذف البيانات عند الطلب'],
       privacyCta: 'اقرأ سياسة الخصوصية',
       deletionCta: 'طلب حذف الحساب / البيانات',
@@ -97,12 +97,12 @@ const content = {
       title: 'أسئلة يطرحها عملاؤنا',
       items: [
         {
-          q: 'لمن صُمّم لبيك؟',
+          q: 'لمن صُمّم تيل بوت؟',
           a: 'للمنشآت التي تتواصل مع عملائها عبر WhatsApp Business وتحتاج إلى تنظيم المحادثات بين أكثر من موظف في فريق خدمة العملاء.',
         },
         {
-          q: 'هل يستخدم لبيك واجهة WhatsApp الرسمية؟',
-          a: 'نعم، يعتمد لبيك على WhatsApp Business Platform (Cloud API) المقدّمة من Meta لإرسال واستقبال الرسائل.',
+          q: 'هل يستخدم تيل بوت واجهة WhatsApp الرسمية؟',
+          a: 'نعم، يعتمد تيل بوت على WhatsApp Business Platform (Cloud API) المقدّمة من Meta لإرسال واستقبال الرسائل.',
         },
         {
           q: 'هل تُباع بيانات العملاء أو تُستخدم للإعلانات؟',
@@ -129,12 +129,12 @@ const content = {
       meta: 'WhatsApp علامة تجارية مملوكة لشركة Meta Platforms, Inc.',
     },
     seo: {
-      title: 'لبيك - نظام الرد والتواصل الذكي',
+      title: 'تيل بوت - نظام الرد والتواصل الذكي',
       description: 'منصة لإدارة محادثات العملاء والتواصل عبر WhatsApp Business.',
     },
   },
   en: {
-    brand: 'Labbaik',
+    brand: 'Tael Bot',
     tagline: 'Smart reply & communication system',
     nav: { about: 'About', whatsapp: 'WhatsApp Business', features: 'Features', data: 'Data use', faq: 'FAQ' },
     login: 'Log in',
@@ -143,7 +143,7 @@ const content = {
     themeToDark: 'Dark mode',
     hero: {
       badge: 'Built on the WhatsApp Business Platform',
-      title: 'Labbaik — Smart Reply & Communication System',
+      title: 'Tael Bot — Smart Reply & Communication System',
       text: 'A platform that helps businesses manage customer conversations over WhatsApp Business and organize communication and customer service from one place.',
       secondary: 'Learn more',
     },
@@ -159,16 +159,16 @@ const content = {
       reply: 'Type your reply...',
     },
     about: {
-      title: 'What is Labbaik?',
-      text: 'Labbaik is a platform for managing how businesses communicate with their customers. It helps customer service teams receive, organize, follow up on and reply to conversations efficiently.',
+      title: 'What is Tael Bot?',
+      text: 'Tael Bot is a platform for managing how businesses communicate with their customers. It helps customer service teams receive, organize, follow up on and reply to conversations efficiently.',
       points: ['Receive conversations', 'Organize and follow up', 'Reply efficiently'],
     },
     whatsapp: {
       title: 'WhatsApp Business integration',
-      text: 'Labbaik uses the WhatsApp Business Platform to enable businesses to send and receive customer messages and manage conversations and message statuses through a unified interface.',
+      text: 'Tael Bot uses the WhatsApp Business Platform to enable businesses to send and receive customer messages and manage conversations and message statuses through a unified interface.',
       detail: "The system relies on Meta's official WhatsApp Cloud API and only handles the WhatsApp Business numbers a business connects to its account, and the conversations it is authorized to manage.",
       items: [
-        { title: 'Connect your number', text: 'The business connects its own WhatsApp Business number to its Labbaik account.' },
+        { title: 'Connect your number', text: 'The business connects its own WhatsApp Business number to its Tael Bot account.' },
         { title: 'Receive messages', text: 'Customer messages arrive in a unified inbox for the whole team.' },
         { title: 'Reply and track', text: 'The team replies from the platform and tracks each message: sent, delivered, read.' },
       ],
@@ -186,7 +186,7 @@ const content = {
     },
     data: {
       title: 'How we use data',
-      text: 'WhatsApp Business data is used only to provide messaging services and manage the conversations requested by the customer. Labbaik does not sell customer data or use it for advertising purposes.',
+      text: 'WhatsApp Business data is used only to provide messaging services and manage the conversations requested by the customer. Tael Bot does not sell customer data or use it for advertising purposes.',
       pills: ['No data selling', 'No advertising use', 'Deletion on request'],
       privacyCta: 'Read the Privacy Policy',
       deletionCta: 'Request account / data deletion',
@@ -195,12 +195,12 @@ const content = {
       title: 'Frequently asked questions',
       items: [
         {
-          q: 'Who is Labbaik for?',
+          q: 'Who is Tael Bot for?',
           a: 'Businesses that talk to their customers over WhatsApp Business and need to organize conversations across several customer service agents.',
         },
         {
-          q: 'Does Labbaik use the official WhatsApp API?',
-          a: 'Yes. Labbaik relies on the WhatsApp Business Platform (Cloud API) provided by Meta to send and receive messages.',
+          q: 'Does Tael Bot use the official WhatsApp API?',
+          a: 'Yes. Tael Bot relies on the WhatsApp Business Platform (Cloud API) provided by Meta to send and receive messages.',
         },
         {
           q: 'Is customer data sold or used for ads?',
@@ -227,7 +227,7 @@ const content = {
       meta: 'WhatsApp is a trademark of Meta Platforms, Inc.',
     },
     seo: {
-      title: 'Labbaik - Smart Reply & Communication System',
+      title: 'Tael Bot - Smart Reply & Communication System',
       description: 'A platform for managing customer conversations and communication via WhatsApp Business.',
     },
   },
@@ -632,7 +632,7 @@ export default function LandingPage() {
         <div className="border-t border-labbaik-border">
           <div className="max-w-6xl mx-auto px-4 sm:px-6 py-5 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-labbaik-text-muted">
             <span>
-              © {new Date().getFullYear()} {isAr ? 'لبيك (Labbaik)' : 'Labbaik'}. {t.footer.rights}
+              © {new Date().getFullYear()} {isAr ? 'تيل بوت (Tael Bot)' : 'Tael Bot'}. {t.footer.rights}
             </span>
             <span>{t.footer.meta}</span>
           </div>

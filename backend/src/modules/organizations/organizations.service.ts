@@ -22,7 +22,7 @@ export class OrganizationsService {
     const user = await this.userRepository.findOne({ where: { id: userId } });
     if (!user) throw new NotFoundException('User not found');
 
-    const orgName = organizationName?.trim() || (user.fullName ? `${user.fullName} Workspace` : 'Labbaik Workspace');
+    const orgName = organizationName?.trim() || (user.fullName ? `${user.fullName} Workspace` : 'Tael Bot Workspace');
     const base = this.slugify(orgName) || 'workspace';
     const organization = await this.organizationRepository.save(this.organizationRepository.create({
       name: orgName,
@@ -54,7 +54,7 @@ export class OrganizationsService {
 
     const base = this.slugify(user.fullName || user.email.split('@')[0]) || 'workspace';
     const organization = await this.organizationRepository.save(this.organizationRepository.create({
-      name: user.fullName ? `${user.fullName} Workspace` : 'Labbaik Workspace',
+      name: user.fullName ? `${user.fullName} Workspace` : 'Tael Bot Workspace',
       slug: `${base}-${randomBytes(3).toString('hex')}`,
     }));
 

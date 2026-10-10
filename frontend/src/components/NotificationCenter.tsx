@@ -167,7 +167,7 @@ export default function NotificationCenter({ socket }: { socket: any }) {
     const result = await window.Notification.requestPermission();
     setBrowserPermission(result);
     if (result === 'granted') {
-      new window.Notification("لبيك الذكي", { body: "تم تفعيل إشعارات سطح المكتب بنجاح! 🎉" });
+      new window.Notification("تيل بوت الذكي", { body: "تم تفعيل إشعارات سطح المكتب بنجاح! 🎉" });
     }
   };
 

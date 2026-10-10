@@ -30,9 +30,9 @@ const DAYS = [
 ];
 
 const AI_MODES = [
-  { id: 'always', name: 'دائمًا', desc: 'يرد لبيك على كل رسالة في أي وقت.' },
-  { id: 'off_hours', name: 'خارج الدوام فقط', desc: 'يرد لبيك عندما يكون المتجر مغلقًا، ويترك الدوام للفريق.' },
-  { id: 'manual', name: 'متوقف', desc: 'لا يرد لبيك آليًا؛ الفريق يرد على كل المحادثات.' },
+  { id: 'always', name: 'دائمًا', desc: 'يرد تيل بوت على كل رسالة في أي وقت.' },
+  { id: 'off_hours', name: 'خارج الدوام فقط', desc: 'يرد تيل بوت عندما يكون المتجر مغلقًا، ويترك الدوام للفريق.' },
+  { id: 'manual', name: 'متوقف', desc: 'لا يرد تيل بوت آليًا؛ الفريق يرد على كل المحادثات.' },
 ];
 
 const AI_MODELS = [
@@ -186,7 +186,7 @@ export default function SettingsPage() {
   const testNotification = () => {
     if (!('Notification' in window)) return showToast('المتصفح لا يدعم إشعارات سطح المكتب.', 'error');
     if (Notification.permission !== 'granted') return showToast('فعّل الإشعارات أولًا من أيقونة الجرس أعلى الصفحة.', 'info');
-    new Notification('اختبار لبيك', { body: 'إشعارات سطح المكتب تعمل.' });
+    new Notification('اختبار تيل بوت', { body: 'إشعارات سطح المكتب تعمل.' });
     showToast('تم إرسال إشعار تجريبي.', 'success');
   };
 
@@ -228,7 +228,7 @@ export default function SettingsPage() {
 
       {activeTab === 'profile' && (
         <div className="space-y-4">
-          <Panel title="بيانات المتجر" hint="تظهر للعملاء ويستخدمها لبيك في التعريف بمتجرك.">
+          <Panel title="بيانات المتجر" hint="تظهر للعملاء ويستخدمها تيل بوت في التعريف بمتجرك.">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <Field label="اسم المتجر" htmlFor="store-name">
                 <input id="store-name" value={storeData.name || ''} onChange={(e) => setStoreData({ ...storeData, name: e.target.value })} className={inputClass} />
@@ -349,9 +349,9 @@ export default function SettingsPage() {
       {activeTab === 'kb' && (
         <Panel
           title="قاعدة المعرفة"
-          hint="كل ما يجب أن يعرفه لبيك عن متجرك ليجيب العملاء بدقة."
+          hint="كل ما يجب أن يعرفه تيل بوت عن متجرك ليجيب العملاء بدقة."
           aside={(
-            <button type="button" onClick={() => void handleSaveStore('تم حفظ قاعدة المعرفة. سيعتمد عليها لبيك في الردود القادمة.')} disabled={savingStore} className={primaryButton}>
+            <button type="button" onClick={() => void handleSaveStore('تم حفظ قاعدة المعرفة. سيعتمد عليها تيل بوت في الردود القادمة.')} disabled={savingStore} className={primaryButton}>
               {savingStore ? <Loader2 className="animate-spin" size={16} /> : <Save size={16} />} حفظ
             </button>
           )}
@@ -376,7 +376,7 @@ export default function SettingsPage() {
                 <li>سياسة التوصيل والاسترجاع</li>
                 <li>طرق الدفع المتاحة</li>
                 <li>الأسئلة الشائعة وإجاباتها</li>
-                <li>ما لا يجب أن يجيب عنه لبيك ويحوّله للفريق</li>
+                <li>ما لا يجب أن يجيب عنه تيل بوت ويحوّله للفريق</li>
               </ul>
             </aside>
           </div>
@@ -385,7 +385,7 @@ export default function SettingsPage() {
 
       {activeTab === 'ai' && (
         <div className="space-y-4">
-          <Panel title="متى يرد لبيك آليًا؟">
+          <Panel title="متى يرد تيل بوت آليًا؟">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-2" role="radiogroup" aria-label="وضع الرد الآلي">
               {AI_MODES.map((mode) => {
                 const on = storeData.aiMode === mode.id;
@@ -442,7 +442,7 @@ export default function SettingsPage() {
             )}
           </Panel>
 
-          <Panel title="محرك الذكاء الاصطناعي" hint="إذا تعطل المحرك المختار ينتقل لبيك تلقائيًا إلى محرك احتياطي حتى لا تتوقف الردود.">
+          <Panel title="محرك الذكاء الاصطناعي" hint="إذا تعطل المحرك المختار ينتقل تيل بوت تلقائيًا إلى محرك احتياطي حتى لا تتوقف الردود.">
             <div className="divide-y divide-labbaik-border rounded-lg border border-labbaik-border" role="radiogroup" aria-label="محرك الذكاء الاصطناعي">
               {AI_MODELS.map((model) => {
                 const on = storeData.preferredModel === model.id;

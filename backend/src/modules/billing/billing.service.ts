@@ -51,7 +51,7 @@ export class InsufficientWalletBalanceException extends HttpException {
     super({
       statusCode: 402,
       code: 'INSUFFICIENT_WALLET_BALANCE',
-      message: 'رصيد محفظة لبيك غير كافٍ لإتمام العملية',
+      message: 'رصيد محفظة تيل بوت غير كافٍ لإتمام العملية',
       requiredSar,
       balanceSar,
     }, 402);
@@ -149,7 +149,7 @@ export class BillingService implements OnModuleInit {
       currency: 'SAR',
       publishableKey: this.getMoyasarPublishableKey(),
       callbackUrl: this.buildFrontendCallbackUrl(providerPaymentId),
-      description: `Labbaik wallet top-up ${organization.name}`,
+      description: `Tael Bot wallet top-up ${organization.name}`,
     };
   }
 
@@ -246,17 +246,17 @@ export class BillingService implements OnModuleInit {
     return subscription;
   }
 
-  // ---------- Meta Labbaik wallet charging ----------
+  // ---------- Meta Tael Bot wallet charging ----------
 
   async assertMetaLabbaikReady(organizationId: string) {
     await this.ensureOrganizationBilling(organizationId);
     const subscription = await this.requireActiveSubscription(organizationId);
     if (!subscription.plan?.features?.metaLabbaik) {
-      throw new ForbiddenException('الباقة الحالية لا تشمل خيار Meta لبيك');
+      throw new ForbiddenException('الباقة الحالية لا تشمل خيار Meta تيل بوت');
     }
     const methodCount = await this.paymentMethodRepo.count({ where: { organizationId, status: PaymentMethodStatus.ACTIVE } });
     if (!methodCount) {
-      throw new HttpException({ statusCode: 402, code: 'PAYMENT_METHOD_REQUIRED', message: 'يجب حفظ بطاقة دفع فعالة قبل تفعيل Meta لبيك' }, 402);
+      throw new HttpException({ statusCode: 402, code: 'PAYMENT_METHOD_REQUIRED', message: 'يجب حفظ بطاقة دفع فعالة قبل تفعيل Meta تيل بوت' }, 402);
     }
     const wallet = await this.ensureWallet(organizationId);
     if (wallet.balanceMicros <= 0) {
@@ -463,7 +463,7 @@ export class BillingService implements OnModuleInit {
     if (!payment || payment.status === BillingPaymentStatus.REFUNDED) return;
 
     // Wallet top-ups are reversed even if the balance has already been consumed.
-    // A negative balance represents money owed to Labbaik and blocks further paid usage
+    // A negative balance represents money owed to Tael Bot and blocks further paid usage
     // until the organization tops up again.
     if ([BillingPaymentType.WALLET_TOPUP, BillingPaymentType.AUTO_TOPUP].includes(payment.type)) {
       await this.forceDebitWallet(payment.organizationId, payment.amountMinor * MICROS_PER_HALALA, {
@@ -565,12 +565,12 @@ export class BillingService implements OnModuleInit {
   private async seedDefaultPricing() {
     const generic = Number(this.config.get<string>('BILLING_DEFAULT_META_RATE_SAR') || '0.05');
     const defaults: Array<[MetaUsageType, string, string]> = [
-      [MetaUsageType.SESSION_TEXT, 'رسالة واتساب نصية عبر Meta لبيك', 'BILLING_META_SESSION_TEXT_RATE_SAR'],
-      [MetaUsageType.INTERACTIVE, 'رسالة واتساب تفاعلية عبر Meta لبيك', 'BILLING_META_INTERACTIVE_RATE_SAR'],
-      [MetaUsageType.TEMPLATE_MARKETING, 'قالب واتساب تسويقي عبر Meta لبيك', 'BILLING_META_MARKETING_RATE_SAR'],
-      [MetaUsageType.TEMPLATE_UTILITY, 'قالب واتساب خدمي عبر Meta لبيك', 'BILLING_META_UTILITY_RATE_SAR'],
-      [MetaUsageType.TEMPLATE_AUTHENTICATION, 'قالب واتساب تحقق عبر Meta لبيك', 'BILLING_META_AUTH_RATE_SAR'],
-      [MetaUsageType.TEMPLATE_OTHER, 'قالب واتساب آخر عبر Meta لبيك', 'BILLING_META_OTHER_RATE_SAR'],
+      [MetaUsageType.SESSION_TEXT, 'رسالة واتساب نصية عبر Meta تيل بوت', 'BILLING_META_SESSION_TEXT_RATE_SAR'],
+      [MetaUsageType.INTERACTIVE, 'رسالة واتساب تفاعلية عبر Meta تيل بوت', 'BILLING_META_INTERACTIVE_RATE_SAR'],
+      [MetaUsageType.TEMPLATE_MARKETING, 'قالب واتساب تسويقي عبر Meta تيل بوت', 'BILLING_META_MARKETING_RATE_SAR'],
+      [MetaUsageType.TEMPLATE_UTILITY, 'قالب واتساب خدمي عبر Meta تيل بوت', 'BILLING_META_UTILITY_RATE_SAR'],
+      [MetaUsageType.TEMPLATE_AUTHENTICATION, 'قالب واتساب تحقق عبر Meta تيل بوت', 'BILLING_META_AUTH_RATE_SAR'],
+      [MetaUsageType.TEMPLATE_OTHER, 'قالب واتساب آخر عبر Meta تيل بوت', 'BILLING_META_OTHER_RATE_SAR'],
     ];
     for (const [usageType, nameAr, envName] of defaults) {
       const exists = await this.pricingRepo.findOne({ where: { usageType } });
@@ -622,7 +622,7 @@ export class BillingService implements OnModuleInit {
     const graceValid = subscription.graceEndsAt && new Date(subscription.graceEndsAt).getTime() > now;
     const statusValid = [SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING].includes(subscription.status) || (subscription.status === SubscriptionStatus.PAST_DUE && graceValid);
     if (!statusValid || (!periodValid && !graceValid)) throw new HttpException({ statusCode: 402, code: 'SUBSCRIPTION_REQUIRED', message: 'الاشتراك غير فعال أو منتهي' }, 402);
-    if (requireMetaLabbaik && !subscription.plan.features?.metaLabbaik) throw new ForbiddenException('الباقة الحالية لا تشمل Meta لبيك');
+    if (requireMetaLabbaik && !subscription.plan.features?.metaLabbaik) throw new ForbiddenException('الباقة الحالية لا تشمل Meta تيل بوت');
     return subscription;
   }
 
@@ -673,7 +673,7 @@ export class BillingService implements OnModuleInit {
         given_id: providerPaymentId,
         amount: input.amountMinor,
         currency: 'SAR',
-        description: input.type.includes('subscription') ? 'Labbaik subscription' : 'Labbaik wallet top-up',
+        description: input.type.includes('subscription') ? 'Tael Bot subscription' : 'Tael Bot wallet top-up',
         callback_url: this.buildFrontendCallbackUrl(providerPaymentId),
         source: { type: 'token', token },
         metadata: { local_billing_payment_id: local.id, organization_id: input.organizationId },

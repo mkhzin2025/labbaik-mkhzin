@@ -7,7 +7,7 @@ export default function PrivacyPolicyPage() {
   const [lang, setLang] = useState<'ar' | 'en'>('ar');
 
   useEffect(() => {
-    document.title = 'سياسة الخصوصية | لبيك';
+    document.title = 'سياسة الخصوصية | تيل بوت';
     const metaDesc = document.querySelector('meta[name="description"]');
     if (metaDesc) {
       metaDesc.setAttribute('content', 'سياسة الخصوصية لمنصة لبيك لإدارة التواصل الذكي مع العملاء');

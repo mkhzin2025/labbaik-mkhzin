@@ -274,7 +274,7 @@ export default function MetaWhatsAppSettingsPanel() {
           <div className="flex gap-3">
             <WalletCards className="text-amber-500 dark:text-amber-400 shrink-0" size={21} />
             <div>
-              <div className="text-sm font-black text-neutral-900 dark:text-white">Meta لبيك</div>
+              <div className="text-sm font-black text-neutral-900 dark:text-white">Meta تيل بوت</div>
               <p className="text-xs text-neutral-600 dark:text-neutral-400 mt-1">يلزم باقة فعالة، بطاقة محفوظة ورصيد موجب بالمحفظة.</p>
             </div>
           </div>
@@ -291,7 +291,7 @@ export default function MetaWhatsAppSettingsPanel() {
             onChange={(e) => setConnection({ ...connection, mode: e.target.value as any })}
             className="field"
           >
-            <option className="bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white" value="shared_app">تطبيق لبيك المشترك</option>
+            <option className="bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white" value="shared_app">تطبيق تيل بوت المشترك</option>
             <option className="bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white" value="own_app">Meta App خاصة بالمنظمة</option>
           </select>
         </Field>
