@@ -129,8 +129,8 @@ const content = {
       meta: 'WhatsApp علامة تجارية مملوكة لشركة Meta Platforms, Inc.',
     },
     seo: {
-      title: 'تيل بوت - نظام الرد والتواصل الذكي',
-      description: 'منصة لإدارة محادثات العملاء والتواصل عبر WhatsApp Business.',
+      title: 'تيل بوت | منصة إدارة محادثات واتساب للأعمال وخدمة العملاء',
+      description: 'تيل بوت منصة لإدارة محادثات العملاء عبر واتساب للأعمال (WhatsApp Business API): صندوق محادثات موحد لفريقك، توزيع المحادثات على الموظفين، ومتابعة حالة الرسائل من مكان واحد.',
     },
   },
   en: {
@@ -227,8 +227,8 @@ const content = {
       meta: 'WhatsApp is a trademark of Meta Platforms, Inc.',
     },
     seo: {
-      title: 'Tael Bot - Smart Reply & Communication System',
-      description: 'A platform for managing customer conversations and communication via WhatsApp Business.',
+      title: 'Tael Bot | WhatsApp Business Customer Conversations Platform',
+      description: 'Tael Bot helps businesses manage customer conversations on the WhatsApp Business API: a shared team inbox, conversation assignment, and message status tracking in one place.',
     },
   },
 } as const;

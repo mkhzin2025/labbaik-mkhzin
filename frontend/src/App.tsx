@@ -1,4 +1,5 @@
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { useEffect } from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import LandingPage from './pages/LandingPage';
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
@@ -29,11 +30,37 @@ const PrivateRoute = ({ children }: { children: React.ReactNode }) => {
   return isAuthenticated ? <>{children}</> : <Navigate to="/login" />;
 };
 
+const SITE_URL = 'https://taelbot.com';
+const CANONICAL_ALIASES: Record<string, string> = {
+  '/privacy-policy': '/privacy',
+  '/terms-of-service': '/terms',
+  '/data-deletion': '/account-deletion',
+};
+
+// Keeps <link rel="canonical"> in sync with the current route for search engines
+const CanonicalLink = () => {
+  const { pathname } = useLocation();
+
+  useEffect(() => {
+    const path = CANONICAL_ALIASES[pathname] || pathname.replace(/\/+$/, '') || '/';
+    let link = document.querySelector<HTMLLinkElement>('link[rel="canonical"]');
+    if (!link) {
+      link = document.createElement('link');
+      link.rel = 'canonical';
+      document.head.appendChild(link);
+    }
+    link.href = `${SITE_URL}${path}`;
+  }, [pathname]);
+
+  return null;
+};
+
 function App() {
   return (
     <ThemeProvider>
       <ToastProvider>
         <Router>
+        <CanonicalLink />
         <Routes>
           {/* Public Routes */}
           <Route path="/login" element={<LoginPage />} />

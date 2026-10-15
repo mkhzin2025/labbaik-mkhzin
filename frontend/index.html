@@ -2,15 +2,96 @@
 <html lang="ar" dir="rtl">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=tael-bot-1" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>تيل بوت - نظام الرد والتواصل الذكي</title>
-    <meta name="description" content="منصة لإدارة محادثات العملاء والتواصل عبر WhatsApp Business." />
+    <title>تيل بوت | منصة إدارة محادثات واتساب للأعمال وخدمة العملاء</title>
+    <meta name="description" content="تيل بوت منصة لإدارة محادثات العملاء عبر واتساب للأعمال (WhatsApp Business API): صندوق محادثات موحد لفريقك، توزيع المحادثات على الموظفين، ومتابعة حالة الرسائل من مكان واحد." />
+    <meta name="keywords" content="تيل بوت, Tael Bot, واتساب للأعمال, WhatsApp Business API, إدارة محادثات العملاء, خدمة العملاء, صندوق محادثات موحد, منصة واتساب للشركات" />
+    <meta name="robots" content="index, follow, max-image-preview:large" />
+    <meta name="theme-color" content="#643B89" />
+    <link rel="canonical" href="https://taelbot.com/" />
+
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=tael-bot-1" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="تيل بوت - Tael Bot" />
-    <meta property="og:title" content="تيل بوت - نظام الرد والتواصل الذكي" />
-    <meta property="og:description" content="منصة لإدارة محادثات العملاء والتواصل عبر WhatsApp Business." />
+    <meta property="og:locale" content="ar_SA" />
+    <meta property="og:locale:alternate" content="en_US" />
+    <meta property="og:title" content="تيل بوت | منصة إدارة محادثات واتساب للأعمال" />
+    <meta property="og:description" content="صندوق محادثات موحد لفريق خدمة العملاء عبر WhatsApp Business: استقبل الرسائل، وزّعها على الموظفين، وتابع حالتها من مكان واحد." />
     <meta property="og:url" content="https://taelbot.com/" />
+    <meta property="og:image" content="https://taelbot.com/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="تيل بوت - نظام الرد والتواصل الذكي عبر WhatsApp Business" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="تيل بوت | منصة إدارة محادثات واتساب للأعمال" />
+    <meta name="twitter:description" content="صندوق محادثات موحد لفريق خدمة العملاء عبر WhatsApp Business." />
+    <meta name="twitter:image" content="https://taelbot.com/og-image.png" />
+
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "Organization",
+            "@id": "https://taelbot.com/#organization",
+            "name": "تيل بوت",
+            "alternateName": "Tael Bot",
+            "url": "https://taelbot.com/",
+            "logo": "https://taelbot.com/apple-touch-icon.png",
+            "email": "info@mkhzin.com"
+          },
+          {
+            "@type": "WebSite",
+            "@id": "https://taelbot.com/#website",
+            "url": "https://taelbot.com/",
+            "name": "تيل بوت",
+            "alternateName": "Tael Bot",
+            "inLanguage": ["ar", "en"],
+            "publisher": { "@id": "https://taelbot.com/#organization" }
+          },
+          {
+            "@type": "SoftwareApplication",
+            "name": "تيل بوت - Tael Bot",
+            "applicationCategory": "BusinessApplication",
+            "operatingSystem": "Web",
+            "url": "https://taelbot.com/",
+            "image": "https://taelbot.com/og-image.png",
+            "description": "منصة لإدارة محادثات العملاء عبر WhatsApp Business: صندوق محادثات موحد، توزيع المحادثات على فريق خدمة العملاء، ومتابعة حالة الرسائل.",
+            "inLanguage": ["ar", "en"],
+            "publisher": { "@id": "https://taelbot.com/#organization" }
+          },
+          {
+            "@type": "FAQPage",
+            "mainEntity": [
+              {
+                "@type": "Question",
+                "name": "لمن صُمّم تيل بوت؟",
+                "acceptedAnswer": { "@type": "Answer", "text": "للمنشآت التي تتواصل مع عملائها عبر WhatsApp Business وتحتاج إلى تنظيم المحادثات بين أكثر من موظف في فريق خدمة العملاء." }
+              },
+              {
+                "@type": "Question",
+                "name": "هل يستخدم تيل بوت واجهة WhatsApp الرسمية؟",
+                "acceptedAnswer": { "@type": "Answer", "text": "نعم، يعتمد تيل بوت على WhatsApp Business Platform (Cloud API) المقدّمة من Meta لإرسال واستقبال الرسائل." }
+              },
+              {
+                "@type": "Question",
+                "name": "هل تُباع بيانات العملاء أو تُستخدم للإعلانات؟",
+                "acceptedAnswer": { "@type": "Answer", "text": "لا. تُستخدم البيانات فقط لتقديم خدمات المراسلة وإدارة المحادثات المطلوبة من العميل." }
+              },
+              {
+                "@type": "Question",
+                "name": "كيف أطلب حذف حسابي أو بياناتي؟",
+                "acceptedAnswer": { "@type": "Answer", "text": "يمكنك تقديم الطلب من صفحة حذف الحساب والبيانات، أو التواصل معنا عبر البريد الإلكتروني للدعم." }
+              }
+            ]
+          }
+        ]
+      }
+    </script>
+
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@100;200;300;400;500;600;700&display=swap" rel="stylesheet">
@@ -20,6 +101,14 @@
     <noscript>
       <h1>تيل بوت - نظام الرد والتواصل الذكي</h1>
       <p>منصة تساعد المنشآت على إدارة محادثات العملاء عبر WhatsApp Business وتنظيم التواصل وخدمة العملاء من مكان واحد.</p>
+      <h2>المميزات</h2>
+      <ul>
+        <li>إدارة محادثات العملاء في صندوق محادثات موحد.</li>
+        <li>إرسال واستقبال رسائل WhatsApp Business عبر Cloud API الرسمي من Meta.</li>
+        <li>تنظيم المحادثات وتوزيعها بين موظفي خدمة العملاء.</li>
+        <li>متابعة حالة الرسائل: مُرسلة، مُستلمة، مقروءة.</li>
+        <li>حماية بيانات العملاء واستخدامها فقط لتقديم الخدمة.</li>
+      </ul>
       <p><a href="/login">تسجيل الدخول</a> · <a href="/privacy">سياسة الخصوصية</a> · <a href="/terms">الشروط والأحكام</a> · <a href="/account-deletion">حذف الحساب / حذف البيانات</a></p>
     </noscript>
     <script type="module" src="/src/main.tsx"></script>
