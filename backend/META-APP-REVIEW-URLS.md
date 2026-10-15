@@ -10,9 +10,9 @@ the Meta Developer Console (App Dashboard → Settings → Basic).
 
 | Meta field | URL |
 |---|---|
-| Privacy Policy URL | `https://labbaik.mkhzin-store.com/privacy` |
-| Terms of Service URL | `https://labbaik.mkhzin-store.com/terms` |
-| Data Deletion Instructions URL | `https://labbaik.mkhzin-store.com/account-deletion` |
+| Privacy Policy URL | `https://taelbot.com/privacy` |
+| Terms of Service URL | `https://taelbot.com/terms` |
+| Data Deletion Instructions URL | `https://taelbot.com/account-deletion` |
 
 Alternate paths that resolve to the same pages (also public, no auth):
 
@@ -29,7 +29,7 @@ Meta only requires a URL where a user can request deletion (a "Data Deletion
 Instructions URL" is enough — a callback endpoint that auto-processes Meta's
 signed request is optional and not implemented here).
 
-1. User opens `https://labbaik.mkhzin-store.com/account-deletion`
+1. User opens `https://taelbot.com/account-deletion`
    (`frontend/src/pages/AccountDeletionPage.tsx`).
 2. The form submits to the public backend endpoint
    `POST /public/account-deletion-request` — no auth required
@@ -57,10 +57,10 @@ client-side.
 
 ## Checklist before submitting to Meta
 
-- [ ] Confirm `https://labbaik.mkhzin-store.com/privacy` loads over HTTPS
+- [ ] Confirm `https://taelbot.com/privacy` loads over HTTPS
       with a valid certificate.
-- [ ] Confirm `https://labbaik.mkhzin-store.com/account-deletion` loads and
+- [ ] Confirm `https://taelbot.com/account-deletion` loads and
       the form successfully posts to `/public/account-deletion-request`.
-- [ ] Confirm `https://labbaik.mkhzin-store.com/terms` loads.
+- [ ] Confirm `https://taelbot.com/terms` loads.
 - [ ] Paste the three URLs from the table above into Meta App Dashboard →
       Settings → Basic.

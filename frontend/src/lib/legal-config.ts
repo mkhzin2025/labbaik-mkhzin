@@ -3,8 +3,8 @@ export const LEGAL_CONFIG = {
   legalEmail: import.meta.env.VITE_LEGAL_EMAIL || 'legal@mkhzin.com',
   lastUpdatedAr: 'سبتمبر 2026',
   lastUpdatedEn: 'September 2026',
-  productionDomain: 'https://labbaik.mkhzin-store.com',
-  termsUrl: 'https://labbaik.mkhzin-store.com/terms',
-  privacyUrl: 'https://labbaik.mkhzin-store.com/privacy',
-  deletionUrl: 'https://labbaik.mkhzin-store.com/account-deletion',
+  productionDomain: 'https://taelbot.com',
+  termsUrl: 'https://taelbot.com/terms',
+  privacyUrl: 'https://taelbot.com/privacy',
+  deletionUrl: 'https://taelbot.com/account-deletion',
 };

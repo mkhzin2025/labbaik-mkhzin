@@ -87,7 +87,7 @@ describe('MetaWhatsAppService - Webhook Subscription Logic', () => {
       get: jest.fn().mockImplementation((key) => {
         if (key === 'META_GRAPH_API_VERSION') return 'v26.0';
         if (key === 'META_APP_ID') return '2173104126584484';
-        if (key === 'PUBLIC_WEBHOOK_URL') return 'https://labbaik.mkhzin-store.com';
+        if (key === 'PUBLIC_WEBHOOK_URL') return 'https://taelbot.com';
         return null;
       }),
     };
@@ -219,7 +219,7 @@ describe('MetaWhatsAppService - Webhook Subscription Logic', () => {
     expect(mockedAxios.post).toHaveBeenCalledWith(
       'https://graph.facebook.com/v26.0/1685815252287283/subscribed_apps',
       {
-        override_callback_uri: 'https://labbaik.mkhzin-store.com/webhooks/meta/whatsapp/054f269a-fc75-4d5c-a3ae-c252e4d63e9c',
+        override_callback_uri: 'https://taelbot.com/webhooks/meta/whatsapp/054f269a-fc75-4d5c-a3ae-c252e4d63e9c',
         verify_token: 'decrypted_verify_token',
       },
       expect.anything(),

@@ -4,8 +4,8 @@ services:
       context: ./frontend
       dockerfile: Dockerfile.prod
       args:
-        VITE_API_URL: ${PUBLIC_API_URL:-https://labbaik.mkhzin-store.com}
-        VITE_WEBHOOK_BASE_URL: ${PUBLIC_WEBHOOK_URL:-${PUBLIC_API_URL:-https://labbaik.mkhzin-store.com}}
+        VITE_API_URL: ${PUBLIC_API_URL:-https://taelbot.com}
+        VITE_WEBHOOK_BASE_URL: ${PUBLIC_WEBHOOK_URL:-${PUBLIC_API_URL:-https://taelbot.com}}
     container_name: labbaik-frontend
     restart: unless-stopped
     ports:
@@ -43,9 +43,9 @@ services:
       GROQ_API_KEY: ${GROQ_API_KEY:-}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-      APP_DOMAIN: ${APP_DOMAIN:-labbaik.mkhzin-store.com}
-      PUBLIC_API_URL: ${PUBLIC_API_URL:-https://${APP_DOMAIN:-labbaik.mkhzin-store.com}}
-      PUBLIC_WEBHOOK_URL: ${PUBLIC_WEBHOOK_URL:-https://${APP_DOMAIN:-labbaik.mkhzin-store.com}}
+      APP_DOMAIN: ${APP_DOMAIN:-taelbot.com}
+      PUBLIC_API_URL: ${PUBLIC_API_URL:-https://${APP_DOMAIN:-taelbot.com}}
+      PUBLIC_WEBHOOK_URL: ${PUBLIC_WEBHOOK_URL:-https://${APP_DOMAIN:-taelbot.com}}
     depends_on:
       postgres:
         condition: service_healthy
