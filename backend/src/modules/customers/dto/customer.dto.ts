@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsEmail, IsArray, ValidateIf, IsUUID, IsHexColor, IsBoolean, IsInt, Min, IsEnum, IsIn, ArrayNotEmpty, ArrayMaxSize } from 'class-validator';
+import { IsString, IsOptional, IsEmail, IsArray, ValidateIf, IsUUID, IsHexColor, IsBoolean, IsInt, Min, IsEnum, IsIn, ArrayNotEmpty, ArrayMaxSize, ValidateNested } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { examples } from '../../../common/swagger/api-examples';
@@ -126,6 +126,41 @@ export class BulkCustomerTaxonomyDto {
   @IsArray()
   @IsUUID('4', { each: true })
   categoryIds?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @IsUUID('4', { each: true })
+  tagIds?: string[];
+}
+
+export class ImportCustomerRowDto {
+  @IsString()
+  phoneNumber: string;
+
+  @IsOptional()
+  @IsString()
+  fullName?: string;
+
+  @IsOptional()
+  @IsEmail()
+  @ValidateIf((o) => o.email && o.email !== '')
+  email?: string;
+
+  @IsOptional()
+  @IsString()
+  notes?: string;
+}
+
+export class ImportCustomersDto {
+  @IsUUID('4')
+  storeId: string;
+
+  @IsArray()
+  @ArrayNotEmpty()
+  @ArrayMaxSize(2000)
+  @ValidateNested({ each: true })
+  @Type(() => ImportCustomerRowDto)
+  rows: ImportCustomerRowDto[];
 
   @IsOptional()
   @IsArray()

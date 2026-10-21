@@ -12,6 +12,7 @@ services:
       POSTGRES_USER: admin
       POSTGRES_PASSWORD: password123
       POSTGRES_DB: labbaik_db
+      TYPEORM_SYNCHRONIZE: "true"
       MONGO_URL: mongodb://admin:password123@mongodb:27017/labbaik_chats?authSource=admin
       REDIS_HOST: redis
       REDIS_PORT: 6379

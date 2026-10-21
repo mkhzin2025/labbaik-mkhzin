@@ -6,3 +6,8 @@ dist/
 coverage/
 
 *.log
+
+# Production backup imports can contain database data, environment secrets,
+# repository metadata, and TLS private keys. Keep them local only.
+backups/*-production/
+backups/*-pre-restore/

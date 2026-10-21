@@ -1,5 +1,6 @@
-import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Query, Request, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Query, Request, Res, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { CustomersService } from './customers.service';
 import type { CustomerPageOptions, CustomerSegment, CustomerSortKey } from './customers.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -7,6 +8,7 @@ import {
   BulkCustomerTaxonomyDto,
   CreateCustomerCategoryDto,
   CreateCustomerTagDto,
+  ImportCustomersDto,
   UpdateCustomerCategoryDto,
   UpdateCustomerDto,
   UpdateCustomerTagDto,
@@ -71,6 +73,43 @@ export class CustomersController {
     await this.organizationsService.assertStoreAccessibleByUser(req.user.id, organization.id, dto.storeId);
     if (!dto.categoryIds?.length && !dto.tagIds?.length) throw new BadRequestException('Choose at least one category or tag');
     return this.customersService.bulkUpdateTaxonomy(dto.storeId, organization.id, dto);
+  }
+
+  @Post('import')
+  async importCustomers(@Request() req: any, @Body() dto: ImportCustomersDto) {
+    const organization = await this.organizationsService.getForUser(req.user.id, req.user.organizationId);
+    await this.organizationsService.assertStoreAccessibleByUser(req.user.id, organization.id, dto.storeId);
+    return this.customersService.importCustomers(dto.storeId, organization.id, dto.rows, dto.tagIds || []);
+  }
+
+  @Get('export/options')
+  async exportOptions(@Request() req: any, @Query('storeIds') storeIds?: string) {
+    const organization = await this.organizationsService.getForUser(req.user.id, req.user.organizationId);
+    const access = await this.organizationsService.assertRequestedStoresAccessible(req.user.id, organization.id, this.csv(storeIds));
+    return this.customersService.getExportTags(organization.id, access.storeIds);
+  }
+
+  @Get('export')
+  async exportCustomers(
+    @Request() req: any,
+    @Res() response: Response,
+    @Query('format') format?: 'xlsx' | 'pdf',
+    @Query('exportType') exportType?: 'customers' | 'statistics',
+    @Query('storeIds') storeIds?: string,
+    @Query('tagId') tagId?: string,
+  ) {
+    if (format !== 'xlsx' && format !== 'pdf') throw new BadRequestException('Export format must be xlsx or pdf');
+    if (exportType && exportType !== 'customers' && exportType !== 'statistics') throw new BadRequestException('Export type must be customers or statistics');
+    const organization = await this.organizationsService.getForUser(req.user.id, req.user.organizationId);
+    const access = await this.organizationsService.assertRequestedStoresAccessible(req.user.id, organization.id, this.csv(storeIds));
+    if (!access.storeIds.length) throw new BadRequestException('Choose at least one branch');
+    await this.customersService.exportCustomers(response, {
+      organizationId: organization.id,
+      storeIds: access.storeIds,
+      tagId: tagId || undefined,
+      format,
+      exportType: exportType || 'customers',
+    });
   }
 
   @Get('taxonomy/usage')

@@ -25,6 +25,14 @@
 
 [Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
 
+### Customer PDF exports
+
+Customer and statistics PDFs use right-to-left column order and Unicode
+bidirectional text layout. Arabic text is shaped as complete directional runs;
+embedded phone numbers, dates, and email addresses retain their left-to-right order.
+Keep the bundled Tajarib regular and bold fonts in `assets/fonts` available at
+runtime (the production Docker image copies these assets).
+
 ## Project setup
 
 ```bash

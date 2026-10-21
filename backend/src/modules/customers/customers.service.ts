@@ -1,4 +1,5 @@
 import { normalizePhoneNumber } from '../../common/utils/phone.util';
+import { drawPdfText } from '../../common/utils/pdf-text.util';
 import { BadRequestException, Injectable, Logger, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Brackets, In, Repository } from 'typeorm';
@@ -14,6 +15,10 @@ import {
 import { Store } from '../stores/entities/store.entity';
 import { CustomerCategory, CustomerTaxonomyScope } from './entities/customer-category.entity';
 import { CustomerTag } from './entities/customer-tag.entity';
+import type { Response } from 'express';
+import ExcelJS from 'exceljs';
+import PDFDocument from 'pdfkit';
+import { join } from 'node:path';
 
 export type CustomerFilters = {
   search?: string;
@@ -43,6 +48,40 @@ const SORT_COLUMNS: Record<CustomerSortKey, string> = {
 
 const HAS_CATEGORY = 'EXISTS (SELECT 1 FROM customer_category_links ccl WHERE ccl."customerId" = customer.id)';
 const HAS_TAG = 'EXISTS (SELECT 1 FROM customer_tag_links ctl WHERE ctl."customerId" = customer.id)';
+const PDF_EXPORT_LIMIT = 5000;
+const EXPORT_BATCH_SIZE = 5000;
+
+type CustomerExportOptions = {
+  organizationId: string;
+  storeIds: string[];
+  tagId?: string;
+  format: 'xlsx' | 'pdf';
+  exportType: 'customers' | 'statistics';
+};
+
+type CustomerExportRow = {
+  id: string;
+  fullName: string | null;
+  phoneNumber: string | null;
+  email: string | null;
+  notes: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  storeName: string;
+  tagNames: string;
+  categoryNames: string;
+};
+
+type CustomerExportStatistic = {
+  storeId: string;
+  storeName: string;
+  total: number;
+  withPhone: number;
+  withEmail: number;
+  withTags: number;
+  withCategories: number;
+  marketingOptOut: number;
+};
 
 @Injectable()
 export class CustomersService implements OnModuleInit {
@@ -56,6 +95,12 @@ export class CustomersService implements OnModuleInit {
     @InjectRepository(CustomerTag)
     private readonly tagRepository: Repository<CustomerTag>,
   ) {}
+
+  private registerPdfFonts(doc: PDFKit.PDFDocument) {
+    doc.registerFont('ArabicRegular', join(process.cwd(), 'assets', 'fonts', 'Tajarib-Regular.otf'));
+    doc.registerFont('ArabicBold', join(process.cwd(), 'assets', 'fonts', 'Tajarib-Bold.otf'));
+    doc.font('ArabicRegular');
+  }
 
   // Same convention as StoresService: add new columns idempotently on boot
   // (see CUSTOMER-MARKETING-OPT-OUT-MIGRATION.sql for running it by hand).
@@ -153,6 +198,445 @@ export class CustomersService implements OnModuleInit {
 
   async findAllByOrganization(organizationId: string, filters: CustomerFilters = {}) {
     return this.findAllScoped(organizationId, undefined, filters);
+  }
+
+  async getExportTags(organizationId: string, storeIds: string[]) {
+    if (!storeIds.length) return [];
+    return this.tagRepository.createQueryBuilder('tag')
+      .where('tag.organizationId = :organizationId', { organizationId })
+      .andWhere('tag.isActive = true')
+      .andWhere(new Brackets((qb) => qb
+        .where('tag.scope = :organizationScope', { organizationScope: CustomerTaxonomyScope.ORGANIZATION })
+        .orWhere('(tag.scope = :storeScope AND tag.storeId IN (:...storeIds))', { storeScope: CustomerTaxonomyScope.STORE, storeIds })))
+      .orderBy('tag.name', 'ASC')
+      .getMany()
+      .then((tags) => tags.map(({ id, name, color, scope, storeId }) => ({ id, name, color, scope, storeId })));
+  }
+
+  async exportCustomers(response: Response, options: CustomerExportOptions) {
+    if (options.exportType === 'statistics') {
+      const rows = await this.exportStatistics(options);
+      if (options.format === 'xlsx') return this.writeStatisticsExcelExport(response, rows);
+      return this.writeStatisticsPdfExport(response, rows);
+    }
+    const total = await this.countExportRows(options);
+    if (options.format === 'pdf' && total > PDF_EXPORT_LIMIT) {
+      throw new BadRequestException(`تصدير PDF يدعم حتى ${PDF_EXPORT_LIMIT.toLocaleString('en')} عميل. قلّل عدد الفروع أو اختر تاقاً، أو استخدم Excel.`);
+    }
+    if (options.format === 'xlsx') return this.writeExcelExport(response, options, total);
+    return this.writePdfExport(response, options, total);
+  }
+
+  private async exportStatistics(options: CustomerExportOptions): Promise<CustomerExportStatistic[]> {
+    const params: unknown[] = [options.organizationId, options.storeIds];
+    const tagFilter = options.tagId
+      ? `AND EXISTS (SELECT 1 FROM customer_tag_links filter_link WHERE filter_link."customerId" = c.id AND filter_link."tagId" = $${params.push(options.tagId)})`
+      : '';
+    const rows = await this.customerRepository.query(
+      `SELECT s.id AS "storeId", s.name AS "storeName",
+              COUNT(c.id)::int AS total,
+              COUNT(c.id) FILTER (WHERE COALESCE(c."phoneNumber", '') <> '')::int AS "withPhone",
+              COUNT(c.id) FILTER (WHERE COALESCE(c.email, '') <> '')::int AS "withEmail",
+              COUNT(c.id) FILTER (WHERE EXISTS (SELECT 1 FROM customer_tag_links tag_link WHERE tag_link."customerId" = c.id))::int AS "withTags",
+              COUNT(c.id) FILTER (WHERE EXISTS (SELECT 1 FROM customer_category_links category_link WHERE category_link."customerId" = c.id))::int AS "withCategories",
+              COUNT(c.id) FILTER (WHERE c."marketingOptOut" = true)::int AS "marketingOptOut"
+       FROM stores s
+       LEFT JOIN customers c ON c."storeId" = s.id ${tagFilter}
+       WHERE s."organizationId" = $1 AND s.id = ANY($2::uuid[])
+       GROUP BY s.id, s.name
+       ORDER BY s.name ASC`,
+      params,
+    );
+    return rows.map((row: Record<string, string | number>) => ({
+      storeId: String(row.storeId),
+      storeName: String(row.storeName),
+      total: Number(row.total || 0),
+      withPhone: Number(row.withPhone || 0),
+      withEmail: Number(row.withEmail || 0),
+      withTags: Number(row.withTags || 0),
+      withCategories: Number(row.withCategories || 0),
+      marketingOptOut: Number(row.marketingOptOut || 0),
+    }));
+  }
+
+  private async writeStatisticsExcelExport(response: Response, rows: CustomerExportStatistic[]) {
+    const stamp = new Date().toISOString().slice(0, 10);
+    const total = rows.reduce((sum, row) => sum + row.total, 0);
+    const withPhone = rows.reduce((sum, row) => sum + row.withPhone, 0);
+    const withEmail = rows.reduce((sum, row) => sum + row.withEmail, 0);
+    const withTags = rows.reduce((sum, row) => sum + row.withTags, 0);
+    const withCategories = rows.reduce((sum, row) => sum + row.withCategories, 0);
+    const marketingOptOut = rows.reduce((sum, row) => sum + row.marketingOptOut, 0);
+    const rate = (value: number) => total ? value / total : 0;
+    response.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    response.setHeader('Content-Disposition', `attachment; filename="customer-statistics-${stamp}.xlsx"`);
+    response.setHeader('X-Export-Count', String(total));
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'Tael Bot';
+    workbook.created = new Date();
+
+    const dashboard = workbook.addWorksheet('لوحة المؤشرات', { views: [{ state: 'frozen', ySplit: 9, rightToLeft: true }] });
+    dashboard.properties.defaultRowHeight = 21;
+    dashboard.columns = Array.from({ length: 8 }, () => ({ width: 16 }));
+    dashboard.mergeCells('A1:H2');
+    dashboard.getCell('A1').value = 'إحصائيات العملاء';
+    dashboard.getCell('A1').font = { bold: true, size: 22, color: { argb: 'FFFFFFFF' } };
+    dashboard.getCell('A1').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF38204A' } };
+    dashboard.getCell('A1').alignment = { horizontal: 'right', vertical: 'middle' };
+    dashboard.mergeCells('A3:H3');
+    dashboard.getCell('A3').value = `نظرة تنفيذية حسب الفروع المحددة - ${stamp}`;
+    dashboard.getCell('A3').font = { size: 10, color: { argb: 'FF746A79' } };
+    dashboard.getCell('A3').alignment = { horizontal: 'right' };
+
+    const metricCards = [
+      { range: 'A5:B7', value: total, label: 'إجمالي العملاء', color: 'FF643B89' },
+      { range: 'C5:D7', value: rate(withPhone), label: 'اكتمال أرقام الجوال', color: 'FF167D72', percent: true },
+      { range: 'E5:F7', value: rate(withTags), label: 'عملاء لديهم تاقات', color: 'FFB36A16', percent: true },
+      { range: 'G5:H7', value: rate(withCategories), label: 'عملاء لديهم فئات', color: 'FF3E6FA8', percent: true },
+    ];
+    for (const card of metricCards) {
+      dashboard.mergeCells(card.range);
+      const cell = dashboard.getCell(card.range.split(':')[0]);
+      cell.value = `${card.percent ? `${Math.round(card.value * 100)}%` : card.value.toLocaleString('en')}\n${card.label}`;
+      cell.font = { bold: true, size: 14, color: { argb: 'FFFFFFFF' } };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: card.color } };
+      cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+    }
+    dashboard.getRow(5).height = 25;
+    dashboard.getRow(6).height = 25;
+    dashboard.getRow(7).height = 25;
+
+    dashboard.mergeCells('A9:H9');
+    dashboard.getCell('A9').value = 'توزيع العملاء حسب الفروع';
+    dashboard.getCell('A9').font = { bold: true, size: 13, color: { argb: 'FF38204A' } };
+    dashboard.getCell('A9').alignment = { horizontal: 'right' };
+    const dashboardHeaders = ['الفرع', 'عدد العملاء', 'الحصة من الإجمالي', 'اكتمال الجوال', 'اكتمال البريد', 'لديهم تاقات', 'لديهم فئات', 'إلغاء التسويق'];
+    const dashboardHeader = dashboard.getRow(10);
+    dashboardHeaders.forEach((label, index) => { dashboardHeader.getCell(index + 1).value = label; });
+    dashboardHeader.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    dashboardHeader.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF643B89' } };
+    dashboardHeader.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+    dashboardHeader.height = 34;
+    rows.forEach((row) => dashboard.addRow([
+      row.storeName, row.total, total ? row.total / total : 0,
+      row.total ? row.withPhone / row.total : 0, row.total ? row.withEmail / row.total : 0,
+      row.total ? row.withTags / row.total : 0, row.total ? row.withCategories / row.total : 0,
+      row.total ? row.marketingOptOut / row.total : 0,
+    ]));
+    const dashboardTotal = dashboard.addRow(['الإجمالي', total, 1, rate(withPhone), rate(withEmail), rate(withTags), rate(withCategories), rate(marketingOptOut)]);
+    dashboardTotal.font = { bold: true, color: { argb: 'FF643B89' } };
+    dashboardTotal.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1EBF6' } };
+    for (let rowNumber = 11; rowNumber <= dashboardTotal.number; rowNumber += 1) {
+      dashboard.getRow(rowNumber).alignment = { horizontal: 'right', vertical: 'middle' };
+      dashboard.getCell(`B${rowNumber}`).numFmt = '#,##0';
+      for (let column = 3; column <= 8; column += 1) dashboard.getRow(rowNumber).getCell(column).numFmt = '0%';
+    }
+    if (rows.length) {
+      dashboard.addConditionalFormatting({
+        ref: `B11:B${10 + rows.length}`,
+        rules: [{ type: 'colorScale', priority: 1, cfvo: [{ type: 'min' }, { type: 'percentile', value: 50 }, { type: 'max' }], color: [{ argb: 'FFF4EEF8' }, { argb: 'FFCDB4DD' }, { argb: 'FF643B89' }] }],
+      });
+      dashboard.addConditionalFormatting({
+        ref: `C11:G${10 + rows.length}`,
+        rules: [{ type: 'colorScale', priority: 2, cfvo: [{ type: 'min' }, { type: 'percentile', value: 50 }, { type: 'max' }], color: [{ argb: 'FFF4EEF8' }, { argb: 'FFD7C3E6' }, { argb: 'FF643B89' }] }],
+      });
+    }
+    dashboard.autoFilter = { from: 'A10', to: `H${10 + rows.length}` };
+
+    const sheet = workbook.addWorksheet('البيانات التفصيلية', { views: [{ state: 'frozen', ySplit: 1, rightToLeft: true }] });
+    sheet.columns = [
+      { header: 'الفرع', key: 'storeName', width: 28 }, { header: 'إجمالي العملاء', key: 'total', width: 18 },
+      { header: 'لديهم رقم جوال', key: 'withPhone', width: 22 }, { header: 'لديهم بريد إلكتروني', key: 'withEmail', width: 22 },
+      { header: 'لديهم تاقات', key: 'withTags', width: 20 }, { header: 'لديهم فئات', key: 'withCategories', width: 22 },
+      { header: 'إلغاء الاشتراك التسويقي', key: 'marketingOptOut', width: 24 },
+    ];
+    const header = sheet.getRow(1);
+    header.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    header.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF643B89' } };
+    header.alignment = { horizontal: 'right', vertical: 'middle' };
+    header.height = 27;
+    rows.forEach((row) => sheet.addRow(row));
+    const totals = sheet.addRow({ storeName: 'الإجمالي', total, withPhone, withEmail, withTags, withCategories, marketingOptOut });
+    totals.font = { bold: true, color: { argb: 'FF643B89' } };
+    totals.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF2ECF7' } };
+    sheet.eachRow((row, rowNumber) => {
+      if (rowNumber >= 2) {
+        row.alignment = { horizontal: 'right', vertical: 'middle' };
+        for (let column = 2; column <= 7; column += 1) row.getCell(column).numFmt = '#,##0';
+      }
+    });
+    sheet.autoFilter = { from: 'A1', to: `G${1 + rows.length}` };
+    await workbook.xlsx.write(response);
+    response.end();
+  }
+
+  private writeStatisticsPdfExport(response: Response, rows: CustomerExportStatistic[]) {
+    const stamp = new Date().toISOString().slice(0, 10);
+    const total = rows.reduce((sum, row) => sum + row.total, 0);
+    const withPhone = rows.reduce((sum, row) => sum + row.withPhone, 0);
+    const withEmail = rows.reduce((sum, row) => sum + row.withEmail, 0);
+    const withTags = rows.reduce((sum, row) => sum + row.withTags, 0);
+    const withCategories = rows.reduce((sum, row) => sum + row.withCategories, 0);
+    const marketingOptOut = rows.reduce((sum, row) => sum + row.marketingOptOut, 0);
+    const percent = (value: number) => total ? Math.round((value / total) * 100) : 0;
+    response.setHeader('Content-Type', 'application/pdf');
+    response.setHeader('Content-Disposition', `attachment; filename="customer-statistics-${stamp}.pdf"`);
+    response.setHeader('X-Export-Count', String(total));
+    const doc = new PDFDocument({ size: 'A4', layout: 'landscape', margins: { top: 30, bottom: 30, left: 30, right: 30 }, bufferPages: true });
+    doc.pipe(response);
+    this.registerPdfFonts(doc);
+
+    const drawBrandHeader = (title: string, totalLabel: string, totalValue: string, dateValue: string) => {
+      doc.rect(0, 0, doc.page.width, 76).fill('#38204A');
+      drawPdfText(doc.fillColor('#ffffff').font('ArabicBold').fontSize(19), title, 36, 18, { width: 770 });
+      doc.fillColor('#DCCCE8').font('ArabicRegular').fontSize(8.5);
+      drawPdfText(doc, 'تاريخ التصدير', 674, 49, { width: 132 });
+      doc.text(dateValue, 584, 49, { width: 86, align: 'right' });
+      drawPdfText(doc, totalLabel, 452, 49, { width: 124 });
+      doc.text(totalValue, 382, 49, { width: 66, align: 'right' });
+    };
+    drawBrandHeader('إحصائيات العملاء', 'عدد الفروع', rows.length.toLocaleString('en'), stamp);
+
+    const cards = [
+      { label: 'إجمالي العملاء', value: total.toLocaleString('en'), color: '#643B89' },
+      { label: 'اكتمال أرقام الجوال', value: `${percent(withPhone)}%`, color: '#167D72' },
+      { label: 'عملاء لديهم تاقات', value: `${percent(withTags)}%`, color: '#B36A16' },
+      { label: 'عملاء لديهم فئات', value: `${percent(withCategories)}%`, color: '#3E6FA8' },
+    ];
+    const cardWidth = 178;
+    cards.forEach((card, index) => {
+      const x = doc.page.width - 36 - cardWidth - index * (cardWidth + 14);
+      doc.roundedRect(x, 92, cardWidth, 68, 9).fill(card.color);
+      doc.fillColor('#ffffff').font('ArabicBold').fontSize(19).text(card.value, x + 12, 105, { width: cardWidth - 24, align: 'right' });
+      drawPdfText(doc.fillColor('#ffffff').opacity(0.82).font('ArabicRegular').fontSize(8.5), card.label, x + 12, 137, { width: cardWidth - 24 });
+      doc.opacity(1);
+    });
+
+    drawPdfText(doc.fillColor('#38204A').font('ArabicBold').fontSize(12.5), 'توزيع العملاء حسب الفروع', 382, 187, { width: 423 });
+    const maxBranchTotal = Math.max(1, ...rows.map((row) => row.total));
+    rows.forEach((row, index) => {
+      const y = 215 + index * 25;
+      const width = Math.max(row.total ? 3 : 0, (row.total / maxBranchTotal) * 235);
+      drawPdfText(doc.fillColor('#4B4350').font('ArabicRegular').fontSize(7.5), row.storeName, 690, y + 3, { width: 115, ellipsis: true });
+      doc.roundedRect(438, y, 235, 13, 4).fill('#EEE8F2');
+      if (width > 0) doc.roundedRect(438 + 235 - width, y, width, 13, 4).fill('#8D67A9');
+      doc.fillColor('#38204A').fontSize(7.5).text(row.total.toLocaleString('en'), 382, y + 2, { width: 48, align: 'right' });
+    });
+
+    drawPdfText(doc.fillColor('#38204A').font('ArabicBold').fontSize(12.5), 'جودة بيانات العملاء', 36, 187, { width: 323 });
+    const quality = [
+      { label: 'رقم الجوال', value: withPhone, color: '#167D72' },
+      { label: 'البريد الإلكتروني', value: withEmail, color: '#3E6FA8' },
+      { label: 'التاقات', value: withTags, color: '#B36A16' },
+      { label: 'الفئات', value: withCategories, color: '#643B89' },
+    ];
+    quality.forEach((metric, index) => {
+      const y = 221 + index * 61;
+      const metricPercent = percent(metric.value);
+      drawPdfText(doc.fillColor('#4B4350').font('ArabicRegular').fontSize(9), metric.label, 36, y, { width: 323 });
+      doc.fillColor(metric.color).fontSize(10).text(`${metricPercent}%`, 36, y, { width: 45, align: 'left' });
+      doc.roundedRect(36, y + 24, 323, 14, 5).fill('#EEE8F2');
+      if (metricPercent > 0) {
+        const metricWidth = Math.max(3, 323 * metricPercent / 100);
+        doc.roundedRect(36 + 323 - metricWidth, y + 24, metricWidth, 14, 5).fill(metric.color);
+      }
+      doc.fillColor('#746A79').fontSize(7.5).text(`${metric.value.toLocaleString('en')} / ${total.toLocaleString('en')}`, 36, y + 43, { width: 323, align: 'right' });
+    });
+    doc.roundedRect(36, 471, 323, 54, 8).fill('#F7F2FA');
+    drawPdfText(doc.fillColor('#746A79').font('ArabicRegular').fontSize(8), 'إلغاء الاشتراك التسويقي', 50, 484, { width: 295 });
+    doc.fillColor('#8B3A45').fontSize(15).text(`${marketingOptOut.toLocaleString('en')} (${percent(marketingOptOut)}%)`, 50, 502, { width: 295, align: 'right' });
+
+    doc.addPage();
+    drawBrandHeader('تفاصيل الفروع', 'إجمالي العملاء', total.toLocaleString('en'), stamp);
+    const columns = [
+      { key: 'storeName', label: 'الفرع', width: 170 }, { key: 'total', label: 'الإجمالي', width: 85 },
+      { key: 'withPhone', label: 'رقم جوال', width: 90 }, { key: 'withEmail', label: 'بريد', width: 90 },
+      { key: 'withTags', label: 'تاقات', width: 85 }, { key: 'withCategories', label: 'فئات', width: 85 },
+      { key: 'marketingOptOut', label: 'إلغاء التسويق', width: 105 },
+    ] as const;
+    const tableX = 45;
+    let y = 103;
+    const drawRow = (row: CustomerExportStatistic | Record<string, string | number>, index: number, bold = false) => {
+      doc.rect(tableX, y, 710, 25).fill(bold ? '#eee7f4' : index % 2 === 0 ? '#f8f6fc' : '#ffffff');
+      let x = tableX + 710;
+      doc.fillColor(bold ? '#643B89' : '#252129').font(bold ? 'ArabicBold' : 'ArabicRegular').fontSize(8.5);
+      for (const column of columns) {
+        x -= column.width;
+        const value = row[column.key as keyof typeof row];
+        const text = typeof value === 'number' ? value.toLocaleString('en') : String(value ?? '—');
+        drawPdfText(doc, text, x + 5, y + 7, { width: column.width - 10, ellipsis: true });
+      }
+      y += 25;
+    };
+    doc.rect(tableX, y, 710, 25).fill('#643B89');
+    let headerX = tableX + 710;
+    doc.fillColor('#ffffff').font('ArabicBold').fontSize(8.5);
+    for (const column of columns) { headerX -= column.width; drawPdfText(doc, column.label, headerX + 5, y + 7, { width: column.width - 10 }); }
+    y += 25;
+    rows.forEach((row, index) => drawRow(row, index));
+    drawRow({
+      storeName: 'الإجمالي', total,
+      withPhone, withEmail, withTags, withCategories, marketingOptOut,
+    }, rows.length, true);
+    const pages = doc.bufferedPageRange();
+    for (let index = 0; index < pages.count; index += 1) {
+      doc.switchToPage(index);
+      drawPdfText(doc.fillColor('#817887').fontSize(7.5), `${index + 1} / ${pages.count}`, 36, doc.page.height - 21, { width: 770, align: 'center' });
+    }
+    doc.end();
+  }
+
+  private async countExportRows(options: CustomerExportOptions) {
+    const params: unknown[] = [options.organizationId, options.storeIds];
+    const tagFilter = options.tagId
+      ? `AND EXISTS (SELECT 1 FROM customer_tag_links filter_link WHERE filter_link."customerId" = c.id AND filter_link."tagId" = $${params.push(options.tagId)})`
+      : '';
+    const [row] = await this.customerRepository.query(
+      `SELECT COUNT(*)::int AS total
+       FROM customers c
+       JOIN stores s ON s.id = c."storeId"
+       WHERE s."organizationId" = $1 AND c."storeId" = ANY($2::uuid[]) ${tagFilter}`,
+      params,
+    );
+    return Number(row?.total || 0);
+  }
+
+  private async exportRows(options: CustomerExportOptions, lastId: string | null, limit: number): Promise<CustomerExportRow[]> {
+    const params: unknown[] = [options.organizationId, options.storeIds];
+    const tagFilter = options.tagId
+      ? `AND EXISTS (SELECT 1 FROM customer_tag_links filter_link WHERE filter_link."customerId" = c.id AND filter_link."tagId" = $${params.push(options.tagId)})`
+      : '';
+    const cursorFilter = lastId ? `AND c.id > $${params.push(lastId)}` : '';
+    params.push(limit);
+    return this.customerRepository.query(
+      `SELECT c.id, c."fullName", c."phoneNumber", c.email, c.notes, c."createdAt", c."updatedAt",
+              s.name AS "storeName",
+              COALESCE(string_agg(DISTINCT t.name, ', '), '') AS "tagNames",
+              COALESCE(string_agg(DISTINCT cat.name, ', '), '') AS "categoryNames"
+       FROM customers c
+       JOIN stores s ON s.id = c."storeId"
+       LEFT JOIN customer_tag_links ctl ON ctl."customerId" = c.id
+       LEFT JOIN customer_tags t ON t.id = ctl."tagId" AND t."isActive" = true
+       LEFT JOIN customer_category_links ccl ON ccl."customerId" = c.id
+       LEFT JOIN customer_categories cat ON cat.id = ccl."categoryId" AND cat."isActive" = true
+       WHERE s."organizationId" = $1 AND c."storeId" = ANY($2::uuid[]) ${tagFilter} ${cursorFilter}
+       GROUP BY c.id, c."fullName", c."phoneNumber", c.email, c.notes, c."createdAt", c."updatedAt", s.name
+       ORDER BY c.id ASC
+       LIMIT $${params.length}`,
+      params,
+    );
+  }
+
+  private async eachExportBatch(options: CustomerExportOptions, callback: (rows: CustomerExportRow[]) => Promise<void>) {
+    let lastId: string | null = null;
+    while (true) {
+      const rows = await this.exportRows(options, lastId, EXPORT_BATCH_SIZE);
+      if (!rows.length) break;
+      await callback(rows);
+      lastId = rows[rows.length - 1].id;
+      if (rows.length < EXPORT_BATCH_SIZE) break;
+    }
+  }
+
+  private async writeExcelExport(response: Response, options: CustomerExportOptions, total: number) {
+    const stamp = new Date().toISOString().slice(0, 10);
+    response.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    response.setHeader('Content-Disposition', `attachment; filename="customers-${stamp}.xlsx"`);
+    response.setHeader('X-Export-Count', String(total));
+    const workbook = new ExcelJS.stream.xlsx.WorkbookWriter({ stream: response, useStyles: true, useSharedStrings: false });
+    const sheet = workbook.addWorksheet('Customers', { views: [{ state: 'frozen', ySplit: 1, rightToLeft: true }] });
+    sheet.columns = [
+      { header: 'الاسم', key: 'fullName', width: 28 },
+      { header: 'رقم الجوال', key: 'phoneNumber', width: 18 },
+      { header: 'البريد الإلكتروني', key: 'email', width: 30 },
+      { header: 'الفرع', key: 'storeName', width: 22 },
+      { header: 'الفئات', key: 'categoryNames', width: 28 },
+      { header: 'التاقات', key: 'tagNames', width: 28 },
+      { header: 'ملاحظات', key: 'notes', width: 38 },
+      { header: 'تاريخ الإضافة', key: 'createdAt', width: 20 },
+      { header: 'آخر تحديث', key: 'updatedAt', width: 20 },
+    ];
+    const header = sheet.getRow(1);
+    header.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    header.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF643B89' } };
+    header.alignment = { horizontal: 'right', vertical: 'middle' };
+    header.height = 24;
+    header.commit();
+    await this.eachExportBatch(options, async (rows) => {
+      for (const row of rows) {
+        const excelRow = sheet.addRow({ ...row, createdAt: new Date(row.createdAt), updatedAt: new Date(row.updatedAt) });
+        excelRow.alignment = { vertical: 'top', wrapText: false };
+        excelRow.getCell('createdAt').numFmt = 'yyyy-mm-dd hh:mm';
+        excelRow.getCell('updatedAt').numFmt = 'yyyy-mm-dd hh:mm';
+        excelRow.commit();
+      }
+    });
+    sheet.commit();
+    await workbook.commit();
+  }
+
+  private async writePdfExport(response: Response, options: CustomerExportOptions, total: number) {
+    const stamp = new Date().toISOString().slice(0, 10);
+    response.setHeader('Content-Type', 'application/pdf');
+    response.setHeader('Content-Disposition', `attachment; filename="customers-${stamp}.pdf"`);
+    response.setHeader('X-Export-Count', String(total));
+    const doc = new PDFDocument({ size: 'A4', layout: 'landscape', margins: { top: 34, bottom: 34, left: 30, right: 30 }, bufferPages: true });
+    doc.pipe(response);
+    this.registerPdfFonts(doc);
+    const columns = [
+      { key: 'fullName', label: 'الاسم', width: 150 },
+      { key: 'phoneNumber', label: 'رقم الجوال', width: 100 },
+      { key: 'email', label: 'البريد', width: 145 },
+      { key: 'storeName', label: 'الفرع', width: 90 },
+      { key: 'categoryNames', label: 'الفئات', width: 100 },
+      { key: 'tagNames', label: 'التاقات', width: 100 },
+      { key: 'createdAt', label: 'تاريخ الإضافة', width: 78 },
+    ] as const;
+    const tableX = 30;
+    const tableWidth = columns.reduce((sum, column) => sum + column.width, 0);
+    let y = 105;
+    const drawTableHeader = () => {
+      let x = tableX + tableWidth;
+      doc.rect(tableX, y, tableWidth, 22).fill('#643B89');
+      doc.fillColor('#ffffff').fontSize(8.5);
+      for (const column of columns) {
+        x -= column.width;
+        drawPdfText(doc.font('ArabicBold'), column.label, x + 4, y + 6, { width: column.width - 8 });
+      }
+      y += 22;
+    };
+    const drawPageTitle = () => {
+      drawPdfText(doc.fillColor('#24152f').font('ArabicBold').fontSize(19), 'تقرير العملاء', 30, 32, { width: 752 });
+      doc.fillColor('#6b6470').font('ArabicRegular').fontSize(9).text(`${total.toLocaleString('en')}  |  ${stamp}`, 30, 65, { width: 752, align: 'right' });
+      y = 105;
+      drawTableHeader();
+    };
+    drawPageTitle();
+    doc.on('pageAdded', drawPageTitle);
+    let rowIndex = 0;
+    await this.eachExportBatch(options, async (rows) => {
+      for (const row of rows) {
+        if (y + 19 > doc.page.height - 34) doc.addPage();
+        const background = rowIndex % 2 === 0 ? '#f7f4fb' : '#ffffff';
+        doc.rect(tableX, y, tableWidth, 19).fill(background);
+        let x = tableX + tableWidth;
+        doc.fillColor('#252129').font('ArabicRegular').fontSize(7.5);
+        for (const column of columns) {
+          x -= column.width;
+          const raw = column.key === 'createdAt' ? new Date(row.createdAt).toISOString().slice(0, 10) : row[column.key];
+          const value = String(raw || '—');
+          drawPdfText(doc, value, x + 4, y + 5, { width: column.width - 8, align: column.key === 'email' ? 'left' : 'right', ellipsis: true });
+        }
+        y += 19;
+        rowIndex += 1;
+      }
+    });
+    const pages = doc.bufferedPageRange();
+    for (let index = 0; index < pages.count; index += 1) {
+      doc.switchToPage(index);
+      drawPdfText(doc.fillColor('#777177').fontSize(8), `${index + 1} / ${pages.count}`, 30, doc.page.height - 24, { width: 752, align: 'center' });
+    }
+    doc.end();
   }
 
   private async findAllScoped(organizationId?: string, storeId?: string, filters: CustomerFilters = {}) {
@@ -273,6 +757,84 @@ export class CustomersService implements OnModuleInit {
     });
 
     return { success: true, updated: customerIds.length };
+  }
+
+  /** Imports a deduplicated batch and updates matching numbers in the selected branch. */
+  async importCustomers(
+    storeId: string,
+    organizationId: string,
+    rows: { phoneNumber: string; fullName?: string; email?: string; notes?: string }[],
+    tagIds: string[],
+  ) {
+    const tags = tagIds.length ? await this.resolveTags(organizationId, storeId, tagIds) : [];
+    const normalized = new Map<string, { phoneNumber: string; fullName?: string; email?: string; notes?: string }>();
+    let skipped = 0;
+
+    for (const row of rows) {
+      const phoneNumber = this.normalizePhone(row.phoneNumber);
+      if (phoneNumber.length < 8 || phoneNumber.length > 15) {
+        skipped += 1;
+        continue;
+      }
+      const clean = (value?: string) => String(value || '').trim() || undefined;
+      normalized.set(phoneNumber, {
+        phoneNumber,
+        fullName: clean(row.fullName),
+        email: clean(row.email)?.toLowerCase(),
+        notes: clean(row.notes),
+      });
+    }
+
+    if (!normalized.size) throw new BadRequestException('No valid phone numbers were found in the import file');
+    const phones = [...normalized.keys()];
+    const existing = await this.customerRepository.find({
+      where: { storeId, phoneNumber: In(phones) },
+      select: ['id', 'phoneNumber', 'fullName', 'email', 'notes', 'storeId'],
+    });
+    const byPhone = new Map(existing.map((customer) => [customer.phoneNumber, customer]));
+    let created = 0;
+    let updated = 0;
+
+    const customerIds = await this.customerRepository.manager.transaction(async (manager) => {
+      const repo = manager.getRepository(Customer);
+      const records: Customer[] = [];
+      for (const [phoneNumber, row] of normalized) {
+        const customer = byPhone.get(phoneNumber);
+        if (customer) {
+          if (row.fullName) customer.fullName = row.fullName;
+          if (row.email) customer.email = row.email;
+          if (row.notes) customer.notes = row.notes;
+          customer.updatedAt = new Date();
+          records.push(customer);
+          updated += 1;
+        } else {
+          records.push(repo.create({
+            storeId,
+            phoneNumber,
+            whatsappId: phoneNumber,
+            fullName: row.fullName || phoneNumber,
+            email: row.email,
+            notes: row.notes,
+            legacyTags: [],
+          }));
+          created += 1;
+        }
+      }
+
+      const saved = await repo.save(records, { chunk: 200 });
+      if (tags.length) {
+        const ids = saved.map((customer) => customer.id);
+        for (const tag of tags) {
+          await manager.query(
+            'INSERT INTO customer_tag_links ("customerId", "tagId") SELECT unnest($1::uuid[]), $2 ON CONFLICT DO NOTHING',
+            [ids, tag.id],
+          );
+        }
+      }
+      return saved.map((customer) => customer.id);
+    });
+
+    return { success: true, total: customerIds.length, created, updated, skipped };
   }
 
   private filteredQuery(scope: { organizationId?: string; storeId?: string }, filters: CustomerFilters) {
