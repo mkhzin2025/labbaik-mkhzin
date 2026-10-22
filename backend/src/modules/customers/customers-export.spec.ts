@@ -37,7 +37,10 @@ describe('Customer PDF exports', () => {
 
   afterEach(() => text.mockRestore());
 
-  async function exportPdf(exportType: 'customers' | 'statistics') {
+  async function exportPdf(
+    exportType: 'customers' | 'statistics',
+    extra: { sources?: string[]; baselineDate?: string } = {},
+  ) {
     const app = express();
     app.get('/export', (req, res, next) => {
       void service
@@ -46,6 +49,7 @@ describe('Customer PDF exports', () => {
           storeIds: ['store'],
           format: 'pdf',
           exportType,
+          ...extra,
         })
         .catch(next);
     });
@@ -111,33 +115,43 @@ describe('Customer PDF exports', () => {
     ).toHaveLength(2);
   });
 
-  it('applies the same Arabic layout to the statistics dashboard and detail table', async () => {
-    query.mockResolvedValueOnce([
-      {
-        storeId: 'store',
-        storeName: 'الفرع الرئيسي',
-        total: 1234,
-        withPhone: 1200,
-        withEmail: 500,
-        withTags: 600,
-        withCategories: 700,
-        marketingOptOut: 12,
-      },
-    ]);
-    const pdf = await exportPdf('statistics');
+  it('builds the branch report with baseline, one column per category/tag, and both totals', async () => {
+    const category = '11111111-1111-4111-8111-111111111111';
+    const tag = '22222222-2222-4222-8222-222222222222';
+    query
+      .mockResolvedValueOnce([
+        { type: 'category', id: category, name: 'المسابقة', color: '#dc2626' },
+        { type: 'tag', id: tag, name: 'نقاط البيع 10-2026', color: '#64748b' },
+      ])
+      .mockResolvedValueOnce([{ name: 'مخازن' }])
+      .mockResolvedValueOnce([
+        { storeId: 'store', storeName: 'بريدة', baseline: 1000, unique: 1300 },
+      ])
+      .mockResolvedValueOnce([
+        { storeId: 'store', key: `category:${category}`, total: 400 },
+        { storeId: 'store', key: `tag:${tag}`, total: 120 },
+      ]);
+    const pdf = await exportPdf('statistics', {
+      sources: [`tag:${tag}`, `category:${category}`],
+      baselineDate: '2026-10-22',
+    });
     expect(pdf.toString('latin1')).toMatch(/\/Type \/Pages[\s\S]*?\/Count 2\b/);
+    const [, baseParams] = query.mock.calls[2] as [string, unknown[]];
+    expect(baseParams).toEqual(['organization', ['store'], '2026-10-22T00:00:00+03:00']);
+    const drawn = (label: string) =>
+      text.mock.calls.some(([value, , , options]) => value === label && options?.features);
     for (const label of [
-      'إحصائيات العملاء',
-      'تاريخ التصدير',
-      'توزيع العملاء حسب الفروع',
-      'الفرع الرئيسي',
-      'تفاصيل الفروع',
+      'تقرير مصادر أرقام العملاء',
+      'تفاصيل الفروع حسب مصادر الأرقام',
+      'بريدة',
+      'المسابقة',
+      'بدون تكرار',
+      // baseline + both sources, and the real branch count
+      '1,520',
+      '1,300',
+      '+300',
     ]) {
-      expect(
-        text.mock.calls.some(
-          ([value, , , options]) => value === label && options?.features,
-        ),
-      ).toBe(true);
+      expect(drawn(label)).toBe(true);
     }
     expect(
       text.mock.calls.filter(

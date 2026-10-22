@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { BarChart3, Building2, Check, ContactRound, Download, FileSpreadsheet, FileText, Loader2, Tag, X } from 'lucide-react';
+import { BarChart3, Building2, CalendarDays, Check, Columns3, ContactRound, Download, FileSpreadsheet, FileText, Loader2, Tag, X } from 'lucide-react';
 import api from '../../api/client';
 import type { Branch } from './BranchSelector';
 
@@ -7,6 +7,7 @@ type ExportFormat = 'xlsx' | 'pdf';
 type ExportType = 'customers' | 'statistics';
 type BranchMode = 'all' | 'single' | 'multiple';
 type ExportTag = { id: string; name: string; color: string; storeId?: string | null };
+type StatisticsSource = { key: string; type: 'category' | 'tag'; name: string; color: string; customers: number };
 
 interface Props {
   branches: Branch[];
@@ -15,6 +16,17 @@ interface Props {
 }
 
 const PDF_LIMIT = 5000;
+const SOURCE_LIMIT = 6;
+const SOURCES_STORAGE_KEY = 'customers.statisticsSources';
+
+const todayInRiyadh = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Riyadh' }).format(new Date());
+
+function readSavedSources(): string[] {
+  try {
+    const saved = JSON.parse(localStorage.getItem(SOURCES_STORAGE_KEY) || '[]');
+    return Array.isArray(saved) ? saved.filter((key): key is string => typeof key === 'string') : [];
+  } catch { return []; }
+}
 
 export default function CustomerExportDialog({ branches, initialStoreId, onClose }: Props) {
   const initialMode: BranchMode = initialStoreId ? 'single' : 'all';
@@ -24,6 +36,9 @@ export default function CustomerExportDialog({ branches, initialStoreId, onClose
   const [exportType, setExportType] = useState<ExportType>('customers');
   const [tags, setTags] = useState<ExportTag[]>([]);
   const [tagId, setTagId] = useState('');
+  const [sources, setSources] = useState<StatisticsSource[]>([]);
+  const [selectedSources, setSelectedSources] = useState<string[]>(readSavedSources);
+  const [baselineDate, setBaselineDate] = useState(todayInRiyadh);
   const [busy, setBusy] = useState(false);
   const [optionsBusy, setOptionsBusy] = useState(false);
   const [error, setError] = useState('');
@@ -64,6 +79,30 @@ export default function CustomerExportDialog({ branches, initialStoreId, onClose
       .finally(() => setOptionsBusy(false));
   }, [effectiveStoreIds.join(',')]);
 
+  const sourceReport = exportType === 'statistics' && format === 'pdf';
+
+  useEffect(() => {
+    if (!sourceReport || !effectiveStoreIds.length) { setSources([]); return; }
+    void api.get<StatisticsSource[]>('/customers/export/statistics-sources', { params: { storeIds: effectiveStoreIds.join(',') } })
+      .then(({ data }) => setSources(data || []))
+      .catch(() => setSources([]));
+  }, [sourceReport, effectiveStoreIds.join(',')]);
+
+  // Keep the saved order, dropping columns that no longer exist for these branches.
+  const activeSources = useMemo(
+    () => selectedSources.filter((key) => sources.some((source) => source.key === key)),
+    [selectedSources, sources],
+  );
+
+  const toggleSource = (key: string) => {
+    setSelectedSources((current) => {
+      const next = current.includes(key) ? current.filter((value) => value !== key) : current.length >= SOURCE_LIMIT ? current : [...current, key];
+      try { localStorage.setItem(SOURCES_STORAGE_KEY, JSON.stringify(next)); } catch { /* per-viewer convenience only */ }
+      return next;
+    });
+    setDownloaded(false);
+  };
+
   const setMode = (mode: BranchMode) => {
     setBranchMode(mode);
     setError('');
@@ -84,7 +123,9 @@ export default function CustomerExportDialog({ branches, initialStoreId, onClose
     setError('');
     try {
       const response = await api.get('/customers/export', {
-        params: { format, exportType, storeIds: effectiveStoreIds.join(','), tagId: tagId || undefined },
+        params: sourceReport
+          ? { format, exportType, storeIds: effectiveStoreIds.join(','), sources: activeSources.join(',') || undefined, baselineDate }
+          : { format, exportType, storeIds: effectiveStoreIds.join(','), tagId: tagId || undefined },
         responseType: 'blob',
       });
       const disposition = String(response.headers['content-disposition'] || '');
@@ -158,7 +199,38 @@ export default function CustomerExportDialog({ branches, initialStoreId, onClose
             <p className="text-xs text-labbaik-text-muted"><span className="tabular-nums font-black text-neutral-700 dark:text-neutral-200">{effectiveStoreIds.length.toLocaleString('en')}</span> فرع محدد</p>
           </fieldset>
 
-          <label className="block space-y-2">
+          {sourceReport && (
+            <>
+              <fieldset className="space-y-3">
+                <legend className="flex items-center gap-2 text-sm font-black text-neutral-900 dark:text-white"><Columns3 size={17} className="text-labbaik-blue" /> أعمدة التقرير <span className="font-medium text-labbaik-text-muted">(فئات وتاقات، حتى {SOURCE_LIMIT})</span></legend>
+                <p className="text-xs leading-5 text-labbaik-text-muted">تظهر الأعمدة بترتيب اختيارك بعد عمود «المخزّنة سابقاً»، ثم الإجمالي والإجمالي بدون تكرار.</p>
+                {sources.length ? (
+                  <div className="flex flex-wrap gap-2" aria-label="أعمدة التقرير">
+                    {sources.map((source) => {
+                      const order = activeSources.indexOf(source.key);
+                      const selected = order >= 0;
+                      return (
+                        <button key={source.key} type="button" aria-pressed={selected} disabled={busy || (!selected && activeSources.length >= SOURCE_LIMIT)} onClick={() => toggleSource(source.key)} className={`inline-flex min-h-9 items-center gap-2 rounded-lg border px-3 text-sm font-bold transition-colors focus:outline-none focus:ring-2 focus:ring-labbaik-blue/30 disabled:opacity-40 ${selected ? 'border-labbaik-blue bg-labbaik-blue/10 text-neutral-900 dark:text-white' : 'border-labbaik-border text-labbaik-text-muted hover:border-labbaik-blue/40'}`}>
+                          {selected
+                            ? <span className="grid size-5 place-items-center rounded-full bg-labbaik-blue text-[11px] font-black text-white tabular-nums">{order + 1}</span>
+                            : <span className="size-2.5 rounded-full" style={{ backgroundColor: source.color }} />}
+                          <span>{source.name}</span>
+                          <span className="text-[11px] font-medium text-labbaik-text-muted">{source.type === 'tag' ? 'تاق' : 'فئة'} · <span className="tabular-nums">{source.customers.toLocaleString('en')}</span></span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : <p className="rounded-xl bg-labbaik-page px-4 py-3 text-xs font-bold text-labbaik-text-muted">لا توجد فئات أو تاقات لهذه الفروع.</p>}
+              </fieldset>
+
+              <label className="block space-y-2">
+                <span className="flex items-center gap-2 text-sm font-black text-neutral-900 dark:text-white"><CalendarDays size={17} className="text-labbaik-blue" /> الأعداد المخزّنة سابقاً = المسجّلون قبل</span>
+                <input type="date" value={baselineDate} max={todayInRiyadh()} onChange={(event) => { setBaselineDate(event.target.value || todayInRiyadh()); setDownloaded(false); }} disabled={busy} className="h-11 w-full rounded-lg border border-labbaik-border bg-labbaik-page px-3 text-sm font-bold text-neutral-900 outline-none focus:border-labbaik-blue focus:ring-2 focus:ring-labbaik-blue/20 dark:text-white" />
+              </label>
+            </>
+          )}
+
+          {!sourceReport && <label className="block space-y-2">
             <span className="flex items-center gap-2 text-sm font-black text-neutral-900 dark:text-white"><Tag size={17} className="text-labbaik-blue" /> فلترة حسب التاق <span className="font-medium text-labbaik-text-muted">(اختياري)</span></span>
             <div className="relative">
               <select value={tagId} onChange={(event) => setTagId(event.target.value)} disabled={busy || optionsBusy || !effectiveStoreIds.length} className="h-11 w-full rounded-lg border border-labbaik-border bg-labbaik-page px-3 text-sm font-bold text-neutral-900 outline-none focus:border-labbaik-blue focus:ring-2 focus:ring-labbaik-blue/20 disabled:opacity-50 dark:text-white">
@@ -167,7 +239,7 @@ export default function CustomerExportDialog({ branches, initialStoreId, onClose
               </select>
               {optionsBusy && <Loader2 size={16} className="absolute left-3 top-3.5 animate-spin text-labbaik-blue" />}
             </div>
-          </label>
+          </label>}
 
           <fieldset className="space-y-3">
             <legend className="text-sm font-black text-neutral-900 dark:text-white">صيغة التصدير</legend>

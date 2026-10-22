@@ -89,6 +89,13 @@ export class CustomersController {
     return this.customersService.getExportTags(organization.id, access.storeIds);
   }
 
+  @Get('export/statistics-sources')
+  async statisticsSources(@Request() req: any, @Query('storeIds') storeIds?: string) {
+    const organization = await this.organizationsService.getForUser(req.user.id, req.user.organizationId);
+    const access = await this.organizationsService.assertRequestedStoresAccessible(req.user.id, organization.id, this.csv(storeIds));
+    return this.customersService.getStatisticsSources(organization.id, access.storeIds);
+  }
+
   @Get('export')
   async exportCustomers(
     @Request() req: any,
@@ -97,6 +104,8 @@ export class CustomersController {
     @Query('exportType') exportType?: 'customers' | 'statistics',
     @Query('storeIds') storeIds?: string,
     @Query('tagId') tagId?: string,
+    @Query('sources') sources?: string,
+    @Query('baselineDate') baselineDate?: string,
   ) {
     if (format !== 'xlsx' && format !== 'pdf') throw new BadRequestException('Export format must be xlsx or pdf');
     if (exportType && exportType !== 'customers' && exportType !== 'statistics') throw new BadRequestException('Export type must be customers or statistics');
@@ -109,6 +118,8 @@ export class CustomersController {
       tagId: tagId || undefined,
       format,
       exportType: exportType || 'customers',
+      sources: this.csv(sources),
+      baselineDate: baselineDate || undefined,
     });
   }
 
