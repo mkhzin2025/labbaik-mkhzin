@@ -11,3 +11,8 @@ coverage/
 # repository metadata, and TLS private keys. Keep them local only.
 backups/*-production/
 backups/*-pre-restore/
+
+# Customer phone lists (PII). Keep local only.
+/التطبيق/
+/الفروع/
+/المسابقة/
