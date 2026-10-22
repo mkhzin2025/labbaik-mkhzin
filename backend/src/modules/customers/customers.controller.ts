@@ -3,6 +3,7 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { CustomersService } from './customers.service';
 import type { CustomerPageOptions, CustomerSegment, CustomerSortKey } from './customers.service';
+import { CompetitionSyncService } from './competition-sync.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import {
   BulkCustomerTaxonomyDto,
@@ -24,7 +25,21 @@ export class CustomersController {
   constructor(
     private readonly customersService: CustomersService,
     private readonly organizationsService: OrganizationsService,
+    private readonly competitionSyncService: CompetitionSyncService,
   ) {}
+
+  @Get('sync/competition')
+  async competitionSyncState(@Request() req: any) {
+    const organization = await this.organizationsService.getForUser(req.user.id, req.user.organizationId);
+    return this.competitionSyncService.getState(organization.id);
+  }
+
+  /** Pulls competition participants into their branches; owners/admins only. `full` re-reads every page. */
+  @Post('sync/competition')
+  async startCompetitionSync(@Request() req: any, @Body() body: { full?: boolean }) {
+    const { organization } = await this.organizationsService.assertCanManageIntegrations(req.user.id, req.user.organizationId);
+    return this.competitionSyncService.start(organization.id, body?.full === true);
+  }
 
   @Get()
   async findAll(

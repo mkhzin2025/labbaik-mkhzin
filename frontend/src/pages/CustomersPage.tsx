@@ -20,6 +20,7 @@ import {
   Trash2,
   Upload,
   Download,
+  RefreshCw,
   Users,
   X,
 } from 'lucide-react';
@@ -31,6 +32,7 @@ import BranchSelector from '../components/customers/BranchSelector';
 import type { Branch } from '../components/customers/BranchSelector';
 import CustomerImportDialog from '../components/customers/CustomerImportDialog';
 import CustomerExportDialog from '../components/customers/CustomerExportDialog';
+import CompetitionSyncDialog from '../components/customers/CompetitionSyncDialog';
 import { useToast } from '../components/Toast';
 
 interface TaxonomyItem {
@@ -120,6 +122,7 @@ export default function CustomersPage() {
   const [showTaxonomy, setShowTaxonomy] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [showExport, setShowExport] = useState(false);
+  const [showCompetitionSync, setShowCompetitionSync] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
   const requestId = useRef(0);
 
@@ -222,6 +225,11 @@ export default function CustomersPage() {
 
   useEffect(() => { void fetchCustomers(); }, [fetchCustomers]);
 
+  const onCompetitionSynced = useCallback(() => {
+    void fetchCustomers();
+    void loadTaxonomy(storeId);
+  }, [fetchCustomers, loadTaxonomy, storeId]);
+
   const customers = result?.items || [];
   const counts = result?.counts || EMPTY_COUNTS;
   const total = result?.total || 0;
@@ -319,6 +327,13 @@ export default function CustomersPage() {
             className="inline-flex h-10 items-center gap-2 rounded-lg border border-labbaik-blue/25 bg-labbaik-surface px-4 text-sm font-black text-labbaik-blue transition-colors hover:border-labbaik-blue hover:bg-labbaik-blue/5 focus:outline-none focus:ring-2 focus:ring-labbaik-blue/30"
           >
             <Download size={16} /> تصدير العملاء
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowCompetitionSync(true)}
+            className="inline-flex h-10 items-center gap-2 rounded-lg border border-labbaik-blue/25 bg-labbaik-surface px-4 text-sm font-black text-labbaik-blue transition-colors hover:border-labbaik-blue hover:bg-labbaik-blue/5 focus:outline-none focus:ring-2 focus:ring-labbaik-blue/30"
+          >
+            <RefreshCw size={16} /> مزامنة المسابقة
           </button>
           <button
             type="button"
@@ -565,6 +580,13 @@ export default function CustomersPage() {
           branches={branches}
           initialStoreId={allBranches ? undefined : storeId}
           onClose={() => setShowExport(false)}
+        />
+      )}
+
+      {showCompetitionSync && (
+        <CompetitionSyncDialog
+          onClose={() => setShowCompetitionSync(false)}
+          onSynced={onCompetitionSynced}
         />
       )}
     </div>

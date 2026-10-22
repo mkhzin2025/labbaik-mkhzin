@@ -46,6 +46,8 @@ services:
       APP_DOMAIN: ${APP_DOMAIN:-taelbot.com}
       PUBLIC_API_URL: ${PUBLIC_API_URL:-https://${APP_DOMAIN:-taelbot.com}}
       PUBLIC_WEBHOOK_URL: ${PUBLIC_WEBHOOK_URL:-https://${APP_DOMAIN:-taelbot.com}}
+      COMPETITION_API_URL: ${COMPETITION_API_URL:-https://competition.mkhzin.com/api/integrations/participants}
+      COMPETITION_API_KEY: ${COMPETITION_API_KEY:-}
     depends_on:
       postgres:
         condition: service_healthy
