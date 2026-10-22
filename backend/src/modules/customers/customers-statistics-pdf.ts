@@ -201,7 +201,8 @@ export function writeSourceStatisticsPdf(response: Response, report: SourceStati
     doc.roundedRect(lx + 72, panelY + 19, 9, 9, 2).fill(item.color);
     text(item.label, lx, panelY + 18, 68, { size: 7.5, color: COLORS.muted });
   });
-  const ranked = [...rows].sort((a, b) => b.unique - a.unique);
+  // Largest branch first, on the chart and in the table.
+  const ranked = [...rows].sort((a, b) => b.unique - a.unique || a.storeName.localeCompare(b.storeName, 'ar'));
   const listTop = panelY + 44;
   const rowHeight = Math.min(22, (panelHeight - 56) / Math.max(1, ranked.length));
   const nameWidth = 96;
@@ -317,7 +318,7 @@ export function writeSourceStatisticsPdf(response: Response, report: SourceStati
 
   let y = startTablePage();
   const footerSpace = 70;
-  rows.forEach((row, index) => {
+  ranked.forEach((row, index) => {
     if (y + bodyRowHeight > height - footerSpace) y = startTablePage();
     drawBodyRow(y, row, index);
     y += bodyRowHeight;

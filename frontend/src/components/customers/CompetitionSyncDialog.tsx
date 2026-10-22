@@ -52,6 +52,8 @@ export default function CompetitionSyncDialog({ onClose, onSynced }: Props) {
   const [starting, setStarting] = useState(false);
   const [confirmFull, setConfirmFull] = useState(false);
   const [error, setError] = useState('');
+  // Polling failures are transient (the sync keeps running on the server), so they clear on the next good read.
+  const [loadError, setLoadError] = useState('');
   const wasRunning = useRef(false);
   const titleRef = useRef<HTMLHeadingElement>(null);
 
@@ -59,10 +61,11 @@ export default function CompetitionSyncDialog({ onClose, onSynced }: Props) {
     try {
       const { data } = await api.get<SyncState>('/customers/sync/competition');
       setState(data);
+      setLoadError('');
       if (wasRunning.current && !data.running) onSynced();
       wasRunning.current = data.running;
     } catch {
-      setError('تعذر قراءة حالة المزامنة.');
+      setLoadError('تعذر تحديث حالة المزامنة، ستُعاد المحاولة تلقائياً. المزامنة نفسها مستمرة على الخادم.');
     }
   }, [onSynced]);
 
@@ -200,6 +203,7 @@ export default function CompetitionSyncDialog({ onClose, onSynced }: Props) {
               </div>
             </div>
           )}
+          {loadError && <p role="status" className="rounded-xl bg-amber-50 px-4 py-3 text-xs font-bold leading-6 text-amber-800 dark:bg-amber-950/20 dark:text-amber-300">{loadError}</p>}
           {error && <p role="alert" className="rounded-xl bg-red-50 px-4 py-3 text-sm font-bold leading-6 text-red-700 dark:bg-red-950/20 dark:text-red-300">{error}</p>}
         </div>
 
