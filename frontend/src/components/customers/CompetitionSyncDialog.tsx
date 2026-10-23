@@ -13,6 +13,7 @@ type SyncStats = {
   linkedDirect: number;
   linkedOnline: number;
   switched: number;
+  linkedAge?: number;
   cancelled: number;
   invalidPhone: number;
   unknownBranches: Record<string, number>;
@@ -111,6 +112,7 @@ export default function CompetitionSyncDialog({ onClose, onSynced }: Props) {
     { label: 'رُبطوا بفئة «المسابقة»', value: stats.linkedDirect, tone: 'text-violet-700 dark:text-violet-300' },
     { label: 'رُبطوا بفئة «المسابقة - online»', value: stats.linkedOnline, tone: 'text-cyan-700 dark:text-cyan-300' },
     { label: 'نُقلوا بين الفئتين', value: stats.switched, tone: 'text-neutral-900 dark:text-white' },
+    { label: 'أخذوا تاق الفئة العمرية', value: stats.linkedAge || 0, tone: 'text-sky-700 dark:text-sky-300' },
     { label: 'مشاركات ملغاة (تم تجاهلها)', value: stats.cancelled, tone: 'text-labbaik-text-muted' },
   ] : [];
 
@@ -139,6 +141,7 @@ export default function CompetitionSyncDialog({ onClose, onSynced }: Props) {
               <p className="mt-2 flex items-center gap-2 text-sm font-black text-neutral-900 dark:text-white"><ArrowLeft size={15} className="text-labbaik-text-muted" /><span className="rounded-md bg-cyan-100 px-2 py-0.5 text-cyan-800 dark:bg-cyan-950/40 dark:text-cyan-200" dir="ltr">المسابقة - online</span></p>
             </div>
           </div>
+          <p className="text-xs leading-5 text-labbaik-text-muted">ويأخذ كل مشارك تاق فئته العمرية، مثل «عمر 26 إلى 35» أو «عمر أكثر من 45»، لتفلترهم حسب العمر.</p>
           <p className="text-xs leading-5 text-labbaik-text-muted">لا يُغيَّر اسم عميل له اسم حقيقي، ولا يُحذف أي عميل. كل مشارك يكون في إحدى الفئتين فقط، والمشاركات الملغاة لا تُضاف.</p>
 
           {state && !state.configured && (

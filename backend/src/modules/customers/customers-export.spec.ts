@@ -132,6 +132,13 @@ describe('Customer PDF exports', () => {
         { storeId: 'store', key: `category:${category}`, total: 400, fresh: 250 },
         { storeId: 'store', key: `tag:${tag}`, total: 120, fresh: 120 },
       ]);
+    // Branch pages also split "المسابقة" by the participants' age-group tags.
+    if (extra.branchDetails) {
+      query.mockResolvedValueOnce([
+        { storeId: 'store', key: `category:${category}`, age: 'عمر 26 إلى 35', total: 300, fresh: 180 },
+        { storeId: 'store', key: `category:${category}`, age: 'عمر أقل من 18', total: 100, fresh: 70 },
+      ]);
+    }
     return exportPdf('statistics', {
       sources: [`tag:${tag}`, `category:${category}`],
       baselineDate: '2026-10-22',
@@ -180,8 +187,19 @@ describe('Customer PDF exports', () => {
       '+25%',
       // branch growth: 300 new on a 1,000 baseline
       '30%',
+      // age-group strip under the competition row: total and new per group
+      'الفئات العمرية',
+      '180',
+      '70',
     ]) {
       expect(drawn(label)).toBe(true);
     }
+    // Mixed Arabic/number labels are drawn as separate bidi runs ("26", "إلى", "35").
+    const runs = text.mock.calls.map(([value]) => String(value));
+    expect(runs.some((value) => value.includes('إلى'))).toBe(true);
+    expect(runs.some((value) => value.includes('أقل من'))).toBe(true);
+    const [ageSql, ageParams] = query.mock.calls[4] as [string, unknown[]];
+    expect(ageSql).toContain('customer_tag_links');
+    expect(ageParams).toEqual([[category], ['store'], '2026-10-22T00:00:00+03:00', 'organization', 'عمر %']);
   });
 });

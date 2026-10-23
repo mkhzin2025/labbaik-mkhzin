@@ -8,12 +8,25 @@ export type CompetitionParticipant = {
   branch?: string | null;
   status?: string | null;
   registrationType?: 'direct' | 'referral' | 'source' | string | null;
+  ageCategory?: string | null;
 };
 
-export type PlannedCustomer = { phone: string; name: string; online: boolean };
+export type PlannedCustomer = { phone: string; name: string; online: boolean; ageTag: string | null };
 
 export const COMPETITION_CATEGORY = 'المسابقة';
 export const COMPETITION_ONLINE_CATEGORY = 'المسابقة - online';
+export const AGE_TAG_PREFIX = 'عمر ';
+
+/**
+ * "26 - 35" -> "عمر 26 إلى 35", "أكثر من 45" -> "عمر أكثر من 45". Ranges are spelled out because a hyphen
+ * between numbers is reordered by the bidi algorithm inside Arabic text ("35 - 26").
+ */
+export function ageTagName(ageCategory: string | null | undefined) {
+  const value = String(ageCategory || '').replace(/\s+/g, ' ').trim();
+  if (!value || value === '-') return null;
+  const range = value.match(/^(\d+)\s*[-–]\s*(\d+)$/);
+  return `${AGE_TAG_PREFIX}${range ? `${range[1]} إلى ${range[2]}` : value}`;
+}
 
 /** "فرع حي المروة" / "المروة" / "▪️المروة" all map to the same key. */
 export function branchKey(name: string | null | undefined) {
@@ -29,7 +42,7 @@ export function branchKey(name: string | null | undefined) {
 export function emptyStats(fromPage: number, toPage: number): CompetitionSyncStats {
   return {
     fromPage, toPage, pagesDone: 0, participants: 0, created: 0, renamed: 0,
-    linkedDirect: 0, linkedOnline: 0, switched: 0, cancelled: 0, invalidPhone: 0, unknownBranches: {},
+    linkedDirect: 0, linkedOnline: 0, switched: 0, linkedAge: 0, cancelled: 0, invalidPhone: 0, unknownBranches: {},
   };
 }
 
@@ -59,6 +72,7 @@ export function planCompetitionPage(
       phone,
       name: String(item.fullName || '').trim().replace(/\s+/g, ' ').slice(0, 200),
       online: item.registrationType !== 'direct',
+      ageTag: ageTagName(item.ageCategory),
     });
     byStore.set(storeId, customers);
   }

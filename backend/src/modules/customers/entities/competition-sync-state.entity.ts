@@ -17,6 +17,8 @@ export type CompetitionSyncStats = {
   linkedOnline: number;
   /** Customers moved from one competition category to the other. */
   switched: number;
+  /** Customers newly given (or moved to) their age-group tag. Optional for states saved before it existed. */
+  linkedAge?: number;
   cancelled: number;
   invalidPhone: number;
   unknownBranches: Record<string, number>;

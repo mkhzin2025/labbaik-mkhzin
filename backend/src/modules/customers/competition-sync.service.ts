@@ -7,6 +7,7 @@ import { CustomersService } from './customers.service';
 import { Customer } from './entities/customer.entity';
 import { CompetitionSyncState, CompetitionSyncStats } from './entities/competition-sync-state.entity';
 import {
+  AGE_TAG_PREFIX,
   branchKey,
   COMPETITION_CATEGORY,
   COMPETITION_ONLINE_CATEGORY,
@@ -20,6 +21,16 @@ type ParticipantsPage = {
   items: CompetitionParticipant[];
   pagination: { page: number; total: number; totalPages: number };
 };
+
+type SyncContext = {
+  organizationId: string;
+  directCategoryId: string;
+  onlineCategoryId: string;
+  /** Age-group tags of the organization ("عمر ..."), by name; created on first use. */
+  ageTagIds: Map<string, string>;
+};
+
+const AGE_TAG_COLORS = ['#0ea5e9', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#14b8a6'];
 
 const DEFAULT_API_URL = 'https://competition.mkhzin.com/api/integrations/participants';
 const PARALLEL_PAGES = 4;
@@ -86,8 +97,15 @@ export class CompetitionSyncService {
     const stores: { id: string; name: string }[] = await this.customerRepository.query(
       'SELECT id, name FROM stores WHERE "organizationId" = $1', [organizationId]);
     const storeIdByBranch = new Map(stores.map((store) => [branchKey(store.name), store.id]));
-    const directCategoryId = await this.ensureCategory(organizationId, COMPETITION_CATEGORY, '#7c3aed');
-    const onlineCategoryId = await this.ensureCategory(organizationId, COMPETITION_ONLINE_CATEGORY, '#0891b2');
+    const ageTags: { id: string; name: string }[] = await this.customerRepository.query(
+      `SELECT id, TRIM(name) AS name FROM customer_tags
+        WHERE "organizationId" = $1 AND scope = 'organization' AND name LIKE $2`, [organizationId, `${AGE_TAG_PREFIX}%`]);
+    const context: SyncContext = {
+      organizationId,
+      directCategoryId: await this.ensureCategory(organizationId, COMPETITION_CATEGORY, '#7c3aed'),
+      onlineCategoryId: await this.ensureCategory(organizationId, COMPETITION_ONLINE_CATEGORY, '#0891b2'),
+      ageTagIds: new Map(ageTags.map((tag) => [tag.name, String(tag.id)])),
+    };
 
     const first = await this.fetchPage(1);
     const totalPages = Math.max(1, first.pagination.totalPages);
@@ -110,7 +128,7 @@ export class CompetitionSyncService {
       for (let ahead = page; ahead < page + PARALLEL_PAGES; ahead += 1) prefetch(ahead);
       const data = await pending.get(page)!;
       pending.delete(page);
-      await this.applyPage(data.items, storeIdByBranch, directCategoryId, onlineCategoryId, stats);
+      await this.applyPage(data.items, storeIdByBranch, context, stats);
       stats.pagesDone += 1;
       await this.stateRepository.update({ organizationId }, { lastPage: page, stats });
     }
@@ -157,19 +175,33 @@ export class CompetitionSyncService {
     return String(created.id);
   }
 
-  /** One transaction per page: create missing customers, fill placeholder names, set the competition category. */
+  private async ensureAgeTag(context: SyncContext, name: string) {
+    const known = context.ageTagIds.get(name);
+    if (known) return known;
+    const [created] = await this.customerRepository.query(
+      `INSERT INTO customer_tags ("organizationId", scope, "storeId", name, color, "isActive")
+       VALUES ($1, 'organization', NULL, $2, $3, true) RETURNING id`,
+      [context.organizationId, name, AGE_TAG_COLORS[context.ageTagIds.size % AGE_TAG_COLORS.length]]);
+    context.ageTagIds.set(name, String(created.id));
+    return String(created.id);
+  }
+
+  /** One transaction per page: create missing customers, fill placeholder names, set the competition category and age tag. */
   private async applyPage(
     items: CompetitionParticipant[],
     storeIdByBranch: Map<string, string>,
-    directCategoryId: string,
-    onlineCategoryId: string,
+    context: SyncContext,
     stats: CompetitionSyncStats,
   ) {
     const byStore = planCompetitionPage(items, storeIdByBranch, stats);
     if (!byStore.size) return;
+    // Age tags are created outside the page transaction so a rolled-back page never leaves a stale id cached.
+    for (const planned of byStore.values()) {
+      for (const row of planned.values()) if (row.ageTag) await this.ensureAgeTag(context, row.ageTag);
+    }
     await this.customerRepository.manager.transaction(async (manager) => {
       for (const [storeId, planned] of byStore) {
-        await this.applyStore(manager, storeId, [...planned.values()], directCategoryId, onlineCategoryId, stats);
+        await this.applyStore(manager, storeId, [...planned.values()], context, stats);
       }
     });
   }
@@ -178,10 +210,10 @@ export class CompetitionSyncService {
     manager: EntityManager,
     storeId: string,
     planned: PlannedCustomer[],
-    directCategoryId: string,
-    onlineCategoryId: string,
+    context: SyncContext,
     stats: CompetitionSyncStats,
   ) {
+    const { directCategoryId, onlineCategoryId } = context;
     const phones = planned.map((row) => row.phone);
     const inserted: unknown[] = await manager.query(
       `INSERT INTO customers ("storeId", "phoneNumber", "whatsappId", "fullName", tags)
@@ -206,10 +238,13 @@ export class CompetitionSyncService {
     const renames: { id: string; name: string }[] = [];
     const directIds: string[] = [];
     const onlineIds: string[] = [];
+    const ageLinks: { customerId: string; tagId: string }[] = [];
     for (const row of planned) {
       const customer = byPhone.get(row.phone);
       if (!customer) continue;
       (row.online ? onlineIds : directIds).push(customer.id);
+      const ageTagId = row.ageTag ? context.ageTagIds.get(row.ageTag) : undefined;
+      if (ageTagId) ageLinks.push({ customerId: customer.id, tagId: ageTagId });
       if (row.name && customer.fullName !== row.name
         && this.customersService.isPlaceholderName(customer.fullName, customer.phoneNumber || customer.whatsappId || '')) {
         renames.push({ id: customer.id, name: row.name });
@@ -241,5 +276,20 @@ export class CompetitionSyncService {
     stats.linkedDirect += await link(directIds, directCategoryId);
     stats.linkedOnline += await link(onlineIds, onlineCategoryId);
     stats.switched += await unlink(directIds, onlineCategoryId) + await unlink(onlineIds, directCategoryId);
+
+    // One age tag per participant: drop any other "عمر ..." tag, then add the current one.
+    if (ageLinks.length) {
+      const allAgeTagIds = [...context.ageTagIds.values()];
+      await manager.query(
+        `DELETE FROM customer_tag_links l USING unnest($1::uuid[], $2::uuid[]) AS t("customerId", "tagId")
+          WHERE l."customerId" = t."customerId" AND l."tagId" = ANY($3::uuid[]) AND l."tagId" <> t."tagId"`,
+        [ageLinks.map((row) => row.customerId), ageLinks.map((row) => row.tagId), allAgeTagIds]);
+      const added: unknown[] = await manager.query(
+        `INSERT INTO customer_tag_links ("customerId", "tagId")
+         SELECT "customerId", "tagId" FROM unnest($1::uuid[], $2::uuid[]) AS t("customerId", "tagId")
+         ON CONFLICT DO NOTHING RETURNING "customerId"`,
+        [ageLinks.map((row) => row.customerId), ageLinks.map((row) => row.tagId)]);
+      stats.linkedAge = (stats.linkedAge || 0) + added.length;
+    }
   }
 }

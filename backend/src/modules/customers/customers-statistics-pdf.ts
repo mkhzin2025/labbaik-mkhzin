@@ -23,7 +23,14 @@ export type SourceStatisticsRow = {
   sourcesNew: Record<string, number>;
   /** Actual customers in the branch (each counted once). */
   unique: number;
+  /** Branch details only: age-group split of the competition categories, keyed by StatisticsSource.key. */
+  sourceAges?: Record<string, SourceAgeBreakdown[]>;
 };
+
+export type SourceAgeBreakdown = { age: string; total: number; fresh: number };
+
+/** "أقل من 18" first, then the ranges by their first number, then "أكثر من ...". */
+const ageOrder = (age: string) => (age.startsWith('أقل') ? -1 : age.startsWith('أكثر') ? 1000 : Number(age.match(/\d+/)?.[0] ?? 999));
 
 export type SourceStatisticsReport = {
   organizationName: string;
@@ -448,10 +455,16 @@ export function writeSourceStatisticsPdf(response: Response, report: SourceStati
         text('اختر أعمدة من الفئات والتاقات عند التصدير لعرض تفاصيلها هنا.', sourcesX + 16, headerY + 40, sourcesWidth - 32, { size: 9, color: COLORS.muted, align: 'center' });
       }
       const listTop = headerY + 26;
-      const sourceRow = Math.min(44, (panelBottom - 14 - listTop) / Math.max(1, sources.length));
+      // Competition rows carry an extra strip with their age-group split, so rows have different heights.
+      const agesOf = (key: string) => [...(row.sourceAges?.[key] || [])].sort((a, b) => ageOrder(a.age) - ageOrder(b.age));
+      const ageStripHeight = 40;
+      const withAges = sources.filter((source) => agesOf(source.key).length).length;
+      const sourceRow = Math.max(30, Math.min(44, (panelBottom - 14 - listTop - withAges * ageStripHeight) / Math.max(1, sources.length)));
       const peakSource = Math.max(1, ...sources.map((source) => row.sources[source.key] || 0));
+      let y = listTop;
       sources.forEach((source, index) => {
-        const y = listTop + index * sourceRow;
+        const ages = agesOf(source.key);
+        const rowHeight = sourceRow + (ages.length ? ageStripHeight : 0);
         const total = row.sources[source.key] || 0;
         const fresh = Math.min(total, row.sourcesNew[source.key] || 0);
         const stored = total - fresh;
@@ -472,7 +485,30 @@ export function writeSourceStatisticsPdf(response: Response, report: SourceStati
           text(value ? format(value) : '—', x, y + 5, metricWidth, { size: 9, color: value ? metric.color : COLORS.lavender, bold: metricIndex === 0, align: 'center' });
         });
         text(row.baseline && fresh ? `+${percent(fresh, row.baseline)}` : '—', sourcesX + 16, y + 5, shareWidth, { size: 9, color: fresh ? COLORS.teal : COLORS.lavender, bold: true, align: 'center' });
-        if (index < sources.length - 1) doc.moveTo(sourcesX + 16, y + sourceRow - 4).lineTo(right - 16, y + sourceRow - 4).lineWidth(0.4).stroke(COLORS.line);
+
+        if (ages.length) {
+          // One cell per age group: total in the category, and how many of them are new to the branch.
+          const stripY = y + sourceRow - 6;
+          const stripX = sourcesX + 16;
+          const stripWidth = right - 16 - stripX;
+          const labelWidth = 74;
+          doc.save().fillOpacity(0.07).roundedRect(stripX, stripY, stripWidth, ageStripHeight - 6, 7).fill(source.color).restore();
+          text('الفئات العمرية', right - 16 - labelWidth - 8, stripY + 5, labelWidth, { size: 7.5, color: COLORS.ink, bold: true });
+          text('الإجمالي | جدد', right - 16 - labelWidth - 8, stripY + 18, labelWidth, { size: 6.5, color: COLORS.muted });
+          const cellsWidth = stripWidth - labelWidth - 16;
+          const cellWidth = cellsWidth / ages.length;
+          ages.forEach((age, ageIndex) => {
+            const cellX = stripX + cellsWidth - (ageIndex + 1) * cellWidth;
+            if (ageIndex) doc.moveTo(cellX + cellWidth, stripY + 6).lineTo(cellX + cellWidth, stripY + ageStripHeight - 12).lineWidth(0.4).stroke(COLORS.line);
+            text(age.age, cellX + 4, stripY + 5, cellWidth - 8, { size: 7, color: COLORS.muted, align: 'center' });
+            const half = (cellWidth - 8) / 2;
+            text(format(age.total), cellX + 4 + half, stripY + 17, half - 2, { size: 8.5, color: COLORS.ink, bold: true, align: 'center' });
+            text(age.fresh ? format(age.fresh) : '—', cellX + 4, stripY + 17, half - 2, { size: 8.5, color: age.fresh ? COLORS.teal : COLORS.lavender, bold: true, align: 'center' });
+          });
+        }
+
+        if (index < sources.length - 1) doc.moveTo(sourcesX + 16, y + rowHeight - 4).lineTo(right - 16, y + rowHeight - 4).lineWidth(0.4).stroke(COLORS.line);
+        y += rowHeight;
       });
     });
   }

@@ -1,6 +1,7 @@
 import { normalizePhoneNumber } from '../../common/utils/phone.util';
 import { drawPdfText } from '../../common/utils/pdf-text.util';
 import { SourceStatisticsReport, SourceStatisticsRow, StatisticsSource, writeSourceStatisticsPdf } from './customers-statistics-pdf';
+import { AGE_TAG_PREFIX, COMPETITION_CATEGORY, COMPETITION_ONLINE_CATEGORY } from './competition-sync.plan';
 import { BadRequestException, Injectable, Logger, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Brackets, In, Repository } from 'typeorm';
@@ -343,6 +344,34 @@ export class CustomersService implements OnModuleInit {
       if (!row) continue;
       row.sources[count.key] = Number(count.total || 0);
       row.sourcesNew[count.key] = Number(count.fresh || 0);
+    }
+
+    // Branch pages split the two competition categories by the participants' age-group tags ("عمر ...").
+    const competition = sources.filter((source) =>
+      source.type === 'category' && [COMPETITION_CATEGORY, COMPETITION_ONLINE_CATEGORY].includes(source.name.trim()));
+    if (options.branchDetails && competition.length) {
+      const ages: { storeId: string; key: string; age: string; total: number; fresh: number }[] = await this.customerRepository.query(
+        `SELECT c."storeId" AS "storeId", 'category:' || cl."categoryId" AS key, TRIM(t.name) AS age,
+                COUNT(*)::int AS total, COUNT(*) FILTER (WHERE c."createdAt" >= $3::timestamptz)::int AS fresh
+           FROM customer_category_links cl
+           JOIN customers c ON c.id = cl."customerId"
+           JOIN customer_tag_links tl ON tl."customerId" = c.id
+           JOIN customer_tags t ON t.id = tl."tagId"
+          WHERE cl."categoryId" = ANY($1::uuid[]) AND c."storeId" = ANY($2::uuid[])
+            AND t."organizationId" = $4 AND t.name LIKE $5
+          GROUP BY 1, 2, 3`,
+        [competition.map((source) => source.id), options.storeIds, `${baselineDate}T00:00:00+03:00`, options.organizationId, `${AGE_TAG_PREFIX}%`],
+      );
+      for (const item of ages) {
+        const row = byStore.get(String(item.storeId));
+        if (!row) continue;
+        row.sourceAges ||= {};
+        (row.sourceAges[item.key] ||= []).push({
+          age: String(item.age).slice(AGE_TAG_PREFIX.length).trim(),
+          total: Number(item.total || 0),
+          fresh: Number(item.fresh || 0),
+        });
+      }
     }
     return {
       organizationName: String(organization?.name || ''),
