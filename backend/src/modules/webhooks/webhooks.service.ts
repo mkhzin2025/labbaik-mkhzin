@@ -12,6 +12,7 @@ import { WhatsAppMediaService } from '../channels/whatsapp-media.service';
 import { MetaWhatsAppService } from '../meta-whatsapp/meta-whatsapp.service';
 import { BillingService } from '../billing/billing.service';
 import { MetaUsageType } from '../billing/entities/pricing-rule.entity';
+import { WhatsAppCampaignsService } from '../meta-whatsapp/whatsapp-campaigns.service';
 
 type NormalizedWhatsAppMessage = {
   from: string;
@@ -38,6 +39,7 @@ export class WebhooksService {
     private readonly whatsAppMediaService: WhatsAppMediaService,
     private readonly metaWhatsAppService: MetaWhatsAppService,
     private readonly billingService: BillingService,
+    private readonly campaignsService: WhatsAppCampaignsService,
   ) {}
 
   verifyWhatsApp(mode: string, token: string, challenge: string) {
@@ -163,6 +165,7 @@ export class WebhooksService {
   private async processWhatsAppStatusAcrossStores(storeIds: string[], status: any) {
     if (!status?.id || !status?.status || !storeIds.length) return;
     const timestamp = this.parseWhatsAppTimestamp(status.timestamp);
+    await this.trackCampaign(() => this.campaignsService.recordStatus({ id: status.id, status: status.status, timestamp, errors: status.errors }));
     const conversation = await this.conversationsService.updateWhatsAppMessageStatusInStores(
       storeIds,
       status.id,
@@ -188,6 +191,7 @@ export class WebhooksService {
   private async processWhatsAppStatus(storeId: string, status: any) {
     if (!status?.id || !status?.status) return;
     const timestamp = this.parseWhatsAppTimestamp(status.timestamp);
+    await this.trackCampaign(() => this.campaignsService.recordStatus({ id: status.id, status: status.status, timestamp, errors: status.errors }));
     const conversation = await this.conversationsService.updateWhatsAppMessageStatus(
       storeId,
       status.id,
@@ -214,6 +218,15 @@ export class WebhooksService {
           errors: status.errors || [],
         });
       }
+    }
+  }
+
+  /** Campaign statistics are best-effort and must never break webhook processing. */
+  private async trackCampaign(task: () => Promise<void>) {
+    try {
+      await task();
+    } catch (error: any) {
+      this.logger.warn(`Campaign tracking failed: ${error.message}`);
     }
   }
 
@@ -274,6 +287,12 @@ export class WebhooksService {
       customerId: customer.id,
       customerName,
     });
+    await this.trackCampaign(() => this.campaignsService.recordReply(currentStore.organizationId, normalized.from, {
+      contextId: message?.context?.id,
+      type: normalized.type,
+      text: normalized.text,
+      timestamp: normalized.timestamp,
+    }));
 
     if (ownerId) {
       this.eventsGateway.server.to(`store_${storeId}`).emit('new_message', {

@@ -22,6 +22,8 @@ function createService() {
     {} as any,
     { safeDownloadMedia: jest.fn() } as any,
     {} as any,
+    {} as any,
+    {} as any,
   );
 }
 

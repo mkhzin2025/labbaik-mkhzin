@@ -26,9 +26,55 @@ export type CustomerFilters = {
   search?: string;
   categoryIds?: string[];
   tagIds?: string[];
+  /** 'all' keeps only customers carrying every selected tag; the default matches any of them. */
+  tagMatch?: 'any' | 'all';
+  excludeCategoryIds?: string[];
+  excludeTagIds?: string[];
+  customerIds?: string[];
+  excludeCustomerIds?: string[];
   whatsappOnly?: boolean;
   storeIds?: string[];
 };
+
+/** One WhatsApp-reachable customer of a campaign audience, without relations. */
+export type AudienceRow = {
+  id: string;
+  storeId: string;
+  storeName: string | null;
+  fullName: string | null;
+  phoneNumber: string | null;
+  whatsappId: string | null;
+  email: string | null;
+  marketingOptOut: boolean;
+  updatedAt: Date;
+};
+
+/** Maps a campaign audience to customer filters within the branches the caller may use. */
+export function audienceToFilters(
+  audience: { mode: 'all' | 'segment' | 'manual'; categoryIds?: string[]; tagIds?: string[]; tagMatch?: 'any' | 'all'; excludeCategoryIds?: string[]; excludeTagIds?: string[]; customerIds?: string[]; excludeCustomerIds?: string[] },
+  storeIds: string[],
+): CustomerFilters {
+  if (audience.mode === 'manual') return { storeIds, customerIds: audience.customerIds || [] };
+  const filters: CustomerFilters = { storeIds, excludeCustomerIds: audience.excludeCustomerIds };
+  if (audience.mode === 'segment') {
+    if (!audience.categoryIds?.length && !audience.tagIds?.length && !audience.excludeCategoryIds?.length && !audience.excludeTagIds?.length) {
+      throw new BadRequestException('اختر فئة أو تاقًا واحدًا على الأقل لتحديد الشريحة.');
+    }
+    Object.assign(filters, {
+      categoryIds: audience.categoryIds,
+      tagIds: audience.tagIds,
+      tagMatch: audience.tagMatch,
+      excludeCategoryIds: audience.excludeCategoryIds,
+      excludeTagIds: audience.excludeTagIds,
+    });
+  }
+  return filters;
+}
+
+/** Largest audience a single campaign may target. */
+export const AUDIENCE_LIMIT = 50000;
+/** The legacy unpaged `GET /customers` returns at most this many rows. */
+const UNPAGED_LIST_LIMIT = 2000;
 
 export type CustomerSegment = 'all' | 'categorized' | 'uncategorized' | 'tagged' | 'untagged';
 export type CustomerSortKey = 'fullName' | 'phoneNumber' | 'createdAt' | 'updatedAt';
@@ -679,40 +725,142 @@ export class CustomersService implements OnModuleInit {
     doc.end();
   }
 
+  /**
+   * Unpaged list, capped so a large customer base can no longer exhaust the server.
+   * Filters run on ids only; relations are loaded once for the matching rows.
+   */
   private async findAllScoped(organizationId?: string, storeId?: string, filters: CustomerFilters = {}) {
-    const query = this.customerRepository.createQueryBuilder('customer')
-      .leftJoinAndSelect('customer.store', 'store')
-      .leftJoinAndSelect('customer.categories', 'category')
-      .leftJoinAndSelect('customer.tags', 'tag')
+    const rows = await this.filteredQuery(storeId ? { storeId } : { organizationId }, filters)
+      .select(['customer.id'])
       .orderBy('customer.updatedAt', 'DESC')
-      .distinct(true);
-
-    if (storeId) query.where('customer.storeId = :storeId', { storeId });
-    else if (organizationId) query.where('store.organizationId = :organizationId', { organizationId });
-    else throw new BadRequestException('Organization or branch scope is required');
-
-    if (filters.storeIds?.length) {
-      query.andWhere('customer.storeId IN (:...storeIds)', { storeIds: [...new Set(filters.storeIds)] });
-    }
-
-    if (filters.search?.trim()) {
-      const search = `%${filters.search.trim().toLowerCase()}%`;
-      query.andWhere(new Brackets((qb) => {
-        qb.where('LOWER(COALESCE(customer.fullName, \'\')) LIKE :search', { search })
-          .orWhere('LOWER(COALESCE(customer.email, \'\')) LIKE :search', { search })
-          .orWhere('COALESCE(customer.phoneNumber, \'\') LIKE :phoneSearch', { phoneSearch: `%${filters.search!.replace(/[^0-9]/g, '')}%` });
-      }));
-    }
-
-    if (filters.categoryIds?.length) query.andWhere('category.id IN (:...categoryIds)', { categoryIds: filters.categoryIds });
-    if (filters.tagIds?.length) query.andWhere('tag.id IN (:...tagIds)', { tagIds: filters.tagIds });
-    if (filters.whatsappOnly) query.andWhere("COALESCE(customer.phoneNumber, customer.whatsappId, '') <> ''");
-
-    const customers = await query.getMany();
+      .limit(UNPAGED_LIST_LIMIT)
+      .getMany();
+    const customers = await this.reloadWithRelations(rows.map((row) => row.id));
     for (const customer of customers) {
       await this.migrateLegacyTags([customer], customer.storeId, customer.store?.organizationId || organizationId);
     }
-    return this.reloadWithRelations(customers.map((customer) => customer.id));
+    return customers;
+  }
+
+  /** Every WhatsApp-reachable customer matching the filters, as lean rows (no relations). */
+  async findAudienceRows(organizationId: string, filters: CustomerFilters): Promise<AudienceRow[]> {
+    const rows = await this.filteredQuery({ organizationId }, { ...filters, whatsappOnly: true })
+      .select('customer.id', 'id')
+      .addSelect('customer.storeId', 'storeId')
+      .addSelect('store.name', 'storeName')
+      .addSelect('customer.fullName', 'fullName')
+      .addSelect('customer.phoneNumber', 'phoneNumber')
+      .addSelect('customer.whatsappId', 'whatsappId')
+      .addSelect('customer.email', 'email')
+      .addSelect('customer.marketingOptOut', 'marketingOptOut')
+      .addSelect('customer.updatedAt', 'updatedAt')
+      .orderBy('customer.id', 'ASC')
+      .limit(AUDIENCE_LIMIT + 1)
+      .getRawMany();
+    return rows.map((row) => ({ ...row, marketingOptOut: row.marketingOptOut === true || row.marketingOptOut === 't' }));
+  }
+
+  /** Lean rows for personalizing a batch of campaign messages, keyed by customer id. */
+  async findAudienceRowsByIds(ids: string[]) {
+    const unique = [...new Set(ids.filter(Boolean))];
+    const map = new Map<string, AudienceRow>();
+    if (!unique.length) return map;
+    const rows: AudienceRow[] = await this.customerRepository.query(
+      `SELECT c.id, c."storeId", s.name AS "storeName", c."fullName", c."phoneNumber", c."whatsappId", c.email, c."marketingOptOut", c."updatedAt"
+         FROM customers c JOIN stores s ON s.id = c."storeId" WHERE c.id = ANY($1::uuid[])`,
+      [unique],
+    );
+    for (const row of rows) map.set(row.id, row);
+    return map;
+  }
+
+  /**
+   * Turns audience rows into the numbers that will actually receive a campaign: opted-out records
+   * are dropped, duplicate numbers are sent once, and numbers opted out in any branch are skipped.
+   */
+  async planAudience(organizationId: string, rows: AudienceRow[]) {
+    const marketable = rows.filter((row) => !row.marketingOptOut);
+    const deduped = this.deduplicateWhatsAppCustomers(marketable as unknown as Customer[]);
+    const optedOutPhones = await this.findMarketingOptedOutPhones(organizationId, deduped.unique.map((item) => item.phone));
+    const recipients = deduped.unique
+      .filter((item) => !optedOutPhones.has(item.phone))
+      .map((item) => ({ ...item, customer: item.customer as unknown as AudienceRow }));
+    return {
+      records: rows.length,
+      optedOut: rows.length - marketable.length + optedOutPhones.size,
+      duplicates: deduped.duplicateRecords,
+      recipients,
+    };
+  }
+
+  /** Counts for the campaign composer, computed with the same rules the send uses. */
+  async summarizeAudience(organizationId: string, filters: CustomerFilters) {
+    const records = await this.filteredQuery({ organizationId }, { ...filters, whatsappOnly: true }).getCount();
+    if (records > AUDIENCE_LIMIT) {
+      return { records, optedOut: 0, duplicates: 0, recipients: 0, byBranch: [], overLimit: true, limit: AUDIENCE_LIMIT };
+    }
+    const plan = await this.planAudience(organizationId, await this.findAudienceRows(organizationId, filters));
+    const byBranch = new Map<string, { storeId: string; storeName: string; recipients: number }>();
+    for (const item of plan.recipients) {
+      const entry = byBranch.get(item.customer.storeId) || { storeId: item.customer.storeId, storeName: item.customer.storeName || '', recipients: 0 };
+      entry.recipients += 1;
+      byBranch.set(item.customer.storeId, entry);
+    }
+    return {
+      records: plan.records,
+      optedOut: plan.optedOut,
+      duplicates: plan.duplicates,
+      recipients: plan.recipients.length,
+      byBranch: [...byBranch.values()].sort((a, b) => b.recipients - a.recipients),
+      overLimit: false,
+      limit: AUDIENCE_LIMIT,
+    };
+  }
+
+  /**
+   * Categories and tags usable in the selected branches, each with how many WhatsApp-reachable customers
+   * carry it. Tag counts narrow to the selected categories so the user can drill down branch → category → tag.
+   */
+  async getAudienceOptions(organizationId: string, storeIds: string[], categoryIds: string[] = []) {
+    if (!storeIds.length) return { categories: [], tags: [] };
+    const reachable = `c."storeId" = ANY($1::uuid[]) AND COALESCE(c."phoneNumber", c."whatsappId", '') <> ''`;
+    const [taxonomy, categoryCounts, tagCounts] = await Promise.all([
+      this.customerRepository.query(
+        `SELECT 'category' AS type, id, name, color, scope::text AS scope, "storeId", "sortOrder" FROM customer_categories
+          WHERE "organizationId" = $1 AND "isActive" AND (scope = 'organization' OR "storeId" = ANY($2::uuid[]))
+         UNION ALL
+         SELECT 'tag' AS type, id, name, color, scope::text, "storeId", 0 FROM customer_tags
+          WHERE "organizationId" = $1 AND "isActive" AND (scope = 'organization' OR "storeId" = ANY($2::uuid[]))
+         ORDER BY "sortOrder", name`,
+        [organizationId, storeIds],
+      ),
+      this.customerRepository.query(
+        `SELECT l."categoryId" AS id, COUNT(*)::int AS count
+           FROM customer_category_links l JOIN customers c ON c.id = l."customerId"
+          WHERE ${reachable}
+          GROUP BY l."categoryId"`,
+        [storeIds],
+      ),
+      this.customerRepository.query(
+        `SELECT l."tagId" AS id, COUNT(*)::int AS count
+           FROM customer_tag_links l JOIN customers c ON c.id = l."customerId"
+          WHERE ${reachable}
+            AND (cardinality($2::uuid[]) = 0 OR EXISTS (
+              SELECT 1 FROM customer_category_links cl WHERE cl."customerId" = c.id AND cl."categoryId" = ANY($2::uuid[])))
+          GROUP BY l."tagId"`,
+        [storeIds, categoryIds],
+      ),
+    ]);
+    const toMap = (rows: { id: string; count: number }[]) => new Map(rows.map((row) => [row.id, Number(row.count)]));
+    const categoryMap = toMap(categoryCounts);
+    const tagMap = toMap(tagCounts);
+    const shape = (row: any, counts: Map<string, number>) => ({
+      id: row.id, name: row.name, color: row.color, scope: row.scope, storeId: row.storeId, customers: counts.get(row.id) || 0,
+    });
+    return {
+      categories: taxonomy.filter((row: any) => row.type === 'category').map((row: any) => shape(row, categoryMap)),
+      tags: taxonomy.filter((row: any) => row.type === 'tag').map((row: any) => shape(row, tagMap)),
+    };
   }
 
   /**
@@ -903,8 +1051,21 @@ export class CustomersService implements OnModuleInit {
       query.andWhere('EXISTS (SELECT 1 FROM customer_category_links fcl WHERE fcl."customerId" = customer.id AND fcl."categoryId" IN (:...categoryIds))', { categoryIds: filters.categoryIds });
     }
     if (filters.tagIds?.length) {
-      query.andWhere('EXISTS (SELECT 1 FROM customer_tag_links ftl WHERE ftl."customerId" = customer.id AND ftl."tagId" IN (:...tagIds))', { tagIds: filters.tagIds });
+      const tagIds = [...new Set(filters.tagIds)];
+      if (filters.tagMatch === 'all' && tagIds.length > 1) {
+        query.andWhere('(SELECT COUNT(DISTINCT ftl."tagId") FROM customer_tag_links ftl WHERE ftl."customerId" = customer.id AND ftl."tagId" IN (:...tagIds)) = :tagCount', { tagIds, tagCount: tagIds.length });
+      } else {
+        query.andWhere('EXISTS (SELECT 1 FROM customer_tag_links ftl WHERE ftl."customerId" = customer.id AND ftl."tagId" IN (:...tagIds))', { tagIds });
+      }
     }
+    if (filters.excludeCategoryIds?.length) {
+      query.andWhere('NOT EXISTS (SELECT 1 FROM customer_category_links xcl WHERE xcl."customerId" = customer.id AND xcl."categoryId" IN (:...excludeCategoryIds))', { excludeCategoryIds: filters.excludeCategoryIds });
+    }
+    if (filters.excludeTagIds?.length) {
+      query.andWhere('NOT EXISTS (SELECT 1 FROM customer_tag_links xtl WHERE xtl."customerId" = customer.id AND xtl."tagId" IN (:...excludeTagIds))', { excludeTagIds: filters.excludeTagIds });
+    }
+    if (filters.customerIds) query.andWhere('customer.id = ANY(CAST(:customerIds AS uuid[]))', { customerIds: filters.customerIds });
+    if (filters.excludeCustomerIds?.length) query.andWhere('NOT (customer.id = ANY(CAST(:excludeCustomerIds AS uuid[])))', { excludeCustomerIds: filters.excludeCustomerIds });
     if (filters.whatsappOnly) query.andWhere("COALESCE(customer.phoneNumber, customer.whatsappId, '') <> ''");
 
     return query;

@@ -13,6 +13,7 @@ import CustomersPage from './pages/CustomersPage';
 import FlowsPage from './pages/FlowsPage';
 import FlowEditorPage from './pages/FlowEditorPage';
 import WhatsAppTemplatesPage from './pages/WhatsAppTemplatesPage';
+import WhatsAppCampaignPage from './pages/WhatsAppCampaignPage';
 import BillingPage from './pages/BillingPage';
 import BillingAdminPage from './pages/BillingAdminPage';
 import PrivacyPolicyPage from './pages/PrivacyPolicyPage';
@@ -86,6 +87,7 @@ function App() {
                     <Route path="flows/:id" element={<FlowEditorPage />} />
                     <Route path="channels" element={<ChannelsPage />} />
                     <Route path="whatsapp-templates" element={<WhatsAppTemplatesPage />} />
+                    <Route path="whatsapp-campaigns/:id" element={<WhatsAppCampaignPage />} />
                     <Route path="reviews" element={<ReviewsPage />} />
                     <Route path="billing" element={<BillingPage />} />
                     <Route path="billing-admin" element={<BillingAdminPage />} />

@@ -44,7 +44,7 @@ import {
 } from 'react-icons/fa';
 import { format, isYesterday } from 'date-fns';
 import { ar } from 'date-fns/locale';
-import { toEnglishDigits } from '@/lib/utils';
+import { formatNumber, toEnglishDigits } from '@/lib/utils';
 import Composer from '../components/conversations/Composer';
 
 interface Message {
@@ -988,7 +988,7 @@ export default function ConversationsPage() {
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-black text-neutral-900 dark:text-white flex items-center gap-2">
               المحادثات
-              {unreadTotal > 0 && <span className="text-[11px] font-black px-2 py-0.5 rounded-full bg-labbaik-blue text-labbaik-on-accent tabular-nums">{unreadTotal} جديدة</span>}
+              {unreadTotal > 0 && <span className="text-[11px] font-black px-2 py-0.5 rounded-full bg-labbaik-blue text-labbaik-on-accent tabular-nums">{formatNumber(unreadTotal)} جديدة</span>}
             </h2>
             <div className="relative" ref={filterRef}>
               <button
@@ -1073,13 +1073,14 @@ export default function ConversationsPage() {
                 aria-selected={statusView === key}
                 key={key}
                 onClick={() => setStatusView(key)}
-                className={`h-8 rounded-md text-xs font-black flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${statusView === key ? 'bg-labbaik-surface text-labbaik-blue dark:text-purple-200 shadow-sm' : 'text-labbaik-text-muted hover:text-neutral-900 dark:hover:text-white'}`}
+                className={`py-1.5 rounded-md flex flex-col items-center justify-center leading-tight transition-colors cursor-pointer ${statusView === key ? 'bg-labbaik-surface text-labbaik-blue dark:text-purple-200 shadow-sm' : 'text-labbaik-text-muted hover:text-neutral-900 dark:hover:text-white'}`}
               >
-                {label}<span className="tabular-nums text-[11px] text-labbaik-text-muted">{statusCounts[key]}</span>
+                <span className="tabular-nums text-sm font-black">{formatNumber(statusCounts[key])}</span>
+                <span className="text-[11px] font-bold whitespace-nowrap">{label}</span>
               </button>
             ))}
           </div>
-          <div className="flex items-center gap-1.5" role="tablist" aria-label="عرض المحادثات">
+          <div className="grid grid-cols-3 gap-1.5" role="tablist" aria-label="عرض المحادثات">
             {([['all', 'الكل', statusCounts[statusView]], ['unread', 'غير مقروءة', unreadTotal], ['needs_reply', 'تحتاج رداً', needsReplyTotal]] as const).map(([key, label, count]) => (
               <button
                 type="button"
@@ -1087,10 +1088,10 @@ export default function ConversationsPage() {
                 aria-selected={listTab === key}
                 key={key}
                 onClick={() => setListTab(key)}
-                className={`h-8 px-3 rounded-full text-xs font-black flex items-center gap-1.5 transition-colors cursor-pointer ${listTab === key ? 'bg-labbaik-blue text-labbaik-on-accent' : 'bg-labbaik-page text-labbaik-text-muted hover:text-labbaik-blue'}`}
+                className={`py-1.5 px-2 rounded-lg flex flex-col items-center justify-center leading-tight transition-colors cursor-pointer ${listTab === key ? 'bg-labbaik-blue text-labbaik-on-accent' : 'bg-labbaik-page text-labbaik-text-muted hover:text-labbaik-blue'}`}
               >
-                {label}
-                <span className={`tabular-nums text-[11px] px-1.5 rounded-full ${listTab === key ? 'bg-white/25' : 'bg-neutral-500/10'}`}>{count}</span>
+                <span className="tabular-nums text-sm font-black">{formatNumber(count)}</span>
+                <span className="text-[11px] font-bold whitespace-nowrap">{label}</span>
               </button>
             ))}
           </div>

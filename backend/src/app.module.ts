@@ -31,6 +31,8 @@ import { StoreMember } from './modules/organizations/entities/store-member.entit
 import { MetaWhatsAppModule } from './modules/meta-whatsapp/meta-whatsapp.module';
 import { MetaWhatsAppConnection } from './modules/meta-whatsapp/entities/meta-whatsapp-connection.entity';
 import { WhatsAppTemplate } from './modules/meta-whatsapp/entities/whatsapp-template.entity';
+import { WhatsAppCampaign } from './modules/meta-whatsapp/entities/whatsapp-campaign.entity';
+import { WhatsAppCampaignRecipient } from './modules/meta-whatsapp/entities/whatsapp-campaign-recipient.entity';
 import { BillingModule } from './modules/billing/billing.module';
 import { BillingPlan } from './modules/billing/entities/billing-plan.entity';
 import { Subscription } from './modules/billing/entities/subscription.entity';
@@ -56,7 +58,7 @@ import { AccountDeletionRequest } from './modules/account-deletion/entities/acco
         username: configService.get<string>('POSTGRES_USER'),
         password: configService.get<string>('POSTGRES_PASSWORD'),
         database: configService.get<string>('POSTGRES_DB'),
-        entities: [User, Store, Channel, Review, Notification, Customer, CustomerCategory, CustomerTag, CompetitionSyncState, Flow, Organization, OrganizationMember, StoreMember, MetaWhatsAppConnection, WhatsAppTemplate, BillingPlan, Subscription, Wallet, WalletTransaction, PaymentMethod, BillingPayment, PricingRule, AccountDeletionRequest],
+        entities: [User, Store, Channel, Review, Notification, Customer, CustomerCategory, CustomerTag, CompetitionSyncState, Flow, Organization, OrganizationMember, StoreMember, MetaWhatsAppConnection, WhatsAppTemplate, WhatsAppCampaign, WhatsAppCampaignRecipient, BillingPlan, Subscription, Wallet, WalletTransaction, PaymentMethod, BillingPayment, PricingRule, AccountDeletionRequest],
         synchronize: configService.get<string>('TYPEORM_SYNCHRONIZE') === 'true',
       }),
     }),

@@ -49,9 +49,15 @@ const readCollapsed = () => {
   try { return localStorage.getItem(COLLAPSED_KEY) === '1'; } catch { return false; }
 };
 
+// Routes that live outside their section's path but belong to it in the sidebar.
+const SECTION_ALIASES: Record<string, string> = { '/dashboard/whatsapp-campaigns': '/dashboard/whatsapp-templates' };
+
 // The dashboard root matches exactly; every other section also owns its sub-routes (e.g. /flows/:id).
-const isActivePath = (pathname: string, path: string) =>
-  path === '/dashboard' ? pathname === path || pathname === `${path}/` : pathname === path || pathname.startsWith(`${path}/`);
+const isActivePath = (pathname: string, path: string) => {
+  const alias = Object.keys(SECTION_ALIASES).find((prefix) => pathname.startsWith(`${prefix}/`));
+  const current = alias ? SECTION_ALIASES[alias] : pathname;
+  return path === '/dashboard' ? current === path || current === `${path}/` : current === path || current.startsWith(`${path}/`);
+};
 
 const SidebarItem = ({ item, active, isCollapsed, onNavigate }: { item: NavItem; active: boolean; isCollapsed: boolean; onNavigate: () => void }) => (
   <Link
@@ -140,7 +146,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       label: 'الأتمتة والقنوات',
       items: [
         { icon: <GitBranch size={18} />, label: 'التدفقات', path: '/dashboard/flows' },
-        { icon: <MessageSquareText size={18} />, label: 'قوالب وقوائم الإرسال', path: '/dashboard/whatsapp-templates' },
+        { icon: <MessageSquareText size={18} />, label: 'قوالب وحملات واتساب', path: '/dashboard/whatsapp-templates' },
         { icon: <Share2 size={18} />, label: 'القنوات', path: '/dashboard/channels' },
       ],
     },

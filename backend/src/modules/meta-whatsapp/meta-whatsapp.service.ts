@@ -5,6 +5,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import axios from 'axios';
 import { createHmac, randomBytes, timingSafeEqual } from 'crypto';
+import { existsSync, mkdirSync, writeFileSync } from 'fs';
+import { join } from 'path';
 import {
   MetaConnectionMode,
   MetaConnectionScope,
@@ -24,6 +26,25 @@ import { EventsGateway } from '../events/events.gateway';
 import { BillingService } from '../billing/billing.service';
 import { Store } from '../stores/entities/store.entity';
 import { MetaTemplatePayloadBuilder } from './services/meta-template-payload.builder';
+
+/** Multer's in-memory file, typed locally because @types/multer is not installed. */
+export type UploadedMediaFile = { buffer: Buffer; mimetype: string; originalname: string; size: number };
+
+const DEFAULT_NAME_FALLBACK = 'عميلنا العزيز';
+
+/** Meta's size limits for template header media. */
+const HEADER_MEDIA_LIMITS = { image: 5 * 1024 * 1024, video: 16 * 1024 * 1024, document: 16 * 1024 * 1024 } as const;
+
+function headerMediaType(mimeType: string): keyof typeof HEADER_MEDIA_LIMITS | null {
+  if (['image/jpeg', 'image/png'].includes(mimeType)) return 'image';
+  if (['video/mp4', 'video/3gpp'].includes(mimeType)) return 'video';
+  if (mimeType === 'application/pdf') return 'document';
+  return null;
+}
+
+function extensionForMime(mimeType: string) {
+  return ({ 'image/jpeg': '.jpg', 'image/png': '.png', 'video/mp4': '.mp4', 'video/3gpp': '.3gp', 'application/pdf': '.pdf' } as Record<string, string>)[mimeType] || '';
+}
 
 @Injectable()
 export class MetaWhatsAppService implements OnModuleInit {
@@ -375,71 +396,91 @@ export class MetaWhatsAppService implements OnModuleInit {
     return this.sendOneTemplate(store, connection, template, dto.to, dto);
   }
 
-  async sendTemplateBulkForUser(userId: string, templateId: string, dto: SendWhatsAppTemplateBulkDto, organizationId?: string) {
-    const { connection, template, organization } = await this.getOwnedTemplate(userId, organizationId, templateId);
-    if ((template.status || '').toUpperCase() !== 'APPROVED') throw new BadRequestException('Only APPROVED WhatsApp templates can be sent');
-
-    let customers: any[];
-    if (connection.scope === MetaConnectionScope.STORE) {
-      if (!connection.storeId) throw new BadRequestException('Store-scoped Meta connection is missing its branch');
-      if (dto.storeId && dto.storeId !== connection.storeId) throw new BadRequestException('This WhatsApp number belongs to a different branch');
-      await this.organizationsService.assertStoreAccessibleByUser(userId, organization.id, connection.storeId);
-      customers = await this.customersService.getCustomersByIdsForStore(connection.storeId, dto.customerIds);
-    } else {
-      const selectedStoreIds = [...new Set((dto.storeIds?.length ? dto.storeIds : dto.storeId ? [dto.storeId] : []).filter(Boolean))] as string[];
-      const access = await this.organizationsService.assertRequestedStoresAccessible(userId, organization.id, selectedStoreIds);
-      if (!access.storeIds.length) throw new BadRequestException('No accessible branches are available for this send');
-      customers = await this.customersService.getCustomersByIdsForOrganization(organization.id, dto.customerIds, access.storeIds);
-    }
-
-    const deduped = this.customersService.deduplicateWhatsAppCustomers(customers);
-    // Campaigns never reach a number that opted out of marketing in any branch of the organization.
-    const optedOut = await this.customersService.findMarketingOptedOutPhones(organization.id, deduped.unique.map((recipient) => recipient.phone));
-    const results: any[] = [];
-    const queue = deduped.unique.filter((recipient) => !optedOut.has(recipient.phone));
-    const workers = Array.from({ length: Math.min(5, queue.length) }, async () => {
-      while (queue.length) {
-        const recipient = queue.shift();
-        if (!recipient) return;
-        const customer = recipient.customer;
-        try {
-          const store = await this.organizationsService.assertStoreBelongsToOrganization(organization.id, customer.storeId);
-          const personalized = this.personalizeTemplateDto(dto, customer);
-          const response = await this.sendOneTemplate(store, connection, template, recipient.phone, personalized);
-          results.push({
-            customerId: customer.id,
-            duplicateCustomerIds: recipient.duplicateCustomerIds,
-            storeIds: recipient.storeIds,
-            phoneNumber: recipient.phone,
-            success: true,
-            whatsappMessageId: response?.message?.metadata?.whatsappMessageId,
-          });
-        } catch (error: any) {
-          results.push({ customerId: customer.id, phoneNumber: recipient.phone, success: false, error: error?.message || 'Send failed' });
-        }
-      }
-    });
-    await Promise.all(workers);
-
-    return {
-      connectionId: connection.id,
-      scope: connection.scope,
-      sourceRecords: deduped.sourceRecords,
-      duplicatesRemoved: deduped.duplicateRecords,
-      optedOutSkipped: optedOut.size,
-      total: deduped.uniqueRecipients - optedOut.size,
-      sent: results.filter((item) => item.success).length,
-      failed: results.filter((item) => !item.success).length,
-      results,
-    };
+  /**
+   * Uploads a template header file to Meta (the returned media id is what the send uses) and keeps a local
+   * copy so the composer and campaign details can show it.
+   */
+  async uploadHeaderMediaForUser(userId: string, organizationId: string | undefined, connectionId: string, file: UploadedMediaFile) {
+    const connection = await this.findForUser(userId, organizationId, { connectionId, required: true }) as MetaWhatsAppConnection;
+    if (!file?.buffer?.length) throw new BadRequestException('اختر ملفًا لرفعه.');
+    return this.storeHeaderMedia(connection, file.buffer, file.mimetype, file.originalname);
   }
 
-  private async sendOneTemplate(
+  /** Reuses the sample file the template was approved with (its Meta example) as the header media. */
+  async useTemplateSampleMediaForUser(userId: string, organizationId: string | undefined, templateId: string) {
+    const { connection, template } = await this.getOwnedTemplate(userId, organizationId, templateId);
+    const header = (template.components || []).find((component: any) => String(component.type).toUpperCase() === 'HEADER');
+    const sampleUrl: string | undefined = header?.example?.header_handle?.[0];
+    if (!sampleUrl) throw new BadRequestException('لا توجد صورة مثال محفوظة لهذا القالب في Meta.');
+    const url = new URL(sampleUrl);
+    const trustedHost = ['.fbcdn.net', '.fbsbx.com', '.whatsapp.net', '.facebook.com'].some((suffix) => url.hostname.endsWith(suffix));
+    if (url.protocol !== 'https:' || !trustedHost) throw new BadRequestException('رابط صورة المثال غير مدعوم.');
+    try {
+      const response = await axios.get<ArrayBuffer>(sampleUrl, { responseType: 'arraybuffer', timeout: 30000, maxContentLength: HEADER_MEDIA_LIMITS.document });
+      const mimeType = String(response.headers['content-type'] || '').split(';')[0].trim();
+      return this.storeHeaderMedia(connection, Buffer.from(response.data), mimeType, `${template.name}${extensionForMime(mimeType)}`);
+    } catch (error: any) {
+      if (error instanceof BadRequestException) throw error;
+      throw new BadRequestException('انتهت صلاحية صورة المثال لدى Meta. ارفع الصورة من جهازك بدلًا منها.');
+    }
+  }
+
+  headerMediaPath(filename: string) {
+    return join(this.headerMediaRoot(), filename);
+  }
+
+  private async storeHeaderMedia(connection: MetaWhatsAppConnection, buffer: Buffer, mimeType: string, originalName?: string) {
+    const type = headerMediaType(mimeType);
+    if (!type) throw new BadRequestException('نوع الملف غير مدعوم. المسموح: صور JPG/PNG، فيديو MP4، أو مستند PDF.');
+    if (buffer.length > HEADER_MEDIA_LIMITS[type]) {
+      throw new BadRequestException(`حجم الملف أكبر من المسموح (${Math.round(HEADER_MEDIA_LIMITS[type] / 1024 / 1024)} ميجابايت).`);
+    }
+    const secretConnection = await this.getConnectionWithSecrets(connection.id);
+    const accessToken = this.credentialEncryption.decryptSecret(secretConnection.accessToken)!;
+    const extension = extensionForMime(mimeType);
+    const filename = originalName || `header${extension}`;
+    const form = new FormData();
+    form.append('messaging_product', 'whatsapp');
+    form.append('type', mimeType);
+    form.append('file', new Blob([new Uint8Array(buffer)], { type: mimeType }), filename);
+    let mediaId: string;
+    try {
+      const { data } = await axios.post(`https://graph.facebook.com/${this.getGraphVersion()}/${connection.phoneNumberId}/media`, form, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        timeout: 60000,
+        maxBodyLength: Infinity,
+      });
+      mediaId = String(data?.id || '');
+    } catch (error) {
+      throw new BadRequestException(this.metaErrorMessage(error));
+    }
+    if (!mediaId) throw new BadRequestException('Meta لم يُرجع معرف الملف.');
+
+    const file = `${randomBytes(16).toString('hex')}${extension}`;
+    const root = this.headerMediaRoot();
+    if (!existsSync(root)) mkdirSync(root, { recursive: true });
+    writeFileSync(join(root, file), buffer);
+    return { id: mediaId, type, mimeType, filename, file, size: buffer.length };
+  }
+
+  private headerMediaRoot() {
+    return join(this.configService.get<string>('UPLOADS_DIR') || join(process.cwd(), 'uploads'), 'whatsapp-campaigns');
+  }
+
+  async findTemplateWithConnection(templateId: string) {
+    const template = await this.templateRepository.findOne({ where: { id: templateId } });
+    if (!template) return null;
+    const connection = await this.connectionRepository.findOne({ where: { id: template.connectionId } });
+    return connection ? { template, connection } : null;
+  }
+
+  async sendOneTemplate(
     store: Store,
     connection: MetaWhatsAppConnection,
     template: WhatsAppTemplate,
     to: string,
     dto: Partial<SendWhatsAppTemplateDto>,
+    extraMetadata: Record<string, unknown> = {},
   ) {
     const secretConnection = await this.getConnectionWithSecrets(connection.id);
     const accessToken = this.credentialEncryption.decryptSecret(secretConnection.accessToken)!;
@@ -495,6 +536,7 @@ export class MetaWhatsAppService implements OnModuleInit {
           },
           status: 'accepted',
           walletTransactionId: walletCharge?.id || null,
+          ...extraMetadata,
         },
       };
       await this.conversationsService.addMessage(normalizedTo, store.id, 'whatsapp', messageData);
@@ -507,12 +549,20 @@ export class MetaWhatsAppService implements OnModuleInit {
     }
   }
 
-  private personalizeTemplateDto(dto: SendWhatsAppTemplateBulkDto, customer: any) {
+  /** Fills the {{customer.*}} tokens for one recipient. Generated placeholder names use the fallback instead. */
+  personalizeTemplateDto(
+    dto: Partial<SendWhatsAppTemplateBulkDto>,
+    customer: { fullName?: string | null; phoneNumber?: string | null; whatsappId?: string | null; email?: string | null; storeName?: string | null; store?: { name?: string } | null },
+  ) {
+    const phone = customer.phoneNumber || customer.whatsappId || '';
+    const name = this.customersService.isPlaceholderName(customer.fullName, phone)
+      ? (dto.nameFallback?.trim() || DEFAULT_NAME_FALLBACK)
+      : String(customer.fullName);
     const replace = (value: string) => String(value || '')
-      .replace(/\{\{customer\.fullName\}\}/g, customer.fullName || '')
-      .replace(/\{\{customer\.phoneNumber\}\}/g, customer.phoneNumber || customer.whatsappId || '')
+      .replace(/\{\{customer\.fullName\}\}/g, name)
+      .replace(/\{\{customer\.phoneNumber\}\}/g, phone)
       .replace(/\{\{customer\.email\}\}/g, customer.email || '')
-      .replace(/\{\{customer\.branchName\}\}/g, customer.store?.name || '');
+      .replace(/\{\{customer\.branchName\}\}/g, customer.storeName || customer.store?.name || '');
 
     const personalizeButton = (btn: any) => {
       if (typeof btn === 'string') return replace(btn);
@@ -608,7 +658,7 @@ export class MetaWhatsAppService implements OnModuleInit {
     throw new NotFoundException('WhatsApp channel not found for connection and branch');
   }
 
-  private async getOwnedTemplate(userId: string, organizationId: string | undefined, templateId: string) {
+  async getOwnedTemplate(userId: string, organizationId: string | undefined, templateId: string) {
     const organization = await this.organizationsService.getForUser(userId, organizationId);
     const template = await this.templateRepository.findOne({ where: { id: templateId } });
     if (!template) throw new NotFoundException('WhatsApp template not found');

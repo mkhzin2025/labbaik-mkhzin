@@ -2,9 +2,13 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { MetaWhatsAppConnection } from './entities/meta-whatsapp-connection.entity';
 import { WhatsAppTemplate } from './entities/whatsapp-template.entity';
+import { WhatsAppCampaign } from './entities/whatsapp-campaign.entity';
+import { WhatsAppCampaignRecipient } from './entities/whatsapp-campaign-recipient.entity';
 import { Channel } from '../channels/entities/channel.entity';
 import { MetaWhatsAppService } from './meta-whatsapp.service';
 import { MetaWhatsAppController } from './meta-whatsapp.controller';
+import { WhatsAppCampaignsService } from './whatsapp-campaigns.service';
+import { WhatsAppCampaignsController } from './whatsapp-campaigns.controller';
 import { OrganizationsModule } from '../organizations/organizations.module';
 import { ChannelsModule } from '../channels/channels.module';
 import { ConversationsModule } from '../conversations/conversations.module';
@@ -15,7 +19,7 @@ import { MetaTemplatePayloadBuilder } from './services/meta-template-payload.bui
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([MetaWhatsAppConnection, WhatsAppTemplate, Channel]),
+    TypeOrmModule.forFeature([MetaWhatsAppConnection, WhatsAppTemplate, WhatsAppCampaign, WhatsAppCampaignRecipient, Channel]),
     OrganizationsModule,
     ChannelsModule,
     ConversationsModule,
@@ -23,9 +27,9 @@ import { MetaTemplatePayloadBuilder } from './services/meta-template-payload.bui
     EventsModule,
     BillingModule,
   ],
-  providers: [MetaWhatsAppService, MetaTemplatePayloadBuilder],
-  controllers: [MetaWhatsAppController],
-  exports: [MetaWhatsAppService, MetaTemplatePayloadBuilder],
+  providers: [MetaWhatsAppService, MetaTemplatePayloadBuilder, WhatsAppCampaignsService],
+  controllers: [MetaWhatsAppController, WhatsAppCampaignsController],
+  exports: [MetaWhatsAppService, MetaTemplatePayloadBuilder, WhatsAppCampaignsService],
 })
 export class MetaWhatsAppModule {}
 

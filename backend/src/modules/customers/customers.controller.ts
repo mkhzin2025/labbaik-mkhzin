@@ -1,7 +1,7 @@
 import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Query, Request, Res, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
-import { CustomersService } from './customers.service';
+import { CustomersService, audienceToFilters } from './customers.service';
 import type { CustomerPageOptions, CustomerSegment, CustomerSortKey } from './customers.service';
 import { CompetitionSyncService } from './competition-sync.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -9,6 +9,7 @@ import {
   BulkCustomerTaxonomyDto,
   CreateCustomerCategoryDto,
   CreateCustomerTagDto,
+  CustomerAudienceDto,
   ImportCustomersDto,
   UpdateCustomerCategoryDto,
   UpdateCustomerDto,
@@ -50,6 +51,9 @@ export class CustomersController {
     @Query('search') search?: string,
     @Query('categoryIds') categoryIds?: string,
     @Query('tagIds') tagIds?: string,
+    @Query('tagMatch') tagMatch?: 'any' | 'all',
+    @Query('excludeCategoryIds') excludeCategoryIds?: string,
+    @Query('excludeTagIds') excludeTagIds?: string,
     @Query('whatsappOnly') whatsappOnly?: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
@@ -64,6 +68,9 @@ export class CustomersController {
       storeIds: requestedStoreIds,
       categoryIds: this.csv(categoryIds),
       tagIds: this.csv(tagIds),
+      tagMatch: tagMatch === 'all' ? 'all' as const : 'any' as const,
+      excludeCategoryIds: this.csv(excludeCategoryIds),
+      excludeTagIds: this.csv(excludeTagIds),
       whatsappOnly: whatsappOnly === 'true',
     };
     // Without `page` the endpoint keeps returning the full array (used by broadcast recipient pickers).
@@ -138,6 +145,22 @@ export class CustomersController {
       baselineDate: baselineDate || undefined,
       branchDetails: branchDetails === 'true',
     });
+  }
+
+  /** Categories/tags of the selected branches with reachable-customer counts, for the campaign audience builder. */
+  @Get('audience/options')
+  async audienceOptions(@Request() req: any, @Query('storeIds') storeIds?: string, @Query('categoryIds') categoryIds?: string) {
+    const organization = await this.organizationsService.getForUser(req.user.id, req.user.organizationId);
+    const access = await this.organizationsService.assertRequestedStoresAccessible(req.user.id, organization.id, this.csv(storeIds));
+    return this.customersService.getAudienceOptions(organization.id, access.storeIds, this.csv(categoryIds) || []);
+  }
+
+  /** How many numbers a campaign audience reaches, after opt-outs and duplicate numbers. */
+  @Post('audience/summary')
+  async audienceSummary(@Request() req: any, @Body() dto: CustomerAudienceDto) {
+    const organization = await this.organizationsService.getForUser(req.user.id, req.user.organizationId);
+    const access = await this.organizationsService.assertRequestedStoresAccessible(req.user.id, organization.id, dto.storeIds);
+    return this.customersService.summarizeAudience(organization.id, audienceToFilters(dto, access.storeIds));
   }
 
   @Get('taxonomy/usage')

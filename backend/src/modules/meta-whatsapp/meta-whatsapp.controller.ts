@@ -1,7 +1,12 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, Request, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, NotFoundException, Param, Patch, Post, Query, Request, Res, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { createReadStream, existsSync } from 'fs';
+import { basename } from 'path';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { MetaWhatsAppService } from './meta-whatsapp.service';
+import type { UploadedMediaFile } from './meta-whatsapp.service';
+import { WhatsAppCampaignsService } from './whatsapp-campaigns.service';
 import { SaveMetaWhatsAppConnectionDto, SendWhatsAppTemplateBulkDto, SendWhatsAppTemplateDto, SubscribeWebhookDto, UpdateMetaWhatsAppConnectionDto } from './dto/meta-whatsapp.dto';
 import { MetaConnectionScope, MetaWebhookMode } from './entities/meta-whatsapp-connection.entity';
 
@@ -10,7 +15,10 @@ import { MetaConnectionScope, MetaWebhookMode } from './entities/meta-whatsapp-c
 @Controller('integrations/meta/whatsapp')
 @UseGuards(JwtAuthGuard)
 export class MetaWhatsAppController {
-  constructor(private readonly service: MetaWhatsAppService) {}
+  constructor(
+    private readonly service: MetaWhatsAppService,
+    private readonly campaigns: WhatsAppCampaignsService,
+  ) {}
 
   @Get('connections')
   listConnections(@Request() req: any) {
@@ -70,8 +78,31 @@ export class MetaWhatsAppController {
     return this.service.sendTemplateForUser(req.user.id, templateId, dto, req.user.organizationId);
   }
 
+  /** Creates a campaign and starts sending in the background; poll `campaigns/:id` for progress. */
   @Post('templates/:templateId/send-bulk')
   sendTemplateBulk(@Request() req: any, @Param('templateId') templateId: string, @Body() dto: SendWhatsAppTemplateBulkDto) {
-    return this.service.sendTemplateBulkForUser(req.user.id, templateId, dto, req.user.organizationId);
+    return this.campaigns.createForUser(req.user.id, req.user.organizationId, templateId, dto);
+  }
+
+  /** Uploads a header image/video/PDF to Meta for this number and returns the media id to send with. */
+  @Post('media')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 16 * 1024 * 1024 } }))
+  uploadMedia(@Request() req: any, @Query('connectionId') connectionId: string, @UploadedFile() file: UploadedMediaFile) {
+    if (!connectionId) throw new BadRequestException('connectionId is required');
+    return this.service.uploadHeaderMediaForUser(req.user.id, req.user.organizationId, connectionId, file);
+  }
+
+  @Post('templates/:templateId/sample-media')
+  useSampleMedia(@Request() req: any, @Param('templateId') templateId: string) {
+    return this.service.useTemplateSampleMediaForUser(req.user.id, req.user.organizationId, templateId);
+  }
+
+  @Get('media/:filename')
+  getMedia(@Param('filename') filename: string, @Res() res: any) {
+    if (filename !== basename(filename)) throw new BadRequestException('Invalid filename');
+    const path = this.service.headerMediaPath(filename);
+    if (!existsSync(path)) throw new NotFoundException('File not found');
+    res.setHeader('Cache-Control', 'private, max-age=86400');
+    return createReadStream(path).pipe(res);
   }
 }

@@ -6,6 +6,7 @@ import api from '../api/client';
 import { useToast } from '../components/Toast';
 import { toEnglishDigits } from '@/lib/utils';
 import type { Branch } from '../components/customers/BranchSelector';
+import CampaignPerformance from '../components/analytics/CampaignPerformance';
 
 interface Analytics {
   period: { days: number; from: string; to: string };
@@ -88,7 +89,7 @@ export default function AnalyticsPage() {
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-black text-neutral-900 dark:text-white">التقارير</h1>
-          <p className="mt-1 text-sm text-labbaik-text-muted">حجم المحادثات، وسرعة الرد، وأوقات الذروة، محسوبة من الرسائل الفعلية.</p>
+          <p className="mt-1 text-sm text-labbaik-text-muted">حجم المحادثات، وسرعة الرد، وأوقات الذروة، ونتائج حملات واتساب، محسوبة من الرسائل الفعلية.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {branches.length > 1 && (
@@ -262,6 +263,8 @@ export default function AnalyticsPage() {
           </div>
         </div>
       )}
+
+      <CampaignPerformance days={days} storeId={storeId} />
     </div>
   );
 }

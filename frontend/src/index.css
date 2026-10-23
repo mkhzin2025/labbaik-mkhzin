@@ -248,10 +248,11 @@ textarea {
 }
 
 
-/* Chart roles (validated reference palette: slot 1 blue, slot 2 orange; dark steps for the dark surface). */
+/* Chart roles (validated reference palette: slot 1 blue, slot 2 orange, slot 3 aqua; dark steps for the dark surface). */
 :root {
   --viz-1: #2a78d6;
   --viz-2: #eb6834;
+  --viz-3: #1baf7a;
   --viz-neutral: #a8a7a2;
   --viz-grid: rgba(100, 59, 137, 0.1);
   --viz-muted: #6b6578;
@@ -259,6 +260,7 @@ textarea {
 :root[data-theme="dark"] {
   --viz-1: #3987e5;
   --viz-2: #d95926;
+  --viz-3: #199e70;
   --viz-neutral: #6b6a66;
   --viz-grid: rgba(255, 255, 255, 0.08);
   --viz-muted: #a9a3b5;

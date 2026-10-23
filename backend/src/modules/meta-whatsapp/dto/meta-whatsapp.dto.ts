@@ -1,6 +1,8 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { ArrayMaxSize, ArrayMinSize, IsArray, IsEnum, IsNotEmpty, IsOptional, IsString, IsUUID, Matches, ValidateIf } from 'class-validator';
+import { ArrayMaxSize, ArrayMinSize, IsArray, IsEnum, IsNotEmpty, IsOptional, IsString, IsUUID, Matches, MaxLength, ValidateIf, ValidateNested } from 'class-validator';
+import { Type } from 'class-transformer';
 import { MetaConnectionMode, MetaConnectionScope, MetaInboundRouting, MetaWebhookMode } from '../entities/meta-whatsapp-connection.entity';
+import { CustomerAudienceDto } from '../../customers/dto/customer.dto';
 
 export class SubscribeWebhookDto {
   @ApiPropertyOptional({ enum: MetaWebhookMode, default: MetaWebhookMode.GLOBAL })
@@ -177,12 +179,31 @@ export class SendWhatsAppTemplateBulkDto {
   @IsUUID('4', { each: true })
   storeIds?: string[];
 
-  @ApiProperty({ type: [String], description: 'Selected customer records. Duplicate phone numbers are sent only once.' })
+  @ApiPropertyOptional({ type: CustomerAudienceDto, description: 'Who receives the campaign; resolved to customers on the server.' })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => CustomerAudienceDto)
+  audience?: CustomerAudienceDto;
+
+  @ApiPropertyOptional({ type: [String], description: 'Legacy: explicit customer records (treated as a manual audience).' })
+  @IsOptional()
   @IsArray()
   @ArrayMinSize(1)
-  @ArrayMaxSize(5000)
+  @ArrayMaxSize(10000)
   @IsUUID('4', { each: true })
-  customerIds: string[];
+  customerIds?: string[];
+
+  @ApiPropertyOptional({ description: 'Campaign name shown in the campaigns log; defaults to the template name and date.' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  name?: string;
+
+  @ApiPropertyOptional({ description: 'Replaces {{customer.fullName}} when the customer has no real name on file.' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  nameFallback?: string;
 
   @ApiPropertyOptional({ description: 'Unified OTP code for AUTHENTICATION templates' })
   @IsOptional()

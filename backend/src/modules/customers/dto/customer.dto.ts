@@ -168,6 +168,67 @@ export class ImportCustomersDto {
   tagIds?: string[];
 }
 
+/** Who a WhatsApp campaign targets; resolved to customers on the server. */
+export class CustomerAudienceDto {
+  @ApiPropertyOptional({ enum: ['all', 'segment', 'manual'], default: 'all' })
+  @IsIn(['all', 'segment', 'manual'])
+  mode: 'all' | 'segment' | 'manual' = 'all';
+
+  @ApiPropertyOptional({ type: [String], description: 'Branches to target; empty means every accessible branch.' })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(100)
+  @IsUUID('4', { each: true })
+  storeIds?: string[];
+
+  @ApiPropertyOptional({ type: [String], description: 'segment: customers in any of these categories.' })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(200)
+  @IsUUID('4', { each: true })
+  categoryIds?: string[];
+
+  @ApiPropertyOptional({ type: [String], description: 'segment: customers carrying these tags (see tagMatch).' })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(200)
+  @IsUUID('4', { each: true })
+  tagIds?: string[];
+
+  @ApiPropertyOptional({ enum: ['any', 'all'], default: 'any' })
+  @IsOptional()
+  @IsIn(['any', 'all'])
+  tagMatch?: 'any' | 'all';
+
+  @ApiPropertyOptional({ type: [String], description: 'segment: drop customers in any of these categories.' })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(200)
+  @IsUUID('4', { each: true })
+  excludeCategoryIds?: string[];
+
+  @ApiPropertyOptional({ type: [String], description: 'segment: drop customers carrying any of these tags.' })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(200)
+  @IsUUID('4', { each: true })
+  excludeTagIds?: string[];
+
+  @ApiPropertyOptional({ type: [String], description: 'manual: the hand-picked customers.' })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(10000)
+  @IsUUID('4', { each: true })
+  customerIds?: string[];
+
+  @ApiPropertyOptional({ type: [String], description: 'all/segment: customers unticked in the review list.' })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(10000)
+  @IsUUID('4', { each: true })
+  excludeCustomerIds?: string[];
+}
+
 export class CreateCustomerTagDto {
   @IsEnum(CustomerTaxonomyScope)
   scope: CustomerTaxonomyScope = CustomerTaxonomyScope.STORE;

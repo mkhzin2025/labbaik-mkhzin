@@ -202,8 +202,9 @@ export class MetaTemplatePayloadBuilder {
 
       const mediaType = analysis.headerType.toLowerCase();
       const mediaObj: Record<string, any> = {};
-      if (media.link) mediaObj.link = media.link;
       if (media.id) mediaObj.id = media.id;
+      else mediaObj.link = media.link;
+      if (mediaType === 'document' && media.filename) mediaObj.filename = media.filename;
 
       components.push({
         type: 'header',
