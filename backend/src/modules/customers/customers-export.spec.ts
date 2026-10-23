@@ -39,7 +39,7 @@ describe('Customer PDF exports', () => {
 
   async function exportPdf(
     exportType: 'customers' | 'statistics',
-    extra: { sources?: string[]; baselineDate?: string } = {},
+    extra: { sources?: string[]; baselineDate?: string; branchDetails?: boolean } = {},
   ) {
     const app = express();
     app.get('/export', (req, res, next) => {
@@ -115,9 +115,10 @@ describe('Customer PDF exports', () => {
     ).toHaveLength(2);
   });
 
-  it('builds the branch report with baseline, one column per category/tag, and both totals', async () => {
-    const category = '11111111-1111-4111-8111-111111111111';
-    const tag = '22222222-2222-4222-8222-222222222222';
+  const category = '11111111-1111-4111-8111-111111111111';
+  const tag = '22222222-2222-4222-8222-222222222222';
+
+  async function statisticsPdf(extra: { branchDetails?: boolean } = {}) {
     query
       .mockResolvedValueOnce([
         { type: 'category', id: category, name: 'المسابقة', color: '#dc2626' },
@@ -128,18 +129,24 @@ describe('Customer PDF exports', () => {
         { storeId: 'store', storeName: 'بريدة', baseline: 1000, unique: 1300 },
       ])
       .mockResolvedValueOnce([
-        { storeId: 'store', key: `category:${category}`, total: 400 },
-        { storeId: 'store', key: `tag:${tag}`, total: 120 },
+        { storeId: 'store', key: `category:${category}`, total: 400, fresh: 250 },
+        { storeId: 'store', key: `tag:${tag}`, total: 120, fresh: 120 },
       ]);
-    const pdf = await exportPdf('statistics', {
+    return exportPdf('statistics', {
       sources: [`tag:${tag}`, `category:${category}`],
       baselineDate: '2026-10-22',
+      ...extra,
     });
+  }
+
+  const drawn = (label: string) =>
+    text.mock.calls.some(([value, , , options]) => value === label && options?.features);
+
+  it('builds the branch report with baseline, one column per category/tag, and both totals', async () => {
+    const pdf = await statisticsPdf();
     expect(pdf.toString('latin1')).toMatch(/\/Type \/Pages[\s\S]*?\/Count 2\b/);
     const [, baseParams] = query.mock.calls[2] as [string, unknown[]];
     expect(baseParams).toEqual(['organization', ['store'], '2026-10-22T00:00:00+03:00']);
-    const drawn = (label: string) =>
-      text.mock.calls.some(([value, , , options]) => value === label && options?.features);
     for (const label of [
       'تقرير مصادر أرقام العملاء',
       'تفاصيل الفروع حسب مصادر الأرقام',
@@ -153,10 +160,28 @@ describe('Customer PDF exports', () => {
     ]) {
       expect(drawn(label)).toBe(true);
     }
+    expect(drawn('تقرير فرع بريدة')).toBe(false);
     expect(
       text.mock.calls.filter(
         ([value]) => value === '1 / 2' || value === '2 / 2',
       ),
     ).toHaveLength(2);
+  });
+
+  it('adds one page per branch with new vs. already-stored customers per source', async () => {
+    const pdf = await statisticsPdf({ branchDetails: true });
+    expect(pdf.toString('latin1')).toMatch(/\/Type \/Pages[\s\S]*?\/Count 3\b/);
+    for (const label of [
+      'تقرير فرع بريدة',
+      'قبل وبعد',
+      // competition: 400 linked = 250 new + 150 already stored; 250 new on a 1,000 baseline
+      '250',
+      '150',
+      '+25%',
+      // branch growth: 300 new on a 1,000 baseline
+      '30%',
+    ]) {
+      expect(drawn(label)).toBe(true);
+    }
   });
 });

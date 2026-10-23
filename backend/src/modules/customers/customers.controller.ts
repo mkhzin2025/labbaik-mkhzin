@@ -121,6 +121,7 @@ export class CustomersController {
     @Query('tagId') tagId?: string,
     @Query('sources') sources?: string,
     @Query('baselineDate') baselineDate?: string,
+    @Query('branchDetails') branchDetails?: string,
   ) {
     if (format !== 'xlsx' && format !== 'pdf') throw new BadRequestException('Export format must be xlsx or pdf');
     if (exportType && exportType !== 'customers' && exportType !== 'statistics') throw new BadRequestException('Export type must be customers or statistics');
@@ -135,6 +136,7 @@ export class CustomersController {
       exportType: exportType || 'customers',
       sources: this.csv(sources),
       baselineDate: baselineDate || undefined,
+      branchDetails: branchDetails === 'true',
     });
   }
 

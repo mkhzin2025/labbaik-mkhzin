@@ -19,6 +19,8 @@ export type SourceStatisticsRow = {
   baseline: number;
   /** Customers of the branch linked to each source, keyed by StatisticsSource.key. */
   sources: Record<string, number>;
+  /** Of those, how many were added on/after the baseline date (the rest were already stored). */
+  sourcesNew: Record<string, number>;
   /** Actual customers in the branch (each counted once). */
   unique: number;
 };
@@ -29,6 +31,8 @@ export type SourceStatisticsReport = {
   generatedDate: string;
   sources: StatisticsSource[];
   rows: SourceStatisticsRow[];
+  /** Adds one page per branch: before/after, and new vs. already-stored customers in each source. */
+  branchDetails?: boolean;
 };
 
 const COLORS = {
@@ -343,6 +347,135 @@ export function writeSourceStatisticsPdf(response: Response, report: SourceStati
   y += 14;
   doc.roundedRect(tableX, y, contentWidth, notesHeight, 9).fill(COLORS.soft);
   notes.forEach((note, index) => text(note, tableX + 14, y + 10 + index * 15, contentWidth - 28, { size: 8, color: COLORS.muted }));
+
+  // ---------- Optional: one page per branch ----------
+  if (report.branchDetails) {
+    ranked.forEach((row, rank) => {
+      doc.addPage();
+      paintPage();
+      drawBand(100);
+      drawBrand(18, 36);
+      text(`تقرير فرع ${row.storeName}`, right - 520, 62, 520, { size: 18, color: COLORS.white, bold: true });
+      drawChip(PAGE_MARGIN, 20, 108, 'تاريخ التقرير', generatedDate);
+      drawChip(PAGE_MARGIN + 116, 20, 108, 'المخزّنة سابقاً = قبل', baselineDate);
+      drawChip(PAGE_MARGIN + 232, 20, 92, 'ترتيب الفرع', `${rank + 1} من ${rows.length}`);
+
+      const added = Math.max(0, row.unique - row.baseline);
+      const branchCards = [
+        { label: 'العملاء الآن (بدون تكرار)', value: format(row.unique), note: `${percent(row.unique, totals.unique)} من كل العملاء`, color: COLORS.plum, hero: true },
+        { label: 'المخزّنة سابقاً', value: format(row.baseline), note: `قبل ${baselineDate}`, color: BASELINE_COLOR },
+        { label: 'عملاء جدد', value: `+${format(added)}`, note: `أُضيفوا من ${baselineDate}`, color: COLORS.teal },
+        { label: 'نسبة النمو', value: row.baseline ? percent(added, row.baseline) : '—', note: 'الجدد مقارنة بالمخزّنة سابقاً', color: COLORS.lilac },
+      ];
+      const gap = 10;
+      const width4 = (contentWidth - gap * 3) / 4;
+      branchCards.forEach((card, index) => {
+        const x = right - width4 - index * (width4 + gap);
+        const top = 116;
+        if (card.hero) {
+          const gradient = doc.linearGradient(x, top, x + width4, top + 72);
+          gradient.stop(0, COLORS.brand).stop(1, COLORS.plum);
+          doc.roundedRect(x, top, width4, 72, 11).fill(gradient);
+        } else {
+          doc.roundedRect(x, top, width4, 72, 11).lineWidth(0.8).fillAndStroke(COLORS.white, COLORS.line);
+          doc.roundedRect(x + width4 - 5, top + 14, 3, 44, 1.5).fill(card.color);
+        }
+        text(card.label, x + 12, top + 11, width4 - 26, { size: 8, color: card.hero ? COLORS.lavender : COLORS.muted, bold: true });
+        text(card.value, x + 12, top + 27, width4 - 26, { size: 19, color: card.hero ? COLORS.white : COLORS.ink, bold: true });
+        text(card.note, x + 12, top + 53, width4 - 26, { size: 7, color: card.hero ? COLORS.lavender : COLORS.muted });
+      });
+
+      // Before / after (left panel).
+      const top = 204;
+      const panelBottom = height - 44;
+      const beforeWidth = 240;
+      doc.roundedRect(PAGE_MARGIN, top, beforeWidth, panelBottom - top, 12).lineWidth(0.8).fillAndStroke(COLORS.white, COLORS.line);
+      text('قبل وبعد', PAGE_MARGIN + 16, top + 14, beforeWidth - 32, { size: 12, color: COLORS.plum, bold: true });
+      const chartBottom = panelBottom - 52;
+      const chartHeight = chartBottom - (top + 66);
+      const peak = Math.max(1, row.unique, row.baseline);
+      const columns = [
+        { label: 'الآن', value: row.unique, color: COLORS.brand },
+        { label: 'المخزّنة سابقاً', value: row.baseline, color: BASELINE_COLOR },
+      ];
+      columns.forEach((column, index) => {
+        const barWidth = 54;
+        const x = PAGE_MARGIN + 40 + index * 106;
+        const barHeight = Math.max(column.value ? 3 : 0, (column.value / peak) * chartHeight);
+        doc.roundedRect(x, chartBottom - chartHeight, barWidth, chartHeight, 6).fill(COLORS.soft);
+        if (barHeight) doc.roundedRect(x, chartBottom - barHeight, barWidth, barHeight, 6).fill(column.color);
+        text(format(column.value), x - 20, chartBottom - barHeight - 16, barWidth + 40, { size: 9, color: COLORS.ink, bold: true, align: 'center' });
+        text(column.label, x - 20, chartBottom + 8, barWidth + 40, { size: 8, color: COLORS.muted, align: 'center' });
+      });
+      doc.roundedRect(PAGE_MARGIN + 16, panelBottom - 30, beforeWidth - 32, 20, 6).fill(COLORS.soft);
+      text(
+        row.baseline ? `+${format(added)} عميل جديد، نمو ${percent(added, row.baseline)}` : `+${format(added)} عميل جديد`,
+        PAGE_MARGIN + 24, panelBottom - 25, beforeWidth - 48, { size: 8.5, color: COLORS.teal, bold: true, align: 'center' },
+      );
+
+      // New vs already stored, per source (right panel).
+      const sourcesX = PAGE_MARGIN + beforeWidth + 14;
+      const sourcesWidth = right - sourcesX;
+      doc.roundedRect(sourcesX, top, sourcesWidth, panelBottom - top, 12).lineWidth(0.8).fillAndStroke(COLORS.white, COLORS.line);
+      text('الفئات والتاقات: جدد مقابل مخزّنين سابقاً', sourcesX + 16, top + 14, sourcesWidth - 32, { size: 12, color: COLORS.plum, bold: true });
+      const legendItems = [{ label: 'جدد', opacity: 1 }, { label: 'مخزّنون سابقاً', opacity: 0.32 }];
+      legendItems.forEach((item, index) => {
+        const lx = sourcesX + 16 + index * 92;
+        doc.save().fillOpacity(item.opacity).roundedRect(lx + 76, top + 19, 9, 9, 2).fill(COLORS.brand).restore();
+        text(item.label, lx, top + 18, 72, { size: 7.5, color: COLORS.muted });
+      });
+
+      const metricWidth = 62;
+      const metrics = [
+        { title: 'الإجمالي', value: (key: string) => row.sources[key] || 0, color: COLORS.ink },
+        { title: 'جدد', value: (key: string) => row.sourcesNew[key] || 0, color: COLORS.teal },
+        { title: 'مخزّنون', value: (key: string) => Math.max(0, (row.sources[key] || 0) - (row.sourcesNew[key] || 0)), color: COLORS.muted },
+      ];
+      const nameWidth = 118;
+      const shareWidth = 70;
+      const barX = sourcesX + 16 + shareWidth + metrics.length * metricWidth + 10;
+      const barWidth = right - 16 - nameWidth - 10 - barX;
+      const headerY = top + 46;
+      text('الاسم', right - 16 - nameWidth, headerY, nameWidth, { size: 7.5, color: COLORS.muted, bold: true });
+      metrics.forEach((metric, index) => {
+        const x = sourcesX + 16 + shareWidth + (metrics.length - 1 - index) * metricWidth;
+        text(metric.title, x, headerY, metricWidth, { size: 7.5, color: COLORS.muted, bold: true, align: 'center' });
+      });
+      text('جدد على المخزّن', sourcesX + 16, headerY, shareWidth, { size: 7.5, color: COLORS.muted, bold: true, align: 'center' });
+      doc.moveTo(sourcesX + 16, headerY + 16).lineTo(right - 16, headerY + 16).lineWidth(0.5).stroke(COLORS.line);
+
+      if (!sources.length) {
+        text('اختر أعمدة من الفئات والتاقات عند التصدير لعرض تفاصيلها هنا.', sourcesX + 16, headerY + 40, sourcesWidth - 32, { size: 9, color: COLORS.muted, align: 'center' });
+      }
+      const listTop = headerY + 26;
+      const sourceRow = Math.min(44, (panelBottom - 14 - listTop) / Math.max(1, sources.length));
+      const peakSource = Math.max(1, ...sources.map((source) => row.sources[source.key] || 0));
+      sources.forEach((source, index) => {
+        const y = listTop + index * sourceRow;
+        const total = row.sources[source.key] || 0;
+        const fresh = Math.min(total, row.sourcesNew[source.key] || 0);
+        const stored = total - fresh;
+        doc.circle(right - 20, y + 9, 4).fill(source.color);
+        text(source.name, right - 16 - nameWidth, y + 3, nameWidth - 14, { size: 9, color: COLORS.ink, bold: true });
+        text(source.type === 'tag' ? 'تاق' : 'فئة', right - 16 - nameWidth, y + 17, nameWidth - 14, { size: 7, color: COLORS.muted });
+        const barY = y + 4;
+        doc.roundedRect(barX, barY, barWidth, 12, 3).fill(COLORS.soft);
+        const storedWidth = (stored / peakSource) * barWidth;
+        const freshWidth = (fresh / peakSource) * barWidth;
+        // RTL: already-stored part from the right, then the new part.
+        if (storedWidth > 0) doc.save().fillOpacity(0.32).roundedRect(barX + barWidth - storedWidth, barY, Math.max(storedWidth, 2), 12, 3).fill(source.color).restore();
+        if (freshWidth > 0) doc.roundedRect(barX + barWidth - storedWidth - freshWidth, barY, Math.max(freshWidth, 2), 12, 3).fill(source.color);
+        text(total ? `${percent(fresh, total)} جدد` : '', barX, barY + 15, barWidth, { size: 6.8, color: COLORS.muted });
+        metrics.forEach((metric, metricIndex) => {
+          const x = sourcesX + 16 + shareWidth + (metrics.length - 1 - metricIndex) * metricWidth;
+          const value = metric.value(source.key);
+          text(value ? format(value) : '—', x, y + 5, metricWidth, { size: 9, color: value ? metric.color : COLORS.lavender, bold: metricIndex === 0, align: 'center' });
+        });
+        text(row.baseline && fresh ? `+${percent(fresh, row.baseline)}` : '—', sourcesX + 16, y + 5, shareWidth, { size: 9, color: fresh ? COLORS.teal : COLORS.lavender, bold: true, align: 'center' });
+        if (index < sources.length - 1) doc.moveTo(sourcesX + 16, y + sourceRow - 4).lineTo(right - 16, y + sourceRow - 4).lineWidth(0.4).stroke(COLORS.line);
+      });
+    });
+  }
 
   const pages = doc.bufferedPageRange();
   for (let index = 0; index < pages.count; index += 1) {

@@ -62,6 +62,8 @@ type CustomerExportOptions = {
   sources?: string[];
   /** Statistics PDF: customers created before this day (YYYY-MM-DD, Riyadh) count as "stored before". */
   baselineDate?: string;
+  /** Statistics PDF: add one detail page per branch. */
+  branchDetails?: boolean;
 };
 
 const STATISTICS_SOURCE_LIMIT = 6;
@@ -305,14 +307,17 @@ export class CustomersService implements OnModuleInit {
         ORDER BY s.name ASC`,
       [options.organizationId, options.storeIds, `${baselineDate}T00:00:00+03:00`],
     );
-    const counts: { storeId: string; key: string; total: number }[] = sources.length
+    // "fresh" = linked customers added on/after the baseline date; the rest were already stored.
+    const counts: { storeId: string; key: string; total: number; fresh: number }[] = sources.length
       ? await this.customerRepository.query(
-        `SELECT c."storeId" AS "storeId", 'category:' || l."categoryId" AS key, COUNT(*)::int AS total
+        `SELECT c."storeId" AS "storeId", 'category:' || l."categoryId" AS key, COUNT(*)::int AS total,
+                COUNT(*) FILTER (WHERE c."createdAt" >= $4::timestamptz)::int AS fresh
            FROM customer_category_links l JOIN customers c ON c.id = l."customerId"
           WHERE l."categoryId" = ANY($1::uuid[]) AND c."storeId" = ANY($3::uuid[])
           GROUP BY 1, 2
          UNION ALL
-         SELECT c."storeId", 'tag:' || l."tagId", COUNT(*)::int
+         SELECT c."storeId", 'tag:' || l."tagId", COUNT(*)::int,
+                COUNT(*) FILTER (WHERE c."createdAt" >= $4::timestamptz)::int
            FROM customer_tag_links l JOIN customers c ON c.id = l."customerId"
           WHERE l."tagId" = ANY($2::uuid[]) AND c."storeId" = ANY($3::uuid[])
           GROUP BY 1, 2`,
@@ -320,6 +325,7 @@ export class CustomersService implements OnModuleInit {
           sources.filter((source) => source.type === 'category').map((source) => source.id),
           sources.filter((source) => source.type === 'tag').map((source) => source.id),
           options.storeIds,
+          `${baselineDate}T00:00:00+03:00`,
         ],
       )
       : [];
@@ -329,11 +335,14 @@ export class CustomersService implements OnModuleInit {
       baseline: Number(row.baseline || 0),
       unique: Number(row.unique || 0),
       sources: {},
+      sourcesNew: {},
     }));
     const byStore = new Map(rows.map((row) => [row.storeId, row]));
     for (const count of counts) {
       const row = byStore.get(String(count.storeId));
-      if (row) row.sources[count.key] = Number(count.total || 0);
+      if (!row) continue;
+      row.sources[count.key] = Number(count.total || 0);
+      row.sourcesNew[count.key] = Number(count.fresh || 0);
     }
     return {
       organizationName: String(organization?.name || ''),
@@ -341,6 +350,7 @@ export class CustomersService implements OnModuleInit {
       generatedDate: riyadhDate(new Date()),
       sources,
       rows,
+      branchDetails: options.branchDetails === true,
     };
   }
 

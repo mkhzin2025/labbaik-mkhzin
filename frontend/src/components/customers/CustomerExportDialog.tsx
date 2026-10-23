@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { BarChart3, Building2, CalendarDays, Check, Columns3, ContactRound, Download, FileSpreadsheet, FileText, Loader2, Tag, X } from 'lucide-react';
+import { BarChart3, Building2, CalendarDays, Check, Columns3, ContactRound, Download, FileSpreadsheet, FileText, LayoutList, Loader2, Tag, X } from 'lucide-react';
 import api from '../../api/client';
 import type { Branch } from './BranchSelector';
 
@@ -18,6 +18,11 @@ interface Props {
 const PDF_LIMIT = 5000;
 const SOURCE_LIMIT = 6;
 const SOURCES_STORAGE_KEY = 'customers.statisticsSources';
+const BASELINE_STORAGE_KEY = 'customers.statisticsBaselineDate';
+const DETAILS_STORAGE_KEY = 'customers.statisticsBranchDetails';
+
+const readSetting = (key: string) => { try { return localStorage.getItem(key); } catch { return null; } };
+const saveSetting = (key: string, value: string) => { try { localStorage.setItem(key, value); } catch { /* per-viewer convenience only */ } };
 
 const todayInRiyadh = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Riyadh' }).format(new Date());
 
@@ -37,8 +42,12 @@ export default function CustomerExportDialog({ branches, initialStoreId, onClose
   const [tags, setTags] = useState<ExportTag[]>([]);
   const [tagId, setTagId] = useState('');
   const [sources, setSources] = useState<StatisticsSource[]>([]);
+  const [sourcesStatus, setSourcesStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [sourcesAttempt, setSourcesAttempt] = useState(0);
   const [selectedSources, setSelectedSources] = useState<string[]>(readSavedSources);
-  const [baselineDate, setBaselineDate] = useState(todayInRiyadh);
+  // The baseline is usually the day of a bulk import, so the last chosen date is kept rather than "today".
+  const [baselineDate, setBaselineDate] = useState(() => readSetting(BASELINE_STORAGE_KEY) || todayInRiyadh());
+  const [branchDetails, setBranchDetails] = useState(() => readSetting(DETAILS_STORAGE_KEY) === 'true');
   const [busy, setBusy] = useState(false);
   const [optionsBusy, setOptionsBusy] = useState(false);
   const [error, setError] = useState('');
@@ -82,11 +91,12 @@ export default function CustomerExportDialog({ branches, initialStoreId, onClose
   const sourceReport = exportType === 'statistics' && format === 'pdf';
 
   useEffect(() => {
-    if (!sourceReport || !effectiveStoreIds.length) { setSources([]); return; }
+    if (!sourceReport || !effectiveStoreIds.length) { setSources([]); setSourcesStatus('ready'); return; }
+    setSourcesStatus('loading');
     void api.get<StatisticsSource[]>('/customers/export/statistics-sources', { params: { storeIds: effectiveStoreIds.join(',') } })
-      .then(({ data }) => setSources(data || []))
-      .catch(() => setSources([]));
-  }, [sourceReport, effectiveStoreIds.join(',')]);
+      .then(({ data }) => { setSources(data || []); setSourcesStatus('ready'); })
+      .catch(() => { setSources([]); setSourcesStatus('error'); });
+  }, [sourceReport, effectiveStoreIds.join(','), sourcesAttempt]);
 
   // Keep the saved order, dropping columns that no longer exist for these branches.
   const activeSources = useMemo(
@@ -124,7 +134,7 @@ export default function CustomerExportDialog({ branches, initialStoreId, onClose
     try {
       const response = await api.get('/customers/export', {
         params: sourceReport
-          ? { format, exportType, storeIds: effectiveStoreIds.join(','), sources: activeSources.join(',') || undefined, baselineDate }
+          ? { format, exportType, storeIds: effectiveStoreIds.join(','), sources: activeSources.join(',') || undefined, baselineDate, branchDetails: branchDetails || undefined }
           : { format, exportType, storeIds: effectiveStoreIds.join(','), tagId: tagId || undefined },
         responseType: 'blob',
       });
@@ -204,7 +214,14 @@ export default function CustomerExportDialog({ branches, initialStoreId, onClose
               <fieldset className="space-y-3">
                 <legend className="flex items-center gap-2 text-sm font-black text-neutral-900 dark:text-white"><Columns3 size={17} className="text-labbaik-blue" /> أعمدة التقرير <span className="font-medium text-labbaik-text-muted">(فئات وتاقات، حتى {SOURCE_LIMIT})</span></legend>
                 <p className="text-xs leading-5 text-labbaik-text-muted">تظهر الأعمدة بترتيب اختيارك بعد عمود «المخزّنة سابقاً»، ثم الإجمالي والإجمالي بدون تكرار.</p>
-                {sources.length ? (
+                {sourcesStatus === 'loading' ? (
+                  <p className="flex items-center gap-2 rounded-xl bg-labbaik-page px-4 py-3 text-xs font-bold text-labbaik-text-muted"><Loader2 size={15} className="animate-spin text-labbaik-blue" /> جاري تحميل الفئات والتاقات وأعدادها...</p>
+                ) : sourcesStatus === 'error' ? (
+                  <p className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-red-50 px-4 py-3 text-xs font-bold text-red-700 dark:bg-red-950/20 dark:text-red-300">
+                    تعذر تحميل الفئات والتاقات.
+                    <button type="button" onClick={() => setSourcesAttempt((value) => value + 1)} className="rounded-md border border-red-300 px-3 py-1 font-black hover:bg-red-100 dark:border-red-800 dark:hover:bg-red-950/40">إعادة المحاولة</button>
+                  </p>
+                ) : sources.length ? (
                   <div className="flex flex-wrap gap-2" aria-label="أعمدة التقرير">
                     {sources.map((source) => {
                       const order = activeSources.indexOf(source.key);
@@ -225,7 +242,20 @@ export default function CustomerExportDialog({ branches, initialStoreId, onClose
 
               <label className="block space-y-2">
                 <span className="flex items-center gap-2 text-sm font-black text-neutral-900 dark:text-white"><CalendarDays size={17} className="text-labbaik-blue" /> الأعداد المخزّنة سابقاً = المسجّلون قبل</span>
-                <input type="date" value={baselineDate} max={todayInRiyadh()} onChange={(event) => { setBaselineDate(event.target.value || todayInRiyadh()); setDownloaded(false); }} disabled={busy} className="h-11 w-full rounded-lg border border-labbaik-border bg-labbaik-page px-3 text-sm font-bold text-neutral-900 outline-none focus:border-labbaik-blue focus:ring-2 focus:ring-labbaik-blue/20 dark:text-white" />
+                <input type="date" value={baselineDate} max={todayInRiyadh()} onChange={(event) => { const value = event.target.value || todayInRiyadh(); setBaselineDate(value); saveSetting(BASELINE_STORAGE_KEY, value); setDownloaded(false); }} disabled={busy} className="h-11 w-full rounded-lg border border-labbaik-border bg-labbaik-page px-3 text-sm font-bold text-neutral-900 outline-none focus:border-labbaik-blue focus:ring-2 focus:ring-labbaik-blue/20 dark:text-white" />
+                <span className="block text-xs leading-5 text-labbaik-text-muted">اختر يوم الاستيراد أو بداية الفترة: من سُجّل قبله «مخزّن سابقاً»، ومن سُجّل فيه أو بعده «جديد».</span>
+              </label>
+
+              <label className="flex cursor-pointer items-start justify-between gap-4 rounded-xl border border-labbaik-border p-4 transition-colors hover:border-labbaik-blue/40">
+                <span>
+                  <b className="flex items-center gap-2 text-sm text-neutral-900 dark:text-white"><LayoutList size={17} className="text-labbaik-blue" /> تفاصيل الفروع</b>
+                  <span className="mt-1 block text-xs leading-5 text-labbaik-text-muted">صفحة لكل فرع: قبل وبعد، نسبة النمو، وكم من كل فئة وتاق عملاء جدد وكم مخزّنون سابقاً.</span>
+                </span>
+                <span className="relative mt-0.5 shrink-0">
+                  <input type="checkbox" role="switch" checked={branchDetails} disabled={busy} onChange={(event) => { setBranchDetails(event.target.checked); saveSetting(DETAILS_STORAGE_KEY, String(event.target.checked)); setDownloaded(false); }} className="peer sr-only" />
+                  <span className="block h-6 w-11 rounded-full bg-neutral-300 transition-colors peer-checked:bg-labbaik-blue peer-focus-visible:ring-2 peer-focus-visible:ring-labbaik-blue/30 dark:bg-neutral-700" />
+                  <span className="absolute right-0.5 top-0.5 size-5 rounded-full bg-white shadow transition-transform peer-checked:-translate-x-5" />
+                </span>
               </label>
             </>
           )}
