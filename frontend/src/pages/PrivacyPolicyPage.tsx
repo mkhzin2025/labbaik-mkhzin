@@ -10,7 +10,7 @@ export default function PrivacyPolicyPage() {
     document.title = 'سياسة الخصوصية | تيل بوت';
     const metaDesc = document.querySelector('meta[name="description"]');
     if (metaDesc) {
-      metaDesc.setAttribute('content', 'سياسة الخصوصية لمنصة لبيك لإدارة التواصل الذكي مع العملاء');
+      metaDesc.setAttribute('content', 'سياسة الخصوصية لمنصة تيل بوت لإدارة التواصل الذكي مع العملاء');
     }
   }, []);
 
@@ -25,7 +25,7 @@ export default function PrivacyPolicyPage() {
               <span>وثيقة قانونية رسمية</span>
             </div>
             <h1 className="text-2xl sm:text-3xl font-black text-neutral-900 dark:text-white">
-              {lang === 'ar' ? 'سياسة الخصوصية — لبيك' : 'Privacy Policy — Labbaik'}
+              {lang === 'ar' ? 'سياسة الخصوصية — تيل بوت' : 'Privacy Policy — Tael Bot'}
             </h1>
             <p className="text-xs text-neutral-500 font-semibold">
               {lang === 'ar' ? 'آخر تحديث: سبتمبر 2026' : 'Last updated: September 2026'}
@@ -65,7 +65,7 @@ export default function PrivacyPolicyPage() {
                 1. مقدمة ونطاق الخدمة
               </h2>
               <p>
-                تُعد منصة <strong>«لبيك» (Labbaik)</strong> منصة برمجية كخدمة (SaaS) متخصصة في إدارة قنوات التواصل والمحادثات مع العملاء، ومساعدة المنشآت على أتمتة الردود وإدارة حملات الرسائل وربط قنوات التواصل الرسمية مثل <strong>WhatsApp Business</strong> وتطبيقات <strong>Meta</strong>.
+                تُعد منصة <strong>«تيل بوت» (Tael Bot)</strong> منصة برمجية كخدمة (SaaS) متخصصة في إدارة قنوات التواصل والمحادثات مع العملاء، ومساعدة المنشآت على أتمتة الردود وإدارة حملات الرسائل وربط قنوات التواصل الرسمية مثل <strong>WhatsApp Business</strong> وتطبيقات <strong>Meta</strong>.
               </p>
               <p>
                 توضح سياسة الخصوصية هذه كيفية جمع البيانات واستخدامها ومعالجتها وحمايتها عند استخدام منصتنا. نحن ملتزمون بأعلى معايير الخصوصية والأمان وحماية البيانات الشخصية.
@@ -125,7 +125,7 @@ export default function PrivacyPolicyPage() {
               </h2>
               <div className="p-3.5 rounded-xl bg-green-500/10 border border-green-500/20 text-xs font-bold text-green-700 dark:text-green-400 flex items-center gap-2">
                 <CheckCircle2 size={16} />
-                <span>نؤكد بشكل قاطع: منصة لبيك لا تبيع بيانات العملاء أو المنظمات لأي جهة إعلانية أو تجارية إطلاقاً.</span>
+                <span>نؤكد بشكل قاطع: منصة تيل بوت لا تبيع بيانات العملاء أو المنظمات لأي جهة إعلانية أو تجارية إطلاقاً.</span>
               </div>
               <p>
                 تتم مشاركة البيانات حصراً بالقدر اللازم تقنياً لتقديم الخدمة عبر مزودي البنية التحتية الموثوقين:
@@ -176,7 +176,7 @@ export default function PrivacyPolicyPage() {
                 1. Overview & Service Scope
               </h2>
               <p>
-                <strong>Labbaik</strong> is a Software-as-a-Service (SaaS) customer communication management platform designed to help businesses manage customer messaging channels, automate smart responses, and integrate official communication tools including <strong>WhatsApp Business</strong> and <strong>Meta Cloud APIs</strong>.
+                <strong>Tael Bot</strong> is a Software-as-a-Service (SaaS) customer communication management platform designed to help businesses manage customer messaging channels, automate smart responses, and integrate official communication tools including <strong>WhatsApp Business</strong> and <strong>Meta Cloud APIs</strong>.
               </p>
               <p>
                 This Privacy Policy describes how we collect, use, process, and protect your information. We are strictly committed to data protection, transparency, and user privacy.
@@ -206,7 +206,7 @@ export default function PrivacyPolicyPage() {
               </h2>
               <ul className="list-disc list-inside space-y-1.5 pl-2 font-medium">
                 <li>We only use the permissions explicitly granted by the account owner to perform authorized actions: channel management, template synchronization, sending and receiving WhatsApp messages, and processing delivery statuses.</li>
-                <li>Labbaik never accesses unauthorized Meta assets outside the scoped WABA credentials.</li>
+                <li>Tael Bot never accesses unauthorized Meta assets outside the scoped WABA credentials.</li>
                 <li>Webhook updates are received and verified against strict HMAC signatures (X-Hub-Signature-256).</li>
               </ul>
             </Card>

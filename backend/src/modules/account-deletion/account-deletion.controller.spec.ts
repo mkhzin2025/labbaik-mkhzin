@@ -9,7 +9,7 @@ describe('AccountDeletionController', () => {
     service = {
       createPublicRequest: jest.fn().mockResolvedValue({
         success: true,
-        message: 'إذا كانت البيانات المدخلة مرتبطة بحساب في لبيك، فسيتم إرسال تعليمات التحقق والمتابعة.',
+        message: 'إذا كانت البيانات المدخلة مرتبطة بحساب في تيل بوت، فسيتم إرسال تعليمات التحقق والمتابعة.',
       }),
       listRequestsForAdmin: jest.fn().mockResolvedValue([]),
       updateStatusForAdmin: jest.fn().mockResolvedValue({

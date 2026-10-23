@@ -12,18 +12,18 @@ export const ids = {
 export const examples = {
   auth: {
     register: {
-      email: 'admin@labbaik.local',
+      email: 'admin@taelbot.local',
       password: 'Admin123!',
       fullName: 'Admin',
     },
     login: {
-      email: 'admin@labbaik.local',
+      email: 'admin@taelbot.local',
       password: 'Admin123!',
     },
     authResponse: {
       user: {
         id: ids.user,
-        email: 'admin@labbaik.local',
+        email: 'admin@taelbot.local',
         fullName: 'Admin',
         role: 'admin',
       },
@@ -33,7 +33,7 @@ export const examples = {
   user: {
     current: {
       id: ids.user,
-      email: 'admin@labbaik.local',
+      email: 'admin@taelbot.local',
       fullName: 'Admin',
       role: 'admin',
       createdAt: '2026-05-03T08:00:00.000Z',
@@ -45,12 +45,12 @@ export const examples = {
   },
   store: {
     create: {
-      name: 'Labbaik',
-      description: 'Labbaik response and communication platform',
+      name: 'Tael Bot',
+      description: 'Tael Bot response and communication platform',
       knowledgeBase: 'We answer customer messages in Arabic and English.',
       phoneNumber: '+966500000000',
-      website: 'https://labbaik.example',
-      logoUrl: 'https://labbaik.example/logo.png',
+      website: 'https://taelbot.com',
+      logoUrl: 'https://taelbot.com/logo.png',
     },
     update: {
       aiMode: 'always',
@@ -65,13 +65,13 @@ export const examples = {
     },
     current: {
       id: ids.store,
-      name: 'Labbaik',
-      description: 'Labbaik response and communication platform',
+      name: 'Tael Bot',
+      description: 'Tael Bot response and communication platform',
       aiMode: 'always',
       preferredModel: 'deepseek_groq',
       customTags: ['VIP', 'Needs follow-up'],
       currency: 'SAR',
-      owner: { id: ids.user, email: 'admin@labbaik.local' },
+      owner: { id: ids.user, email: 'admin@taelbot.local' },
     },
   },
   channel: {
@@ -159,7 +159,7 @@ export const examples = {
           id: 'welcome',
           type: 'message',
           data: {
-            text: 'مرحباً بك في لبّيك. كيف نقدر نخدمك؟',
+            text: 'مرحباً بك في تيل بوت. كيف نقدر نخدمك؟',
             buttons: [{ id: 'support', label: 'الدعم', value: 'support' }],
           },
         },

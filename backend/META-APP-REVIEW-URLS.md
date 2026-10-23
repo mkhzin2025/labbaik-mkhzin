@@ -1,4 +1,4 @@
-# Labbaik – Public URLs for Meta App Review
+# Tael Bot – Public URLs for Meta App Review
 
 Meta's App Review (Facebook/Instagram/WhatsApp Business) requires a public
 Privacy Policy URL and, for apps that store user data, a Data Deletion

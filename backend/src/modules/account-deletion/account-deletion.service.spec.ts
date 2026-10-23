@@ -40,7 +40,7 @@ describe('AccountDeletionService', () => {
     );
 
     expect(res.success).toBe(true);
-    expect(res.message).toBe('إذا كانت البيانات المدخلة مرتبطة بحساب في لبيك، فسيتم إرسال تعليمات التحقق والمتابعة.');
+    expect(res.message).toBe('إذا كانت البيانات المدخلة مرتبطة بحساب في تيل بوت، فسيتم إرسال تعليمات التحقق والمتابعة.');
     expect(requestRepository.create).toHaveBeenCalledWith(
       expect.objectContaining({
         email: 'test@example.com',

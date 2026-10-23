@@ -33,8 +33,8 @@ export default function TermsPage() {
       metaDesc.setAttribute(
         'content',
         lang === 'ar'
-          ? 'شروط وأحكام استخدام منصة لبيك لإدارة التواصل الذكي مع العملاء عبر قنوات واتساب وميتا.'
-          : 'Terms of Service governing the use of the Labbaik customer communication and messaging SaaS platform.'
+          ? 'شروط وأحكام استخدام منصة تيل بوت لإدارة التواصل الذكي مع العملاء عبر قنوات واتساب وميتا.'
+          : 'Terms of Service governing the use of the Tael Bot customer communication and messaging SaaS platform.'
       );
     }
   }, [lang]);
@@ -50,7 +50,7 @@ export default function TermsPage() {
               <span>{lang === 'ar' ? 'اتفاقية الاستخدام الرسمية' : 'Official Legal Agreement'}</span>
             </div>
             <h1 className="text-2xl sm:text-3xl font-black text-neutral-900 dark:text-white">
-              {lang === 'ar' ? 'شروط الخدمة — لبيك' : 'Terms of Service — Labbaik'}
+              {lang === 'ar' ? 'شروط الخدمة — تيل بوت' : 'Terms of Service — Tael Bot'}
             </h1>
             <p className="text-xs text-neutral-500 font-semibold">
               {lang === 'ar'
@@ -96,14 +96,14 @@ export default function TermsPage() {
                 1. مقدمة ونطاق سريان الشروط
               </h2>
               <p>
-                تحكم شروط الخدمة هذه («الشروط») استخدامك لمنصة <strong>«لبيك» (Labbaik)</strong> وجميع الخدمات والميزات والواجهات البرمجية المرتبطة بها. باستخدامك للمنصة أو إنشائك لحساب أو ربطك لأي قناة اتصال خارجية، فإنك تقر وتوافق على الالتزام الكامل بهذه الشروط وبـ{' '}
+                تحكم شروط الخدمة هذه («الشروط») استخدامك لمنصة <strong>«تيل بوت» (Tael Bot)</strong> وجميع الخدمات والميزات والواجهات البرمجية المرتبطة بها. باستخدامك للمنصة أو إنشائك لحساب أو ربطك لأي قناة اتصال خارجية، فإنك تقر وتوافق على الالتزام الكامل بهذه الشروط وبـ{' '}
                 <Link to="/privacy" className="text-labbaik-blue font-bold underline hover:opacity-80">
                   سياسة الخصوصية
                 </Link>
                 .
               </p>
               <p>
-                لبيك هي منصة برمجية كخدمة (SaaS) مصممة لمساعدة الشركات والمنشآت التجارية على إدارة التواصل مع عملائها عبر قنوات متعددة تشمل <strong>WhatsApp Business</strong> و <strong>Meta Cloud API</strong> وتطبيقات المراسلة والرد الآلي، وتنظيم سير المحادثات وإدارتها بين فرق العمل وفروع المنشأة.
+                تيل بوت هي منصة برمجية كخدمة (SaaS) مصممة لمساعدة الشركات والمنشآت التجارية على إدارة التواصل مع عملائها عبر قنوات متعددة تشمل <strong>WhatsApp Business</strong> و <strong>Meta Cloud API</strong> وتطبيقات المراسلة والرد الآلي، وتنظيم سير المحادثات وإدارتها بين فرق العمل وفروع المنشأة.
               </p>
             </Card>
 
@@ -136,7 +136,7 @@ export default function TermsPage() {
                 3. هيكل المنظمات (Organizations) والفروع والصلاحيات
               </h2>
               <p>
-                تم بناء بنية لبيك المعمارية بنظام عزل مشدد بين المستأجرين (Multi-tenant Isolation):
+                تم بناء بنية تيل بوت المعمارية بنظام عزل مشدد بين المستأجرين (Multi-tenant Isolation):
               </p>
               <ul className="list-disc list-inside space-y-1.5 pr-2 font-medium">
                 <li>تمتلك كل منظمة (Organization) مساحة بيانات مستقلة ومعزولة برمجياً ومنطقياً عن باقي المنظمات.</li>
@@ -157,7 +157,7 @@ export default function TermsPage() {
                 4. ربط الخدمات والتكاملات الخارجية (Integrations)
               </h2>
               <p>
-                تتيح لبيك تكاملات مع خدمات خارجية موثوقة لتشغيل وظائف المنصة الأساسية، ومنها:
+                تتيح تيل بوت تكاملات مع خدمات خارجية موثوقة لتشغيل وظائف المنصة الأساسية، ومنها:
               </p>
               <ul className="list-disc list-inside space-y-1.5 pr-2 font-medium">
                 <li>منظومة Meta و WhatsApp Business Cloud API للمراسلة المباشرة.</li>
@@ -166,7 +166,7 @@ export default function TermsPage() {
                 <li>مزودو خدمات الاستضافة، والبنية التحتية، وخدمات إرسال البريد الإلكتروني والإشعارات.</li>
               </ul>
               <p className="text-xs text-neutral-500 bg-neutral-100 dark:bg-white/5 p-3 rounded-xl">
-                <strong>تنويه نظامي:</strong> يخضع استخدام هذه الخدمات الخارجية أيضاً للشروط والسياسات الخاصة بكل مزود طرف ثالث. ولا تتحمل لبيك المسؤولية المباشرة عن انقطاع خدمات المزودين الخارجيين، أو إلغاء رموز الوصول (Tokens)، أو تعديل واجهات البرمجة (APIs) الخاصة بهم، أو أي قرارات تشغيلية تتخذها تلك الجهات خارج نطاق سيطرة لبيك.
+                <strong>تنويه نظامي:</strong> يخضع استخدام هذه الخدمات الخارجية أيضاً للشروط والسياسات الخاصة بكل مزود طرف ثالث. ولا تتحمل تيل بوت المسؤولية المباشرة عن انقطاع خدمات المزودين الخارجيين، أو إلغاء رموز الوصول (Tokens)، أو تعديل واجهات البرمجة (APIs) الخاصة بهم، أو أي قرارات تشغيلية تتخذها تلك الجهات خارج نطاق سيطرة تيل بوت.
               </p>
             </Card>
 
@@ -177,7 +177,7 @@ export default function TermsPage() {
                 5. استخدام WhatsApp Business و Meta
               </h2>
               <p>
-                عند ربط حساب واتساب للأعمال (WABA) التابع لمنشأتك مع لبيك، تقر وتلتزم بما يلي:
+                عند ربط حساب واتساب للأعمال (WABA) التابع لمنشأتك مع تيل بوت، تقر وتلتزم بما يلي:
               </p>
               <ul className="list-disc list-inside space-y-1.5 pr-2 font-medium">
                 <li>
@@ -190,10 +190,10 @@ export default function TermsPage() {
                   الامتناع التام عن إرسال الرسائل غير المرغوب فيها (Spam)، أو مراسلة مستخدمين دون موافقة مسبقة موثقة (Opt-in) وفق متطلبات واتساب والأنظمة السارية.
                 </li>
                 <li>
-                  استخدام القوالب (Templates) المعتمدة رسمياً من Meta، وإدراك أن Meta هي الجهة الوحيدة المخولة باعتماد أو رفض القوالب، ولا تضمن لبيك قبول أي قالب أو تصنيف رسالة.
+                  استخدام القوالب (Templates) المعتمدة رسمياً من Meta، وإدراك أن Meta هي الجهة الوحيدة المخولة باعتماد أو رفض القوالب، ولا تضمن تيل بوت قبول أي قالب أو تصنيف رسالة.
                 </li>
                 <li>
-                  تعتمد لبيك على تقنية الويب هوك (Webhooks) لاستقبال الرسائل وتحديثات حالات التسليم والقراءة (Sent, Delivered, Read, Failed) وفق الآلية التي توفرها Meta.
+                  تعتمد تيل بوت على تقنية الويب هوك (Webhooks) لاستقبال الرسائل وتحديثات حالات التسليم والقراءة (Sent, Delivered, Read, Failed) وفق الآلية التي توفرها Meta.
                 </li>
               </ul>
             </Card>
@@ -205,7 +205,7 @@ export default function TermsPage() {
                 6. المحتوى والاستخدام المحظور
               </h2>
               <p>
-                تتحمل المنشأة وحدها كامل المسؤولية عن محتوى الرسائل، والحملات، والقوالب، والملفات، والوسائط المرسلة عبر المنصة. يُحظر حظراً تاماً استخدام منصة لبيك في:
+                تتحمل المنشأة وحدها كامل المسؤولية عن محتوى الرسائل، والحملات، والقوالب، والملفات، والوسائط المرسلة عبر المنصة. يُحظر حظراً تاماً استخدام منصة تيل بوت في:
               </p>
               <ul className="list-disc list-inside space-y-1.5 pr-2 font-medium">
                 <li>نشر أو إرسال محتوى غير قانوني أو احتيالي أو مسيء أو مضلل.</li>
@@ -255,20 +255,20 @@ export default function TermsPage() {
                   تتضمن كل باقة حدوداً تشغيلية واضحة تشمل على سبيل المثال: عدد الفروع، والمستخدمين المصرح لهم، والقنوات المربوطة، ورسائل واتساب، واستهلاك الردود الذكية.
                 </li>
                 <li>
-                  تحتفظ لبيك بحق تعديل أسعار الباقات أو حدودها مستقبلاً، على أن يتم إشعار المشتركين بأي تعديل يؤثر على اشتراكاتهم الحالية بفترة معقولة قبل حلول موعد التجديد.
+                  تحتفظ تيل بوت بحق تعديل أسعار الباقات أو حدودها مستقبلاً، على أن يتم إشعار المشتركين بأي تعديل يؤثر على اشتراكاتهم الحالية بفترة معقولة قبل حلول موعد التجديد.
                 </li>
               </ul>
             </Card>
 
-            {/* 9. محفظة لبيك (Labbaik Wallet) */}
+            {/* 9. محفظة تيل بوت (Tael Bot Wallet) */}
             <Card variant="labbaik" className="space-y-3">
               <h2 className="text-base sm:text-lg font-black text-neutral-900 dark:text-white flex items-center gap-2">
                 <Wallet className="text-labbaik-blue" size={20} />
-                9. رصيد محفظة لبيك (Labbaik Wallet) والخدمات الاستهلاكية
+                9. رصيد محفظة تيل بوت (Tael Bot Wallet) والخدمات الاستهلاكية
               </h2>
               <ul className="list-disc list-inside space-y-1.5 pr-2 font-medium">
                 <li>
-                  تعتمد بعض الخدمات (مثل إرسال قوالب واتساب ورسوم استهلاك Meta المدفوعة أو الردود الذكية الإضافية) على الدفع المسبق عبر محفظة لبيك الرقمية.
+                  تعتمد بعض الخدمات (مثل إرسال قوالب واتساب ورسوم استهلاك Meta المدفوعة أو الردود الذكية الإضافية) على الدفع المسبق عبر محفظة تيل بوت الرقمية.
                 </li>
                 <li>
                   يتم الخصم التلقائي من رصيد المحفظة بحسب الاستهلاك الفعلي والأسعار الموضحة والمعلنة داخل المنصة لحظة الاستخدام.
@@ -290,7 +290,7 @@ export default function TermsPage() {
               </p>
               <ul className="list-disc list-inside space-y-1.5 pr-2 font-medium">
                 <li>
-                  لا تقوم منصة لبيك بتخزين أرقام البطاقات البنكية الكاملة أو رموز التحقق (CVC/CVV) على خوادمها نهائياً، بل تعتمد المعالجة على نظام التوكنات الآمنة (Tokenization) عبر مزود الدفع المعتمد.
+                  لا تقوم منصة تيل بوت بتخزين أرقام البطاقات البنكية الكاملة أو رموز التحقق (CVC/CVV) على خوادمها نهائياً، بل تعتمد المعالجة على نظام التوكنات الآمنة (Tokenization) عبر مزود الدفع المعتمد.
                 </li>
                 <li>
                   يقتصر ما يتم حفظه لأغراض المحاسبة وتأكيد المعاملات على معرف المعاملة، ونوع الشبكة، والرمز المشفر، وآخر 4 أرقام من البطاقة إن لزم.
@@ -327,7 +327,7 @@ export default function TermsPage() {
                 12. تعليق الحساب أو إنهاء الخدمة
               </h2>
               <p>
-                يحق للبيك تعليق أو تقييد أو إنهاء وصول المنشأة للمنصة كلياً أو جزئياً، مع إشعار مسبق متى كان ذلك ممكناً، في الحالات التالية:
+                يحق لتيل بوت تعليق أو تقييد أو إنهاء وصول المنشأة للمنصة كلياً أو جزئياً، مع إشعار مسبق متى كان ذلك ممكناً، في الحالات التالية:
               </p>
               <ul className="list-disc list-inside space-y-1.5 pr-2 font-medium">
                 <li>مخالفة أي بند من بنود هذه الشروط أو سياسة الخصوصية.</li>
@@ -371,10 +371,10 @@ export default function TermsPage() {
               </h2>
               <ul className="list-disc list-inside space-y-1.5 pr-2 font-medium">
                 <li>
-                  <strong>ملكية منصة لبيك:</strong> تحتفظ لبيك بجميع حقوق الملكية الفكرية والعلامات التجارية والبرمجيات وشفرات المصدر والواجهات والتصاميم الخاصة بالمنصة.
+                  <strong>ملكية منصة تيل بوت:</strong> تحتفظ تيل بوت بجميع حقوق الملكية الفكرية والعلامات التجارية والبرمجيات وشفرات المصدر والواجهات والتصاميم الخاصة بالمنصة.
                 </li>
                 <li>
-                  <strong>ملكية العميل لبياناته:</strong> تحتفظ المنشأة المشتركة بكامل حقوق الملكية لبيانات عملائها، ونصوص محادثاتها، ومحتواها وقوالبها الخاصة، ولا تدعي لبيك أي ملكية لتلك البيانات.
+                  <strong>ملكية العميل لبياناته:</strong> تحتفظ المنشأة المشتركة بكامل حقوق الملكية لبيانات عملائها، ونصوص محادثاتها، ومحتواها وقوالبها الخاصة، ولا تدعي تيل بوت أي ملكية لتلك البيانات.
                 </li>
               </ul>
             </Card>
@@ -416,7 +416,7 @@ export default function TermsPage() {
                 17. النسخ الاحتياطي ومسؤولية الحفظ
               </h2>
               <p>
-                تطبق لبيك إجراءات نسخ احتياطي دورية لحماية بنية النظام واستعادة التشغيل عند الكوارث التقنية. وعلى الرغم من ذلك، يُوصى بأن تحتفظ المنشآت بنسخها الإضافية الخاصة للبيانات الحرجة وسجلات العملاء التي تهم نشاطها التجاري.
+                تطبق تيل بوت إجراءات نسخ احتياطي دورية لحماية بنية النظام واستعادة التشغيل عند الكوارث التقنية. وعلى الرغم من ذلك، يُوصى بأن تحتفظ المنشآت بنسخها الإضافية الخاصة للبيانات الحرجة وسجلات العملاء التي تهم نشاطها التجاري.
               </p>
             </Card>
 
@@ -427,12 +427,12 @@ export default function TermsPage() {
                 18. حدود المسؤولية (Limitation of Liability)
               </h2>
               <p>
-                إلى الحد الأقصى المسموح به نظاماً، لا تتحمل لبيك أي مسؤولية عن أي أضرار غير مباشرة أو تبعية أو خسائر في الأرباح أو السمعة التجارية تنتج عن:
+                إلى الحد الأقصى المسموح به نظاماً، لا تتحمل تيل بوت أي مسؤولية عن أي أضرار غير مباشرة أو تبعية أو خسائر في الأرباح أو السمعة التجارية تنتج عن:
               </p>
               <ul className="list-disc list-inside space-y-1.5 pr-2 font-medium">
                 <li>إساءة استخدام المنصة من قبل المشترك أو أي من تابعيه ومستخدميه.</li>
                 <li>إيقاف أو تعليق حساب واتساب للأعمال (WABA) من قبل شركة Meta نتيجة مخالفة سياساتها.</li>
-                <li>أعطال خدمات الاتصال والمزودين الخارجيين الخارجة عن سيطرة لبيك المعقولة.</li>
+                <li>أعطال خدمات الاتصال والمزودين الخارجيين الخارجة عن سيطرة تيل بوت المعقولة.</li>
                 <li>أي إجراء اتخذته المنشأة اعتماداً على مقترحات الردود الآلية دون مراجعة وتدقيق بشري.</li>
               </ul>
             </Card>
@@ -444,7 +444,7 @@ export default function TermsPage() {
                 19. التعديلات على الشروط
               </h2>
               <p>
-                يحق للبيك تحديث شروط الخدمة هذه عند الحاجة لمواكبة التحديثات التشغيلية أو التنظيمية. وتصبح التعديلات سارية المفعول بمجرد نشرها على هذه الصفحة مع تحديث تاريخ «آخر تحديث». وفي حال كانت التعديلات جوهرية، سيتم إشعار المشتركين عبر لوحة التحكم أو عبر البريد الإلكتروني المسجل.
+                يحق لتيل بوت تحديث شروط الخدمة هذه عند الحاجة لمواكبة التحديثات التشغيلية أو التنظيمية. وتصبح التعديلات سارية المفعول بمجرد نشرها على هذه الصفحة مع تحديث تاريخ «آخر تحديث». وفي حال كانت التعديلات جوهرية، سيتم إشعار المشتركين عبر لوحة التحكم أو عبر البريد الإلكتروني المسجل.
               </p>
             </Card>
 
@@ -497,14 +497,14 @@ export default function TermsPage() {
                 1. Introduction & Scope
               </h2>
               <p>
-                These Terms of Service ("Terms") govern your access to and use of the <strong>Labbaik</strong> platform, services, software, APIs, and associated applications. By accessing or using the platform, registering an account, or connecting any external communication channel, you agree to be bound by these Terms and our{' '}
+                These Terms of Service ("Terms") govern your access to and use of the <strong>Tael Bot</strong> platform, services, software, APIs, and associated applications. By accessing or using the platform, registering an account, or connecting any external communication channel, you agree to be bound by these Terms and our{' '}
                 <Link to="/privacy" className="text-labbaik-blue font-bold underline hover:opacity-80">
                   Privacy Policy
                 </Link>
                 .
               </p>
               <p>
-                Labbaik is a Software-as-a-Service (SaaS) platform designed to help businesses manage customer communication channels, including <strong>WhatsApp Business</strong> via <strong>Meta Cloud API</strong>, automated workflows, and multi-branch team collaboration.
+                Tael Bot is a Software-as-a-Service (SaaS) platform designed to help businesses manage customer communication channels, including <strong>WhatsApp Business</strong> via <strong>Meta Cloud API</strong>, automated workflows, and multi-branch team collaboration.
               </p>
             </Card>
 
@@ -539,7 +539,7 @@ export default function TermsPage() {
                 4. Third-Party Integrations
               </h2>
               <p>
-                Labbaik integrates with third-party providers including Meta Cloud API, Moyasar Payment Gateway, AI model providers, and cloud hosting infrastructure. Your use of third-party services is subject to their respective terms. Labbaik is not liable for third-party outages, API deprecations, token revocations, or policy changes by external vendors.
+                Tael Bot integrates with third-party providers including Meta Cloud API, Moyasar Payment Gateway, AI model providers, and cloud hosting infrastructure. Your use of third-party services is subject to their respective terms. Tael Bot is not liable for third-party outages, API deprecations, token revocations, or policy changes by external vendors.
               </p>
             </Card>
 
@@ -549,10 +549,10 @@ export default function TermsPage() {
                 5. WhatsApp Business & Meta Cloud API Terms
               </h2>
               <ul className="list-disc list-inside space-y-1.5 pl-2 font-medium">
-                <li>You must own or be legally authorized to manage the WhatsApp Business Account (WABA) connected to Labbaik.</li>
+                <li>You must own or be legally authorized to manage the WhatsApp Business Account (WABA) connected to Tael Bot.</li>
                 <li>You must strictly comply with Meta's WhatsApp Business and Commerce Policies.</li>
                 <li>Sending spam, unsolicited broadcasts, or messaging individuals without documented prior consent (opt-in) is strictly forbidden.</li>
-                <li>Template approval is solely determined by Meta; Labbaik does not guarantee approval or categorization by Meta.</li>
+                <li>Template approval is solely determined by Meta; Tael Bot does not guarantee approval or categorization by Meta.</li>
                 <li>Webhooks are utilized to process incoming messages and delivery event statuses (sent, delivered, read, failed).</li>
               </ul>
             </Card>
@@ -590,10 +590,10 @@ export default function TermsPage() {
             <Card variant="labbaik" className="space-y-3">
               <h2 className="text-base sm:text-lg font-black text-neutral-900 dark:text-white flex items-center gap-2">
                 <Wallet className="text-labbaik-blue" size={20} />
-                9. Labbaik Wallet & Pay-As-You-Go Services
+                9. Tael Bot Wallet & Pay-As-You-Go Services
               </h2>
               <p>
-                Consumable services such as Meta messaging fees or additional AI capacity are deducted from your prepaid Labbaik Wallet balance according to visible system rates. Erroneous failed transactions may be credited back upon verification.
+                Consumable services such as Meta messaging fees or additional AI capacity are deducted from your prepaid Tael Bot Wallet balance according to visible system rates. Erroneous failed transactions may be credited back upon verification.
               </p>
             </Card>
 
@@ -603,7 +603,7 @@ export default function TermsPage() {
                 10. Payment Processing & Card Security
               </h2>
               <p>
-                Online payments are securely processed through Moyasar (PCI-DSS compliant). Labbaik does not store raw credit card numbers or CVC codes on its servers; transactions utilize secure cryptographic tokenization.
+                Online payments are securely processed through Moyasar (PCI-DSS compliant). Tael Bot does not store raw credit card numbers or CVC codes on its servers; transactions utilize secure cryptographic tokenization.
               </p>
             </Card>
 

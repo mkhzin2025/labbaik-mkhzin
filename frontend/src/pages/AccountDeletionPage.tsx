@@ -22,7 +22,7 @@ export default function AccountDeletionPage() {
     document.title = 'حذف الحساب والبيانات | تيل بوت';
     const metaDesc = document.querySelector('meta[name="description"]');
     if (metaDesc) {
-      metaDesc.setAttribute('content', 'تعليمات وطلب حذف حسابك وبياناتك من منصة لبيك');
+      metaDesc.setAttribute('content', 'تعليمات وطلب حذف حسابك وبياناتك من منصة تيل بوت');
     }
   }, []);
 
@@ -74,11 +74,11 @@ export default function AccountDeletionPage() {
               <span>{lang === 'ar' ? 'حذف الحساب والبيانات' : 'Data & Account Deletion'}</span>
             </div>
             <h1 className="text-2xl sm:text-3xl font-black text-neutral-900 dark:text-white">
-              {lang === 'ar' ? 'حذف الحساب والبيانات — لبيك' : 'Account & Data Deletion — Labbaik'}
+              {lang === 'ar' ? 'حذف الحساب والبيانات — تيل بوت' : 'Account & Data Deletion — Tael Bot'}
             </h1>
             <p className="text-xs text-neutral-500 font-semibold">
               {lang === 'ar'
-                ? 'تعليمات ونموذج طلب حذف بيانات الحساب بما يتوافق مع سياسات Meta ومنصة لبيك'
+                ? 'تعليمات ونموذج طلب حذف بيانات الحساب بما يتوافق مع سياسات Meta ومنصة تيل بوت'
                 : 'Instructions and request form for account and data deletion in compliance with Meta guidelines'}
             </p>
           </div>
@@ -147,7 +147,7 @@ export default function AccountDeletionPage() {
             </h2>
             <p className="text-xs text-neutral-500">
               {lang === 'ar'
-                ? 'يرجى إدخال البريد الإلكتروني المسجل في لبيك لإرسال تعليمات التحقق واستكمال الحذف.'
+                ? 'يرجى إدخال البريد الإلكتروني المسجل في تيل بوت لإرسال تعليمات التحقق واستكمال الحذف.'
                 : 'Enter your registered email address to receive identity verification instructions.'}
             </p>
           </div>

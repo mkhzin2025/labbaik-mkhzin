@@ -41,7 +41,7 @@ const Card = React.forwardRef<HTMLDivElement, CardProps>(
     },
     ref
   ) => {
-    // Map Labbaik variant with isSelected state
+    // Map Tael Bot variant with isSelected state
     let computedVariant = variant;
     if (variant === 'labbaik' && isSelected) {
       computedVariant = 'labbaik-selected';

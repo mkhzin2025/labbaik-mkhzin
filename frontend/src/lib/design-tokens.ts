@@ -1,6 +1,6 @@
 /**
  * Design Tokens
- * Central source of truth for Labbaik design system
+ * Central source of truth for Tael Bot design system
  * Unified approach: Tailwind-based tokens exported for programmatic access
  */
 

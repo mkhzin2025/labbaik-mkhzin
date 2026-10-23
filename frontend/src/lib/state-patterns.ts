@@ -1,7 +1,7 @@
 /**
  * State Patterns Guide
  * 
- * This document defines consistent patterns for handling data states across Labbaik:
+ * This document defines consistent patterns for handling data states across Tael Bot:
  * - Loading states (initial load, pagination, refresh)
  * - Empty states (no data available)
  * - Error states (load failure, validation error, network error)
