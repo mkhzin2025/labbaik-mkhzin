@@ -60,6 +60,7 @@ export class CustomersController {
     @Query('segment') segment?: CustomerSegment,
     @Query('sort') sort?: CustomerSortKey,
     @Query('dir') dir?: 'asc' | 'desc',
+    @Query('counts') counts?: string,
   ) {
     const organization = await this.organizationsService.getForUser(req.user.id, req.user.organizationId);
     const requestedStoreIds = this.csv(storeIds);
@@ -74,7 +75,8 @@ export class CustomersController {
       whatsappOnly: whatsappOnly === 'true',
     };
     // Without `page` the endpoint keeps returning the full array (used by broadcast recipient pickers).
-    const paging = page !== undefined ? this.pageOptions(page, limit, segment, sort, dir) : null;
+    // `counts=false`: same filters as the previous page, so the client reuses the totals it already has.
+    const paging = page !== undefined ? { ...this.pageOptions(page, limit, segment, sort, dir), withCounts: counts !== 'false' } : null;
     if (scope === 'organization' || !storeId) {
       const access = await this.organizationsService.assertRequestedStoresAccessible(req.user.id, organization.id, requestedStoreIds);
       if (!access.storeIds.length) return paging ? { items: [], total: 0, page: paging.page, limit: paging.limit, counts: { all: 0, categorized: 0, uncategorized: 0, tagged: 0, untagged: 0 } } : [];

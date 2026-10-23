@@ -4,7 +4,7 @@ import { SourceStatisticsReport, SourceStatisticsRow, StatisticsSource, writeSou
 import { AGE_TAG_PREFIX, COMPETITION_CATEGORY, COMPETITION_ONLINE_CATEGORY } from './competition-sync.plan';
 import { BadRequestException, Injectable, Logger, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Brackets, In, Repository } from 'typeorm';
+import { Brackets, In, Repository, SelectQueryBuilder } from 'typeorm';
 import { Customer } from './entities/customer.entity';
 import {
   CreateCustomerCategoryDto,
@@ -85,6 +85,8 @@ export type CustomerPageOptions = {
   segment?: CustomerSegment;
   sort?: CustomerSortKey;
   dir?: 'asc' | 'desc';
+  /** false skips the segment totals (same filters, another page or sort). */
+  withCounts?: boolean;
 };
 
 const SORT_COLUMNS: Record<CustomerSortKey, string> = {
@@ -169,6 +171,34 @@ export class CustomersService implements OnModuleInit {
       );
     } catch (e: any) {
       this.logger.warn(`Auto-migration for marketingOptOut skipped or failed: ${e.message}`);
+    }
+    void this.ensureListIndexes();
+  }
+
+  /**
+   * Indexes behind the customers list: trigram indexes make "contains" search on name/email/phone
+   * use an index instead of scanning every customer, and the btree ones serve the list sort orders.
+   * Built CONCURRENTLY after boot so a large table never blocks startup or writes
+   * (see CUSTOMERS-LIST-INDEXES.sql for running it by hand).
+   */
+  private async ensureListIndexes() {
+    const statements = [
+      'CREATE EXTENSION IF NOT EXISTS pg_trgm',
+      `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_customers_fullname_trgm ON customers USING gin (LOWER(COALESCE("fullName", '')) gin_trgm_ops)`,
+      `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_customers_email_trgm ON customers USING gin (LOWER(COALESCE(email, '')) gin_trgm_ops)`,
+      `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_customers_phone_trgm ON customers USING gin (COALESCE("phoneNumber", '') gin_trgm_ops)`,
+      // Must match the list's ORDER BY exactly (direction, NULLS LAST, then id) to be walked in order.
+      'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_customers_updated_at ON customers ("updatedAt" DESC NULLS LAST, id)',
+      'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_customers_store_updated_at ON customers ("storeId", "updatedAt" DESC NULLS LAST, id)',
+      'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_customers_created_at ON customers ("createdAt" DESC NULLS LAST, id)',
+      'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_customers_full_name ON customers ("fullName" ASC NULLS LAST, id)',
+    ];
+    for (const statement of statements) {
+      try {
+        await this.customerRepository.query(statement);
+      } catch (e: any) {
+        this.logger.warn(`Customer list index skipped (${statement.slice(0, 60)}…): ${e.message}`);
+      }
     }
   }
 
@@ -865,41 +895,15 @@ export class CustomersService implements OnModuleInit {
 
   /**
    * One page of customers plus per-segment totals for the same filters, so the UI can show
-   * accurate counts without loading every customer.
+   * accurate counts without loading every customer. Totals only depend on the filters, so callers
+   * paging or re-sorting the same filters can skip them (`withCounts: false`) and reuse the last ones.
    */
   async findPage(scope: { organizationId?: string; storeId?: string }, filters: CustomerFilters, options: CustomerPageOptions) {
     const base = () => this.filteredQuery(scope, filters);
-
-    const [all, categorized, tagged] = await Promise.all([
-      base().getCount(),
-      base().andWhere(HAS_CATEGORY).getCount(),
-      base().andWhere(HAS_TAG).getCount(),
+    const [counts, rows] = await Promise.all([
+      options.withCounts === false ? Promise.resolve(null) : this.segmentCounts(base),
+      this.pageIds(base(), options),
     ]);
-    const counts: Record<CustomerSegment, number> = {
-      all,
-      categorized,
-      uncategorized: all - categorized,
-      tagged,
-      untagged: all - tagged,
-    };
-
-    const page = base();
-    switch (options.segment) {
-      case 'categorized': page.andWhere(HAS_CATEGORY); break;
-      case 'uncategorized': page.andWhere(`NOT ${HAS_CATEGORY}`); break;
-      case 'tagged': page.andWhere(HAS_TAG); break;
-      case 'untagged': page.andWhere(`NOT ${HAS_TAG}`); break;
-    }
-
-    const column = SORT_COLUMNS[options.sort || 'updatedAt'] || SORT_COLUMNS.updatedAt;
-    const direction = options.dir === 'asc' ? 'ASC' : 'DESC';
-    const rows = await page
-      .select(['customer.id', 'customer.storeId'])
-      .orderBy(column, direction, 'NULLS LAST')
-      .addOrderBy('customer.id', 'ASC')
-      .offset((options.page - 1) * options.limit)
-      .limit(options.limit)
-      .getMany();
 
     const ids = rows.map((row) => row.id);
     const loaded = await this.reloadWithRelations(ids);
@@ -911,11 +915,43 @@ export class CustomersService implements OnModuleInit {
 
     return {
       items,
-      total: counts[options.segment || 'all'] ?? all,
+      total: counts ? counts[options.segment || 'all'] ?? counts.all : null,
       page: options.page,
       limit: options.limit,
       counts,
     };
+  }
+
+  /**
+   * Segment totals. Kept as separate counts: a top-level EXISTS becomes a hash semi-join, while the same
+   * test inside COUNT(*) FILTER runs per row and measured ~2.5x slower on 100k customers.
+   */
+  private async segmentCounts(query: () => SelectQueryBuilder<Customer>): Promise<Record<CustomerSegment, number>> {
+    const [all, categorized, tagged] = await Promise.all([
+      query().getCount(),
+      query().andWhere(HAS_CATEGORY).getCount(),
+      query().andWhere(HAS_TAG).getCount(),
+    ]);
+    return { all, categorized, uncategorized: all - categorized, tagged, untagged: all - tagged };
+  }
+
+  private async pageIds(page: SelectQueryBuilder<Customer>, options: CustomerPageOptions) {
+    switch (options.segment) {
+      case 'categorized': page.andWhere(HAS_CATEGORY); break;
+      case 'uncategorized': page.andWhere(`NOT ${HAS_CATEGORY}`); break;
+      case 'tagged': page.andWhere(HAS_TAG); break;
+      case 'untagged': page.andWhere(`NOT ${HAS_TAG}`); break;
+    }
+
+    const column = SORT_COLUMNS[options.sort || 'updatedAt'] || SORT_COLUMNS.updatedAt;
+    const direction = options.dir === 'asc' ? 'ASC' : 'DESC';
+    return page
+      .select(['customer.id', 'customer.storeId'])
+      .orderBy(column, direction, 'NULLS LAST')
+      .addOrderBy('customer.id', 'ASC')
+      .offset((options.page - 1) * options.limit)
+      .limit(options.limit)
+      .getMany();
   }
 
   /** Adds or removes categories/tags on many customers of one branch at once. */
@@ -1029,7 +1065,8 @@ export class CustomersService implements OnModuleInit {
     const query = this.customerRepository.createQueryBuilder('customer').leftJoin('customer.store', 'store');
 
     if (scope.storeId) query.where('customer.storeId = :storeId', { storeId: scope.storeId });
-    else if (scope.organizationId) query.where('store.organizationId = :organizationId', { organizationId: scope.organizationId });
+    // A semi-join rather than a filter on the joined store, so the list can walk the sort index and stop after one page.
+    else if (scope.organizationId) query.where('customer.storeId IN (SELECT org_store.id FROM stores org_store WHERE org_store."organizationId" = :organizationId)', { organizationId: scope.organizationId });
     else throw new BadRequestException('Organization or branch scope is required');
 
     if (filters.storeIds?.length) {

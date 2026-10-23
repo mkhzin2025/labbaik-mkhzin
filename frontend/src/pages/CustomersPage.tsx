@@ -71,6 +71,14 @@ interface CustomerPage {
   counts: Record<Segment, number>;
 }
 
+/** With `counts=false` the server skips the totals and returns null for them. */
+type CustomerPageResponse = Omit<CustomerPage, 'total' | 'counts'> & { total: number | null; counts: Record<Segment, number> | null };
+
+/** A visited page is shown instantly; younger than this it is not even refetched. */
+const PAGE_CACHE_TTL_MS = 20_000;
+/** Segment totals are reused for the same filters until they are this old. */
+const COUNTS_TTL_MS = 60_000;
+
 const SEGMENTS: { key: Segment; label: string }[] = [
   { key: 'all', label: 'الكل' },
   { key: 'categorized', label: 'لديهم فئة' },
@@ -125,6 +133,8 @@ export default function CustomersPage() {
   const [showCompetitionSync, setShowCompetitionSync] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
   const requestId = useRef(0);
+  const pageCache = useRef(new Map<string, { at: number; data: CustomerPage }>());
+  const countsCache = useRef<{ key: string; counts: Record<Segment, number>; at: number } | null>(null);
 
   useEffect(() => { writeStored(VIEW_MODE_KEY, viewMode); }, [viewMode]);
   useEffect(() => { writeStored(PAGE_SIZE_KEY, String(pageSize)); }, [pageSize]);
@@ -193,42 +203,82 @@ export default function CustomersPage() {
     void loadTaxonomy(storeId);
   }, [storeId, loadTaxonomy]);
 
+  // Segment totals depend only on these filters, so paging, sorting or switching segment reuses them.
+  const countsKey = JSON.stringify([storeId, search, categoryFilter, tagFilter]);
+  const pageParams = useCallback((target: number) => ({
+    ...(storeId === ALL_BRANCHES ? { scope: 'organization' } : { storeId }),
+    page: target,
+    limit: pageSize,
+    segment,
+    sort: sortKey,
+    dir: sortDir,
+    search: search || undefined,
+    categoryIds: categoryFilter.length ? categoryFilter.join(',') : undefined,
+    tagIds: tagFilter.length ? tagFilter.join(',') : undefined,
+  }), [storeId, pageSize, segment, sortKey, sortDir, search, categoryFilter, tagFilter]);
+
+  const requestPage = useCallback(async (target: number) => {
+    const params = pageParams(target);
+    const known = countsCache.current;
+    const reuseCounts = known?.key === countsKey && Date.now() - known.at < COUNTS_TTL_MS;
+    const { data } = await api.get<CustomerPageResponse>('/customers', { params: { ...params, counts: reuseCounts ? 'false' : undefined } });
+    const counts = data.counts || known?.counts || EMPTY_COUNTS;
+    if (data.counts) countsCache.current = { key: countsKey, counts: data.counts, at: Date.now() };
+    const full: CustomerPage = { ...data, counts, total: data.total ?? counts[segment] };
+    pageCache.current.set(JSON.stringify(params), { at: Date.now(), data: full });
+    return full;
+  }, [pageParams, countsKey, segment]);
+
+  /** Loads the next page in the background so "next" opens instantly. */
+  const prefetch = useCallback((target: number, total: number) => {
+    if (target > Math.ceil(total / pageSize)) return;
+    const cached = pageCache.current.get(JSON.stringify(pageParams(target)));
+    if (cached && Date.now() - cached.at < PAGE_CACHE_TTL_MS) return;
+    void requestPage(target).catch(() => undefined);
+  }, [pageParams, requestPage, pageSize]);
+
   const fetchCustomers = useCallback(async () => {
     if (!storeId) return;
     const id = ++requestId.current;
+    // Show a page seen recently right away; refetch it quietly only once it is a little old.
+    const cached = pageCache.current.get(JSON.stringify(pageParams(page)));
+    if (cached) {
+      setResult(cached.data);
+      if (Date.now() - cached.at < PAGE_CACHE_TTL_MS) {
+        setLoading(false);
+        prefetch(page + 1, cached.data.total);
+        return;
+      }
+    }
     setLoading(true);
     try {
-      const { data } = await api.get<CustomerPage>('/customers', {
-        params: {
-          ...(storeId === ALL_BRANCHES ? { scope: 'organization' } : { storeId }),
-          page,
-          limit: pageSize,
-          segment,
-          sort: sortKey,
-          dir: sortDir,
-          search: search || undefined,
-          categoryIds: categoryFilter.length ? categoryFilter.join(',') : undefined,
-          tagIds: tagFilter.length ? tagFilter.join(',') : undefined,
-        },
-      });
+      const data = await requestPage(page);
       if (id !== requestId.current) return; // a newer request already replaced this one
       setResult(data);
       // Deleting the last customers of a page would otherwise leave the user on an empty page.
       const lastPage = Math.max(1, Math.ceil((data.total || 0) / pageSize));
       if (page > lastPage) setPage(lastPage);
+      else prefetch(page + 1, data.total);
     } catch (error) {
       if (id === requestId.current) showToast(errorMessage(error, 'تعذر تحميل العملاء.'), 'error');
     } finally {
       if (id === requestId.current) setLoading(false);
     }
-  }, [storeId, page, setPage, pageSize, segment, sortKey, sortDir, search, categoryFilter, tagFilter, showToast]);
+  }, [storeId, page, setPage, pageSize, pageParams, requestPage, prefetch, showToast]);
 
   useEffect(() => { void fetchCustomers(); }, [fetchCustomers]);
 
+  /** After any change to customers or their labels: forget cached pages and totals, then reload. */
+  const refreshCustomers = useCallback(() => {
+    pageCache.current.clear();
+    countsCache.current = null;
+    return fetchCustomers();
+  }, [fetchCustomers]);
+
   const onCompetitionSynced = useCallback(() => {
-    void fetchCustomers();
+    void refreshCustomers();
     void loadTaxonomy(storeId);
-  }, [fetchCustomers, loadTaxonomy, storeId]);
+  }, [refreshCustomers, loadTaxonomy, storeId]);
 
   const customers = result?.items || [];
   const counts = result?.counts || EMPTY_COUNTS;
@@ -282,7 +332,7 @@ export default function CustomersPage() {
       const label = kind === 'category' ? 'الفئة' : 'التاق';
       showToast(mode === 'add' ? `تمت إضافة ${label} «${item.name}» إلى ${selection.size} عميل.` : `تمت إزالة ${label} «${item.name}» من ${selection.size} عميل.`, 'success');
       setSelection(new Set());
-      await Promise.all([fetchCustomers(), loadTaxonomy(storeId)]);
+      await Promise.all([refreshCustomers(), loadTaxonomy(storeId)]);
     } catch (error) {
       showToast(errorMessage(error, 'تعذر تحديث العملاء المحددين.'), 'error');
     } finally {
@@ -546,8 +596,8 @@ export default function CustomersPage() {
         <CustomerProfile
           customerId={selectedCustomerId}
           onClose={() => setSelectedCustomerId(null)}
-          onUpdated={() => { void fetchCustomers(); void loadTaxonomy(storeId); }}
-          onTransferred={(result) => { setSelectedCustomerId(result.customer.id); void fetchCustomers(); void loadTaxonomy(storeId); }}
+          onUpdated={() => { void refreshCustomers(); void loadTaxonomy(storeId); }}
+          onTransferred={(result) => { setSelectedCustomerId(result.customer.id); void refreshCustomers(); void loadTaxonomy(storeId); }}
         />
       )}
 
@@ -559,7 +609,7 @@ export default function CustomersPage() {
           tags={tags}
           usage={usage}
           onClose={() => setShowTaxonomy(false)}
-          onChanged={async () => { await Promise.all([loadTaxonomy(storeId), fetchCustomers()]); }}
+          onChanged={async () => { await Promise.all([loadTaxonomy(storeId), refreshCustomers()]); }}
         />
       )}
 
@@ -569,7 +619,7 @@ export default function CustomersPage() {
           initialStoreId={allBranches ? branches[0]?.id : storeId}
           onClose={() => setShowImport(false)}
           onImported={() => {
-            void fetchCustomers();
+            void refreshCustomers();
             void loadTaxonomy(storeId);
           }}
         />
