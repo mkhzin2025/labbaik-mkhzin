@@ -9,7 +9,7 @@ import { CustomersService } from '../customers/customers.service';
 import { existsSync, readFileSync } from 'fs';
 import { FlowsService } from '../flows/flows.service';
 import { Flow } from '../flows/entities/flow.entity';
-import { continueFlow, fillVariables, NEW_CONVERSATION_GAP_MS, nodeAsText, startFlow } from '../flows/flow-engine';
+import { continueFlow, fillVariables, MAX_LIST_ROWS, MAX_REPLY_BUTTONS, NEW_CONVERSATION_GAP_MS, nodeAsText, startFlow } from '../flows/flow-engine';
 import type { FlowMedia, FlowNode, FlowStep } from '../flows/flow-engine';
 import { MessagingService } from '../channels/messaging.service';
 import { WhatsAppMediaService } from '../channels/whatsapp-media.service';
@@ -519,7 +519,14 @@ export class WebhooksService {
     ];
     const textPart = (body: string): FlowMessagePart => ({ payload: { type: 'text', text: { body, preview_url: /https?:\/\//i.test(body) } }, interactive: false, type: 'text', text: body, attachments: [] });
 
-    switch (node.type) {
+    // Flows saved by the first editor can exceed WhatsApp's limits (more than 3 buttons, empty text);
+    // send the closest message Meta accepts instead of failing. Numbered text replies still match options.
+    const options = data.buttons || [];
+    const kind = node.type === 'buttons' && options.length > MAX_REPLY_BUTTONS ? 'list' : node.type;
+    if ((kind === 'buttons' || kind === 'list') && (options.length === 0 || options.length > MAX_LIST_ROWS)) return [textPart(inboxText || text || '…')];
+    if (kind === 'buttons' || kind === 'list' || kind === 'link') text = text.trim() || 'اختر من الخيارات:';
+
+    switch (kind) {
       case 'buttons': {
         const media: FlowMedia | null = data.media || (data.imageUrl ? { type: 'image', link: data.imageUrl } : null);
         const header = media
