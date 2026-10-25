@@ -306,3 +306,15 @@ textarea {
 :root[data-theme="dark"] .landing ::selection {
   background: rgba(178, 146, 221, 0.35);
 }
+
+/* Flow builder canvas (React Flow) follows the app palette in both themes. */
+.react-flow {
+  --xy-background-color: var(--color-labbaik-page);
+  --xy-minimap-background-color: var(--color-labbaik-surface);
+  --xy-controls-button-background-color: var(--color-labbaik-surface);
+  --xy-controls-button-background-color-hover: var(--color-labbaik-deep);
+  --xy-controls-button-color: var(--color-labbaik-text);
+  --xy-controls-button-border-color: var(--color-labbaik-border);
+  --xy-edge-stroke-selected: var(--color-labbaik-blue);
+  --xy-connectionline-stroke: var(--color-labbaik-blue);
+}

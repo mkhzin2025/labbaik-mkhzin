@@ -1,233 +1,447 @@
-import { useState, useEffect, useCallback } from 'react';
-import type { MouseEvent } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { DragEvent } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import {
-  ReactFlow,
-  Controls,
-  Background,
-  useNodesState,
-  useEdgesState,
   addEdge,
-  Handle,
-  Position,
-  Panel
+  applyEdgeChanges,
+  applyNodeChanges,
+  Background,
+  BackgroundVariant,
+  BaseEdge,
+  Controls,
+  EdgeLabelRenderer,
+  getSmoothStepPath,
+  MarkerType,
+  MiniMap,
+  ReactFlow,
+  ReactFlowProvider,
+  useReactFlow,
 } from '@xyflow/react';
-import type { Connection, Edge, Node, NodeProps } from '@xyflow/react';
+import type { Connection, EdgeChange, EdgeProps, NodeChange } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
+import { AlertTriangle, ArrowRight, CheckCircle2, FlaskConical, LayoutGrid, Loader2, Save, X } from 'lucide-react';
 import api from '../api/client';
-import { Button } from '../components/ui/Button';
-import { 
-  Save, 
-  MessageSquare, 
-  Zap, 
-  Trash2, 
-  Loader2,
-  ChevronRight,
-  Plus,
-  Settings2,
-  PlayCircle,
-  Image as ImageIcon
-} from 'lucide-react';
 import { useToast } from '../components/Toast';
+import { useTheme } from '../context/ThemeContext';
+import FlowNodeCard from '../components/flows/FlowNodes';
+import NodeSettings from '../components/flows/NodeSettings';
+import FlowTester from '../components/flows/FlowTester';
+import {
+  autoLayout, defaultData, errorMessage, FALLBACK_HANDLE, NODE_KINDS, normalizeNodes, serializeGraph, uid,
+} from '../components/flows/flowModel';
+import type { FlowEdge, FlowIssue, FlowNode, FlowNodeData, FlowNodeType } from '../components/flows/flowModel';
 
-// --- CUSTOM NODES ---
+const EDGE_STYLE = { stroke: 'var(--color-labbaik-blue)', strokeWidth: 1.75 };
+const edgeDefaults = { type: 'flow', markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16, color: '#643B89' }, style: EDGE_STYLE };
 
-type FlowNodeData = {
-  text?: string;
-  buttons?: { id: string; label: string }[];
-  isStart?: boolean;
-  imageUrl?: string;
-};
+/** Smooth-step edge with a remove button while selected. */
+function FlowEdgeView(props: EdgeProps) {
+  const { setEdges } = useReactFlow();
+  const [path, labelX, labelY] = getSmoothStepPath({ ...props, borderRadius: 14 });
+  return (
+    <>
+      <BaseEdge path={path} markerEnd={props.markerEnd} style={{ ...props.style, strokeWidth: props.selected ? 2.5 : 1.75 }} />
+      {props.selected && (
+        <EdgeLabelRenderer>
+          <button
+            type="button"
+            onClick={() => setEdges((edges) => edges.filter((edge) => edge.id !== props.id))}
+            aria-label="حذف الرابط"
+            title="حذف الرابط"
+            className="nodrag nopan pointer-events-auto absolute grid h-6 w-6 place-items-center rounded-full bg-labbaik-surface text-red-600 shadow-[0_2px_8px_rgba(15,10,30,0.25)] ring-1 ring-red-500/40 hover:bg-red-600 hover:text-white cursor-pointer"
+            style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)` }}
+          >
+            <X size={13} strokeWidth={2.5} />
+          </button>
+        </EdgeLabelRenderer>
+      )}
+    </>
+  );
+}
 
-type FlowNode = Node<FlowNodeData>;
+const edgeTypes = { flow: FlowEdgeView };
+const nodeTypes = { start: FlowNodeCard, message: FlowNodeCard, buttons: FlowNodeCard, list: FlowNodeCard, link: FlowNodeCard, handoff: FlowNodeCard, end: FlowNodeCard };
 
-const StartNode = (_props: NodeProps<FlowNode>) => (
-  <div className="bg-labbaik-deep border-2 border-green-500/50 p-6 rounded-2xl shadow-[0_0_20px_rgba(34,197,94,0.2)] min-w-[180px] text-center relative overflow-hidden">
-    <div className="absolute top-0 right-0 left-0 h-1 bg-green-500"></div>
-    <div className="flex flex-col items-center gap-3">
-      <div className="p-3 bg-green-500/20 rounded-2xl"><PlayCircle size={24} className="text-green-400" /></div>
-      <span className="text-xs font-black text-white uppercase tracking-widest">نقطة الانطلاق</span>
-      <p className="text-[10px] text-neutral-400 font-bold">هنا يبدأ تيل بوت الرد</p>
-    </div>
-    <Handle type="source" position={Position.Bottom} className="!bg-green-500 !w-4 !h-4 !border-labbaik-page shadow-lg" />
-  </div>
-);
+const PALETTE: { title: string; types: FlowNodeType[] }[] = [
+  { title: 'رسائل', types: ['message', 'buttons', 'list', 'link'] },
+  { title: 'إجراءات', types: ['handoff', 'end'] },
+];
 
-const MessageNode = ({ data }: NodeProps<FlowNode>) => (
-  <div className="bg-labbaik-surface border-2 border-white/5 p-6 rounded-2xl shadow-2xl min-w-[200px] group hover:border-labbaik-blue/50 transition-all">
-    <Handle type="target" position={Position.Top} className="!bg-labbaik-blue !w-3 !h-3 !border-labbaik-page" />
-    <div className="flex items-center gap-3 mb-4">
-      <div className="p-2 bg-labbaik-blue/10 rounded-lg"><MessageSquare size={16} className="text-labbaik-blue" /></div>
-      <span className="text-[10px] font-black text-white">رسالة نصية</span>
-    </div>
-    <div className="text-[11px] text-neutral-400 font-medium leading-relaxed">{data.text || 'اكتب نصاً...'}</div>
-    <Handle type="source" position={Position.Bottom} className="!bg-labbaik-blue !w-3 !h-3 !border-labbaik-page" />
-  </div>
-);
+const DRAG_TYPE = 'application/x-flow-node';
 
-const ButtonsNode = ({ data }: NodeProps<FlowNode>) => (
-  <div className="bg-labbaik-surface border-2 border-labbaik-blue/30 p-6 rounded-2xl shadow-2xl min-w-[250px] group hover:border-labbaik-blue transition-all">
-    <Handle type="target" position={Position.Top} className="!bg-labbaik-blue !w-3 !h-3" />
-    <div className="flex items-center gap-3 mb-4">
-      <div className="p-2 bg-labbaik-blue/20 rounded-lg"><Zap size={16} className="text-labbaik-blue" /></div>
-      <span className="text-[10px] font-black text-white">خيارات (أزرار)</span>
-    </div>
-    {data.imageUrl && (
-      <div className="mb-4 rounded-xl overflow-hidden border border-white/10 aspect-video bg-black/20">
-        <img src={data.imageUrl} alt="Header" className="w-full h-full object-cover" />
-      </div>
-    )}
-    <div className="text-[11px] text-gray-200 font-bold mb-4">{data.text}</div>
-    <div className="space-y-2">
-      {data.buttons?.map((btn) => (
-        <div key={btn.id} className="relative bg-white/5 border border-white/10 p-3 rounded-xl text-[9px] font-black text-neutral-400 text-center flex items-center justify-center">
-          {btn.label}
-          <Handle type="source" position={Position.Right} id={btn.id} className="!bg-labbaik-blue !w-2 !h-2 !-right-2" />
-        </div>
-      ))}
-    </div>
-  </div>
-);
-
-const nodeTypes = {
-  start: StartNode,
-  message: MessageNode,
-  buttons: ButtonsNode,
-};
-
-export default function FlowEditorPage() {
+function Editor() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { showToast } = useToast();
-  const [nodes, setNodes, onNodesChange] = useNodesState<FlowNode>([]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
-  const [flowName, setFlowName] = useState('');
+  const { theme } = useTheme();
+  const { screenToFlowPosition, setCenter, fitView, getNode } = useReactFlow();
+
+  const [nodes, setNodes] = useState<FlowNode[]>([]);
+  const [edges, setEdges] = useState<FlowEdge[]>([]);
+  const [name, setName] = useState('');
+  const [isActive, setIsActive] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [selectedNode, setSelectedNode] = useState<FlowNode | null>(null);
+  const [dirty, setDirty] = useState(false);
+  const [issues, setIssues] = useState<FlowIssue[]>([]);
+  const [checked, setChecked] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [panel, setPanel] = useState<'settings' | 'test' | null>(null);
+  const [issuesOpen, setIssuesOpen] = useState(false);
+  const canvasRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    fetchFlow();
-  }, [id]);
+    let cancelled = false;
+    api.get(`/flows/${id}`)
+      .then(({ data }) => {
+        if (cancelled) return;
+        const loaded = normalizeNodes(Array.isArray(data.nodes) ? data.nodes : []);
+        const loadedEdges: FlowEdge[] = (Array.isArray(data.edges) ? data.edges : []).map((edge: FlowEdge) => ({ ...edge, id: edge.id || uid('e'), ...edgeDefaults }));
+        const unplaced = loaded.length > 1 && loaded.every((node) => !node.position || (node.position.x === loaded[0].position?.x && node.position.y === loaded[0].position?.y));
+        setNodes((unplaced ? autoLayout(loaded, loadedEdges) : loaded).map((node) => ({ ...node, deletable: node.type !== 'start' })));
+        setEdges(loadedEdges);
+        setName(data.name);
+        setIsActive(Boolean(data.isActive));
+        setLoading(false);
+      })
+      .catch(() => {
+        showToast('تعذر فتح التدفق.', 'error');
+        navigate('/dashboard/flows');
+      });
+    return () => { cancelled = true; };
+  }, [id, navigate, showToast]);
 
-  const fetchFlow = async () => {
-    try {
-      const { data } = await api.get(`/flows/${id}`);
-      setFlowName(data.name);
-      setNodes(data.nodes || []);
-      setEdges(data.edges || []);
-      setLoading(false);
-    } catch {
-      navigate('/dashboard/flows');
+  // Live validation by the same rules the server applies before a flow can go live.
+  const graphKey = useMemo(() => JSON.stringify(serializeGraph(nodes, edges), (key, value) => (key === 'position' ? undefined : value)), [nodes, edges]);
+  useEffect(() => {
+    if (loading) return;
+    const timer = setTimeout(() => {
+      api.post<FlowIssue[]>('/flows/validate', JSON.parse(graphKey))
+        .then(({ data }) => { setIssues(Array.isArray(data) ? data : []); setChecked(true); })
+        .catch(() => undefined);
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [graphKey, loading]);
+
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [dirty]);
+
+  const errors = issues.filter((issue) => issue.level === 'error');
+  const warnings = issues.filter((issue) => issue.level === 'warning');
+  const startNode = nodes.find((node) => node.type === 'start');
+
+  const displayNodes = useMemo(() => {
+    const byNode = new Map<string, FlowIssue[]>();
+    issues.forEach((issue) => issue.nodeId && byNode.set(issue.nodeId, [...(byNode.get(issue.nodeId) || []), issue]));
+    return nodes.map((node) => (byNode.has(node.id) || node.data.issues ? { ...node, data: { ...node.data, issues: byNode.get(node.id) } } : node));
+  }, [nodes, issues]);
+
+  const selectedNode = displayNodes.find((node) => node.id === selectedId) || null;
+
+  const onNodesChange = useCallback((changes: NodeChange<FlowNode>[]) => {
+    if (changes.some((change) => change.type !== 'select' && change.type !== 'dimensions')) setDirty(true);
+    if (changes.some((change) => change.type === 'remove' && change.id === selectedId)) { setSelectedId(null); setPanel((current) => (current === 'settings' ? null : current)); }
+    setNodes((current) => applyNodeChanges(changes, current));
+  }, [selectedId]);
+
+  const onEdgesChange = useCallback((changes: EdgeChange<FlowEdge>[]) => {
+    if (changes.some((change) => change.type !== 'select')) setDirty(true);
+    setEdges((current) => applyEdgeChanges(changes, current));
+  }, []);
+
+  // Every output leads to exactly one step: a new connection replaces the old one from the same handle.
+  const onConnect = useCallback((connection: Connection) => {
+    setDirty(true);
+    setEdges((current) => addEdge(
+      { ...connection, id: uid('e'), ...edgeDefaults },
+      current.filter((edge) => !(edge.source === connection.source && (edge.sourceHandle ?? null) === (connection.sourceHandle ?? null))),
+    ));
+  }, []);
+
+  const isValidConnection = useCallback((connection: FlowEdge | Connection) => connection.source !== connection.target, []);
+
+  const focusNode = useCallback((nodeId: string) => {
+    const node = getNode(nodeId);
+    if (!node) return;
+    const width = node.measured?.width || 280;
+    const height = node.measured?.height || 120;
+    setCenter(node.position.x + width / 2, node.position.y + height / 2, { zoom: 1, duration: 300 });
+  }, [getNode, setCenter]);
+
+  const selectNode = (nodeId: string) => {
+    setSelectedId(nodeId);
+    setPanel('settings');
+    setNodes((current) => current.map((node) => ({ ...node, selected: node.id === nodeId })));
+  };
+
+  const updateNodeData = (nodeId: string, patch: Partial<FlowNodeData>) => {
+    setDirty(true);
+    setNodes((current) => current.map((node) => (node.id === nodeId ? { ...node, data: { ...node.data, ...patch } } : node)));
+    if (patch.buttons) {
+      const handles = new Set([...patch.buttons.map((option) => option.id), FALLBACK_HANDLE]);
+      setEdges((current) => current.filter((edge) => edge.source !== nodeId || !edge.sourceHandle || handles.has(edge.sourceHandle)));
     }
   };
 
-  const onConnect = useCallback((params: Connection) => setEdges((eds) => addEdge({ ...params, animated: true, style: { stroke: '#643B89' } }, eds)), [setEdges]);
+  const deleteNode = (nodeId: string) => {
+    setDirty(true);
+    setNodes((current) => current.filter((node) => node.id !== nodeId));
+    setEdges((current) => current.filter((edge) => edge.source !== nodeId && edge.target !== nodeId));
+    setSelectedId(null);
+    setPanel(null);
+  };
 
-  const handleSave = async () => {
+  const addNode = (type: FlowNodeType, at?: { x: number; y: number }) => {
+    const rect = canvasRef.current?.getBoundingClientRect();
+    const center = rect ? screenToFlowPosition({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }) : { x: 0, y: 0 };
+    const source = nodes.find((node) => node.id === selectedId);
+    const chain = !at && source && ['start', 'message', 'link'].includes(source.type || '') && !edges.some((edge) => edge.source === source.id && !edge.sourceHandle);
+    const position = at || (chain && source
+      ? { x: source.position.x, y: source.position.y + (source.measured?.height || 120) + 70 }
+      : { x: center.x - 140 + (nodes.length % 4) * 24, y: center.y - 60 + (nodes.length % 4) * 24 });
+    const node: FlowNode = { id: uid(type), type, position, data: defaultData(type), deletable: true };
+    setNodes((current) => [...current.map((item) => ({ ...item, selected: false })), { ...node, selected: true }]);
+    // Adding a step while a step with a free output is selected links them, so a flow can be built top-down by clicking.
+    if (chain && source) setEdges((current) => [...current, { id: uid('e'), source: source.id, target: node.id, sourceHandle: null, ...edgeDefaults }]);
+    setDirty(true);
+    setSelectedId(node.id);
+    setPanel('settings');
+    if (chain) requestAnimationFrame(() => setCenter(position.x + 140, position.y + 80, { zoom: 1, duration: 300 }));
+  };
+
+  const onDrop = (event: DragEvent) => {
+    event.preventDefault();
+    const type = event.dataTransfer.getData(DRAG_TYPE) as FlowNodeType;
+    if (!type || !NODE_KINDS[type]) return;
+    const point = screenToFlowPosition({ x: event.clientX, y: event.clientY });
+    addNode(type, { x: point.x - 140, y: point.y - 30 });
+  };
+
+  const arrange = () => {
+    setNodes((current) => autoLayout(current, edges));
+    setDirty(true);
+    requestAnimationFrame(() => fitView({ padding: 0.2, duration: 300, maxZoom: 1 }));
+  };
+
+  const persist = async (extra: { isActive?: boolean } = {}) => {
     setSaving(true);
     try {
-      await api.patch(`/flows/${id}`, { name: flowName, nodes, edges });
-      showToast('تم حفظ التدفق بنجاح! ✅', 'success');
-    } catch {
-      showToast('فشل الحفظ ❌', 'error');
+      const { data } = await api.patch(`/flows/${id}`, { name: name.trim() || 'تدفق بدون اسم', ...serializeGraph(nodes, edges), ...extra });
+      setIsActive(Boolean(data.isActive));
+      setDirty(false);
+      return true;
+    } catch (error) {
+      showToast(errorMessage(error, 'تعذر حفظ التدفق.'), 'error');
+      return false;
     } finally {
       setSaving(false);
     }
   };
 
-  const addNode = (type: string) => {
-    if (type === 'start' && nodes.some(n => n.type === 'start')) {
-      showToast('يمكنك إضافة نقطة بداية واحدة فقط لكل تدفق.', 'error');
+  const save = async () => {
+    if (isActive && errors.length) {
+      setIssuesOpen(true);
+      showToast('التدفق مفعّل، فلا يُحفظ وفيه مشاكل تمنع عمله. أصلحها أو أوقف التدفق أولًا.', 'error');
       return;
     }
-    const newNode: FlowNode = {
-      id: `${type}-${Date.now()}`,
-      type,
-      position: { x: 250, y: 150 },
-      data: { 
-        text: type === 'message' ? 'مرحباً بك!' : 'اختر أحد الخيارات:',
-        buttons: type === 'buttons' ? [{ id: `btn-${Date.now()}`, label: 'خيار 1' }] : [],
-        isStart: type === 'start'
-      },
+    if (await persist()) showToast(isActive ? 'حُفظ التدفق، والتعديلات تعمل الآن.' : 'حُفظ التدفق كمسودة.', 'success');
+  };
+
+  const toggleActive = async () => {
+    if (!isActive && errors.length) {
+      setIssuesOpen(true);
+      showToast(`أصلح ${errors.length === 1 ? 'المشكلة' : `${errors.length} مشاكل`} قبل التفعيل.`, 'error');
+      return;
+    }
+    if (await persist({ isActive: !isActive })) showToast(isActive ? 'أُوقف التدفق.' : 'فُعّل التدفق وسيبدأ مع العملاء حسب المحفّز.', 'success');
+  };
+
+  const saveRef = useRef(save);
+  saveRef.current = save;
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') { event.preventDefault(); void saveRef.current(); }
     };
-    setNodes((nds) => nds.concat(newNode));
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  const goBack = () => {
+    if (dirty && !window.confirm('لديك تعديلات غير محفوظة. الخروج بدون حفظ؟')) return;
+    navigate('/dashboard/flows');
   };
 
-  const onNodeClick = (_: MouseEvent, node: FlowNode) => setSelectedNode(node);
+  if (loading) {
+    return <div className="grid h-full place-items-center bg-labbaik-page"><Loader2 className="animate-spin text-labbaik-blue" size={32} /></div>;
+  }
 
-  const updateNodeData = <K extends keyof FlowNodeData>(field: K, value: FlowNodeData[K]) => {
-    if (!selectedNode) return;
-    setNodes((nds) => nds.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, [field]: value } } : node));
-    setSelectedNode({ ...selectedNode, data: { ...selectedNode.data, [field]: value } });
-  };
-
-  if (loading) return <div className="h-screen flex flex-col items-center justify-center bg-labbaik-page"><Loader2 className="animate-spin text-labbaik-blue" size={48} /></div>;
+  const issueSummary = !checked
+    ? { label: 'جاري الفحص', tone: 'text-labbaik-text-muted', icon: <Loader2 size={14} className="animate-spin" /> }
+    : errors.length
+      ? { label: `${errors.length} ${errors.length === 1 ? 'مشكلة' : errors.length <= 10 ? 'مشاكل' : 'مشكلة'}`, tone: 'bg-red-500/10 text-red-700 dark:text-red-300', icon: <AlertTriangle size={14} /> }
+      : { label: warnings.length ? `جاهز · ${warnings.length} تنبيه` : 'جاهز للتشغيل', tone: warnings.length ? 'bg-amber-500/12 text-amber-800 dark:text-amber-200' : 'bg-emerald-500/12 text-emerald-800 dark:text-emerald-300', icon: <CheckCircle2 size={14} /> };
 
   return (
-    <div className="h-[calc(100vh-100px)] flex flex-col -m-10" dir="rtl">
-      <div className="h-20 bg-labbaik-surface border-b border-white/5 flex items-center justify-between px-10 z-50 shadow-2xl">
-        <div className="flex items-center gap-6">
-          <Button onClick={() => navigate('/dashboard/flows')} variant="ghost" size="md"><ChevronRight size={24} /></Button>
-          <input type="text" value={flowName} onChange={(e) => setFlowName(e.target.value)} className="bg-transparent border-none text-xl font-black text-white focus:outline-none w-64"/>
-        </div>
-        <Button onClick={handleSave} disabled={saving} variant="primary" size="md">
-          {saving ? <Loader2 className="animate-spin" size={18} /> : <Save size={18} />} حفظ المسار
-        </Button>
-      </div>
+    <div className="flex h-full flex-col bg-labbaik-page" dir="rtl">
+      {/* Top bar */}
+      <header className="flex flex-wrap items-center gap-2 border-b border-labbaik-border bg-labbaik-surface px-3 py-2 sm:px-4">
+        <button type="button" onClick={goBack} aria-label="العودة للتدفقات" className="grid h-9 w-9 place-items-center rounded-lg text-labbaik-text-muted hover:bg-labbaik-page hover:text-labbaik-text cursor-pointer"><ArrowRight size={18} /></button>
+        <input
+          value={name}
+          onChange={(e) => { setName(e.target.value); setDirty(true); }}
+          aria-label="اسم التدفق"
+          className="h-9 min-w-0 flex-1 basis-40 rounded-lg border-transparent! bg-transparent px-2 text-base font-black text-neutral-900 hover:border-[color:var(--color-input-border)]! focus:border-[color:var(--color-input-border)]! focus:outline-none dark:text-white sm:max-w-80"
+        />
 
-      <div className="flex-1 flex overflow-hidden relative">
-        <div className="flex-1 bg-black/20">
-          <ReactFlow nodes={nodes} edges={edges} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect} nodeTypes={nodeTypes} onNodeClick={onNodeClick} fitView>
-            <Background color="rgba(255,255,255,0.05)" gap={20} /><Controls />
-            <Panel position="top-right" className="flex gap-3 bg-labbaik-surface p-2 rounded-2xl border border-white/5 shadow-2xl">
-              <Button onClick={() => addNode('start')} variant="success" size="sm" className="flex items-center gap-2"><PlayCircle size={14} /> نقطة البداية</Button>
-              <Button onClick={() => addNode('message')} variant="secondary" size="sm" className="flex items-center gap-2"><MessageSquare size={14} /> رسالة نصية</Button>
-              <Button onClick={() => addNode('buttons')} variant="secondary" size="sm" className="flex items-center gap-2"><Zap size={14} /> أزرار</Button>
-            </Panel>
-          </ReactFlow>
-        </div>
-
-        {selectedNode && (
-          <div className="w-96 bg-labbaik-surface border-r border-white/5 p-8 overflow-y-auto animate-fade-in shadow-2xl z-40">
-            <div className="flex justify-between items-center mb-10"><h3 className="font-black text-white flex items-center gap-3"><Settings2 size={20} className="text-labbaik-blue" /> إعدادات العقدة</h3><Button onClick={() => { setNodes(nds => nds.filter(n => n.id !== selectedNode.id)); setSelectedNode(null); }} variant="danger" size="md"><Trash2 size={16} /></Button></div>
-            <div className="space-y-8">
-              {selectedNode.type !== 'start' && (
-                <div className="space-y-3">
-                  <label className="text-[10px] font-black text-neutral-400 uppercase tracking-widest px-1">نص الرسالة</label>
-                  <textarea value={selectedNode.data.text} onChange={(e) => updateNodeData('text', e.target.value)} className="w-full h-32 bg-white/2 border border-white/5 rounded-2xl p-4 text-sm text-gray-200 focus:outline-none focus:ring-1 focus:ring-labbaik-blue/50 font-medium resize-none leading-relaxed"/>
-                </div>
-              )}
-              {selectedNode.type === 'buttons' && (
-                <div className="space-y-8">
-                  <div className="space-y-3">
-                    <label className="text-[10px] font-black text-neutral-400 uppercase tracking-widest px-1 flex items-center gap-2"><ImageIcon size={14} className="text-labbaik-blue" /> صورة الترويسة (Header)</label>
-                    <input 
-                      type="text" 
-                      placeholder="ضع رابط الصورة هنا (URL)..."
-                      value={selectedNode.data.imageUrl || ''}
-                      onChange={(e) => updateNodeData('imageUrl', e.target.value)}
-                      className="w-full bg-white/2 border border-white/5 rounded-xl px-4 py-3 text-xs text-white focus:outline-none font-bold"
-                    />
-                    <p className="text-[8px] text-neutral-500 font-bold px-1">سيتم عرض هذه الصورة فوق الأزرار في الواتساب.</p>
-                  </div>
-
-                  <div className="space-y-4">
-                    <label className="text-[10px] font-black text-neutral-400 uppercase tracking-widest px-1">الخيارات المتاحة</label>
-                    <div className="space-y-3">
-                      {selectedNode.data.buttons?.map((btn, index) => (
-                        <div key={btn.id} className="flex gap-2"><input type="text" value={btn.label} onChange={(e) => { const newBtns = [...(selectedNode.data.buttons || [])]; newBtns[index].label = e.target.value; updateNodeData('buttons', newBtns); }} className="flex-1 bg-white/2 border border-white/5 rounded-xl px-4 py-3 text-xs text-white focus:outline-none font-bold"/><Button onClick={() => { const newBtns = (selectedNode.data.buttons || []).filter((b) => b.id !== btn.id); updateNodeData('buttons', newBtns); }} variant="danger" size="md"><Trash2 size={14} /></Button></div>
-                      ))}
-                      <Button onClick={() => { const newBtns = [...(selectedNode.data.buttons || []), { id: `btn-${Date.now()}`, label: 'خيار جديد' }]; updateNodeData('buttons', newBtns); }} variant="secondary" size="sm" className="w-full"><Plus size={12} /> إضافة زر جديد</Button>
-                    </div>
-                  </div>
-                </div>
-              )}
+        <div className="relative">
+          <button type="button" onClick={() => setIssuesOpen((open) => !open)} aria-expanded={issuesOpen} className={`inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-xs font-bold cursor-pointer ${issueSummary.tone}`}>
+            {issueSummary.icon} {issueSummary.label}
+          </button>
+          {issuesOpen && issues.length > 0 && (
+            <div className="absolute top-10 right-0 z-30 w-80 max-w-[calc(100vw-2rem)] rounded-xl border border-labbaik-border bg-labbaik-surface p-1.5 shadow-[0_16px_40px_-12px_rgba(15,10,30,0.35)]">
+              <ul className="max-h-80 overflow-y-auto custom-scrollbar">
+                {issues.map((issue, index) => {
+                  const node = nodes.find((item) => item.id === issue.nodeId);
+                  return (
+                    <li key={index}>
+                      <button
+                        type="button"
+                        onClick={() => { if (issue.nodeId) { selectNode(issue.nodeId); focusNode(issue.nodeId); } setIssuesOpen(false); }}
+                        className="flex w-full gap-2 rounded-lg px-2.5 py-2 text-start hover:bg-labbaik-page cursor-pointer"
+                      >
+                        <span className={`mt-1 h-2 w-2 shrink-0 rounded-full ${issue.level === 'error' ? 'bg-red-600' : 'bg-amber-500'}`} />
+                        <span className="min-w-0">
+                          {node && <span className="block text-[11px] font-bold text-labbaik-text-muted">{NODE_KINDS[node.type as FlowNodeType]?.label}</span>}
+                          <span className="block text-xs leading-relaxed text-labbaik-text">{issue.message}</span>
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
             </div>
-          </div>
+          )}
+        </div>
+
+        <div className="ms-auto flex items-center gap-2">
+          <button type="button" onClick={() => { setPanel(panel === 'test' ? null : 'test'); setIssuesOpen(false); }} aria-pressed={panel === 'test'} className={`inline-flex h-9 items-center gap-1.5 rounded-lg border px-3 text-sm font-bold cursor-pointer ${panel === 'test' ? 'border-labbaik-blue bg-labbaik-blue/10 text-labbaik-blue dark:text-purple-200' : 'border-labbaik-border text-labbaik-text hover:border-labbaik-blue/40'}`}>
+            <FlaskConical size={15} /> تجربة
+          </button>
+          <span className="mx-0.5 hidden h-6 w-px bg-labbaik-border sm:block" />
+          <button
+            type="button"
+            role="switch"
+            aria-checked={isActive}
+            disabled={saving}
+            onClick={() => void toggleActive()}
+            className="inline-flex h-9 items-center gap-2 rounded-lg px-2 text-sm font-bold text-labbaik-text hover:bg-labbaik-page disabled:opacity-50 cursor-pointer"
+          >
+            <span className={`relative h-5 w-9 rounded-full transition-colors ${isActive ? 'bg-emerald-600' : 'bg-neutral-300 dark:bg-neutral-600'}`}>
+              <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-all ${isActive ? 'right-0.5' : 'right-[18px]'}`} />
+            </span>
+            {isActive ? 'مفعّل' : 'مسودة'}
+          </button>
+          <button type="button" onClick={() => void save()} disabled={saving || !dirty} title="Ctrl+S" className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-labbaik-blue px-4 text-sm font-black text-labbaik-on-accent hover:bg-[#553174] disabled:opacity-50 cursor-pointer disabled:cursor-default">
+            {saving ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />} {dirty ? 'حفظ' : 'محفوظ'}
+          </button>
+        </div>
+      </header>
+
+      <div className="relative flex min-h-0 flex-1 flex-col lg:flex-row">
+        {/* Palette */}
+        <aside className="flex shrink-0 gap-1 overflow-x-auto border-b border-labbaik-border bg-labbaik-surface p-2 lg:w-52 lg:flex-col lg:gap-0 lg:overflow-y-auto lg:border-b-0 lg:border-l lg:p-3 custom-scrollbar">
+          {PALETTE.map((group) => (
+            <div key={group.title} className="flex gap-1 lg:mb-4 lg:block lg:space-y-1">
+              <p className="hidden px-2 pb-1 text-[11px] font-bold text-labbaik-text-muted lg:block">{group.title}</p>
+              {group.types.map((type) => {
+                const kind = NODE_KINDS[type];
+                const Icon = kind.icon;
+                return (
+                  <button
+                    key={type}
+                    type="button"
+                    draggable
+                    onDragStart={(event) => { event.dataTransfer.setData(DRAG_TYPE, type); event.dataTransfer.effectAllowed = 'move'; }}
+                    onClick={() => addNode(type)}
+                    title={`${kind.label}: ${kind.hint}`}
+                    className="flex shrink-0 items-center gap-2.5 rounded-lg px-2 py-1.5 text-start hover:bg-labbaik-page cursor-grab active:cursor-grabbing lg:w-full"
+                  >
+                    <span className={`grid h-7 w-7 shrink-0 place-items-center rounded-md ${kind.tone}`}><Icon size={14} /></span>
+                    <span className="min-w-0">
+                      <span className="block whitespace-nowrap text-[13px] font-bold text-labbaik-text">{kind.label}</span>
+                      <span className="hidden truncate text-[11px] text-labbaik-text-muted lg:block">{kind.hint}</span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          ))}
+          <p className="mt-auto hidden rounded-lg bg-labbaik-page p-2.5 text-[11px] leading-relaxed text-labbaik-text-muted lg:block">
+            اسحب خطوة إلى الكانفس، أو اختر خطوة ثم اضغط نوعًا هنا لإضافته بعدها مباشرة.
+          </p>
+        </aside>
+
+        {/* Canvas */}
+        <div ref={canvasRef} className="relative min-h-0 flex-1" dir="ltr" onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; }} onDrop={onDrop}>
+          <ReactFlow<FlowNode, FlowEdge>
+            nodes={displayNodes}
+            edges={edges}
+            nodeTypes={nodeTypes}
+            edgeTypes={edgeTypes}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
+            onConnect={onConnect}
+            isValidConnection={isValidConnection}
+            onNodeClick={(_, node) => selectNode(node.id)}
+            onPaneClick={() => { setSelectedId(null); setIssuesOpen(false); if (panel === 'settings') setPanel(null); }}
+            deleteKeyCode={['Backspace', 'Delete']}
+            colorMode={theme === 'dark' ? 'dark' : 'light'}
+            defaultEdgeOptions={edgeDefaults}
+            fitView
+            fitViewOptions={{ padding: 0.2, maxZoom: 1 }}
+            minZoom={0.25}
+            maxZoom={1.75}
+            proOptions={{ hideAttribution: true }}
+            className="bg-labbaik-page!"
+          >
+            <Background variant={BackgroundVariant.Dots} gap={22} size={1.4} color="var(--color-input-border)" />
+            <Controls showInteractive={false} position="bottom-left" className="overflow-hidden! rounded-lg! border! border-labbaik-border! shadow-none!" />
+            <MiniMap position="top-left" pannable zoomable style={{ width: 150, height: 96 }} className="hidden! rounded-lg! border! border-labbaik-border! md:block!" nodeColor={(node) => (node.type === 'start' ? '#059669' : '#643B89')} maskColor="rgba(100,59,137,0.06)" />
+          </ReactFlow>
+          <button type="button" onClick={arrange} className="absolute top-3 right-3 inline-flex h-8 items-center gap-1.5 rounded-lg border border-labbaik-border bg-labbaik-surface px-2.5 text-xs font-bold text-labbaik-text shadow-[0_1px_2px_rgba(15,10,30,0.06)] hover:border-labbaik-blue/40 cursor-pointer" dir="rtl">
+            <LayoutGrid size={14} /> ترتيب تلقائي
+          </button>
+        </div>
+
+        {/* Side panel */}
+        {panel && (panel === 'test' || selectedNode) && (
+          <aside className="absolute inset-x-0 bottom-0 z-20 h-[72%] rounded-t-2xl border-t border-labbaik-border bg-labbaik-surface shadow-[0_-12px_40px_-16px_rgba(15,10,30,0.35)] lg:static lg:h-auto lg:w-[380px] lg:rounded-none lg:border-t-0 lg:border-r lg:shadow-none">
+            {panel === 'test'
+              ? <FlowTester nodes={nodes} edges={edges} trigger={startNode?.data.trigger} onClose={() => setPanel(null)} onFocusNode={(nodeId) => { setNodes((current) => current.map((node) => ({ ...node, selected: node.id === nodeId }))); focusNode(nodeId); }} />
+              : selectedNode && (
+                <NodeSettings
+                  key={selectedNode.id}
+                  node={selectedNode}
+                  onChange={(patch) => updateNodeData(selectedNode.id, patch)}
+                  onDelete={() => deleteNode(selectedNode.id)}
+                  onClose={() => { setPanel(null); setSelectedId(null); }}
+                />
+              )}
+          </aside>
         )}
       </div>
     </div>
   );
 }
 
+export default function FlowEditorPage() {
+  return (
+    <ReactFlowProvider>
+      <Editor />
+    </ReactFlowProvider>
+  );
+}

@@ -6,7 +6,7 @@ import { useAuthedObjectUrl } from '../whatsapp/media';
 import { FALLBACK_HANDLE, MEDIA_KIND_LABELS, NODE_KINDS, triggerSummary } from './flowModel';
 import type { FlowIssue, FlowMedia, FlowNode, FlowNodeType } from './flowModel';
 
-const handleBase = '!h-3 !w-3 !rounded-full !border-2 !border-labbaik-surface !bg-labbaik-blue transition-transform hover:!scale-125';
+const handleBase = 'h-3! w-3! rounded-full! border-2! border-labbaik-surface! bg-labbaik-blue! transition-transform hover:scale-125!';
 
 function MediaThumb({ media }: { media: FlowMedia }) {
   const src = useAuthedObjectUrl(media.file ? `/flows/media/${media.file}` : null) || (media.type === 'image' ? media.link : null);
@@ -42,7 +42,8 @@ function FlowNodeCard(props: NodeProps<FlowNode>) {
   const issues = data.issues || [];
   const hasError = issues.some((issue) => issue.level === 'error');
   const options = type === 'buttons' || type === 'list' ? data.buttons || [] : [];
-  const text = (data.text || '').trim();
+  // Placeholders read as what they become, e.g. {{name}} → ‹اسم العميل›.
+  const text = (data.text || '').trim().replace(/\{\{\s*name\s*\}\}/gi, '‹اسم العميل›').replace(/\{\{\s*phone\s*\}\}/gi, '‹رقم الجوال›');
   const hasInput = type !== 'start';
   const hasSingleOutput = type === 'start' || type === 'message' || type === 'link';
 
@@ -87,12 +88,12 @@ function FlowNodeCard(props: NodeProps<FlowNode>) {
           {options.map((option) => (
             <div key={option.id} className="relative flex h-8 items-center justify-center rounded-lg bg-labbaik-page px-3 text-xs font-bold text-labbaik-text">
               <span className="truncate" dir="auto">{option.label || 'خيار بدون اسم'}</span>
-              <Handle type="source" id={option.id} position={Position.Left} className={`${handleBase} !-left-[22px]`} />
+              <Handle type="source" id={option.id} position={Position.Left} className={`${handleBase} -left-3.5!`} />
             </div>
           ))}
           <div className="relative flex h-7 items-center justify-center gap-1.5 rounded-lg border border-dashed border-labbaik-border text-[11px] font-bold text-labbaik-text-muted">
             <CornerDownLeft size={12} /> أي رد آخر
-            <Handle type="source" id={FALLBACK_HANDLE} position={Position.Left} className={`${handleBase} !-left-[22px] !bg-neutral-400 dark:!bg-neutral-500`} />
+            <Handle type="source" id={FALLBACK_HANDLE} position={Position.Left} className={`${handleBase} -left-3.5! bg-neutral-400! dark:bg-neutral-500!`} />
           </div>
         </div>
       )}
@@ -102,14 +103,4 @@ function FlowNodeCard(props: NodeProps<FlowNode>) {
   );
 }
 
-const Card = memo(FlowNodeCard);
-
-export const nodeTypes = {
-  start: Card,
-  message: Card,
-  buttons: Card,
-  list: Card,
-  link: Card,
-  handoff: Card,
-  end: Card,
-};
+export default memo(FlowNodeCard);

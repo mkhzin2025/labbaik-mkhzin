@@ -128,7 +128,8 @@ export function defaultData(type: FlowNodeType): FlowNodeData {
 export function serializeGraph(nodes: FlowNode[], edges: FlowEdge[]) {
   return {
     nodes: nodes.map(({ id, type, position, data }) => {
-      const { issues: _issues, ...rest } = data;
+      const rest = { ...data };
+      delete rest.issues;
       return { id, type, position, data: rest };
     }),
     edges: edges.map(({ id, source, target, sourceHandle }) => ({ id, source, target, sourceHandle: sourceHandle ?? null })),
