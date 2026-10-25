@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useNavigate, Link, useLocation } from 'react-router-dom';
+import { useNavigate, Link, useLocation, Navigate } from 'react-router-dom';
 import { io, Socket } from 'socket.io-client';
 import {
   LayoutDashboard,
@@ -22,6 +22,8 @@ import {
   WalletCards,
   BadgeDollarSign,
   Trash2,
+  UserCog,
+  Loader2,
 } from 'lucide-react';
 
 import LogoImage from '../assets/logos/tael-bot-glyph-white.svg';
@@ -31,11 +33,15 @@ import CustomerAvatar from './CustomerAvatar';
 import { getApiBaseUrl } from '../api/baseUrl';
 import api from '../api/client';
 import { useTheme } from '../context/ThemeContext';
+import { ALL_SECTIONS, cacheAccess, firstAllowedPath, readCachedAccess, ROLE_LABELS, sectionOf } from '../lib/access';
+import type { Access, Section } from '../lib/access';
 
 interface NavItem {
   icon: React.ReactNode;
   label: string;
   path: string;
+  /** Hidden from members whose role does not cover it; platform pages have none. */
+  section?: Section;
 }
 
 interface NavGroup {
@@ -91,7 +97,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const isFullBleed = isConversationsPage || /^\/dashboard\/flows\/[^/]+$/.test(location.pathname);
   const user = JSON.parse(localStorage.getItem('user') || '{}');
   const sidebarLogo = theme === 'light' ? LogoAltImage : LogoImage;
-  const roleLabel = user.role === 'admin' ? 'مدير النظام' : 'موظف';
+  const [access, setAccess] = useState<Access | null>(readCachedAccess);
+  const roleLabel = access ? ROLE_LABELS[access.role] : '';
+  const can = (section?: Section) => !section || Boolean(access?.sections.includes(section));
+  const currentSection = sectionOf(location.pathname);
 
   useEffect(() => {
     try { localStorage.setItem(COLLAPSED_KEY, isCollapsed ? '1' : '0'); } catch { /* storage unavailable */ }
@@ -110,6 +119,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       setSocket(newSocket);
       return () => { newSocket.disconnect(); };
     }
+  }, []);
+
+  // The role decides which sections appear; the cached copy renders the sidebar while this refreshes.
+  useEffect(() => {
+    api.get<Access>('/organizations/me/access')
+      .then(({ data }) => { setAccess(data); cacheAccess(data); })
+      // Without an answer (e.g. an older backend) show everything; the API still refuses what the role may not do.
+      .catch(() => setAccess((current) => current || { organization: { id: '', name: '' }, role: 'admin', sections: ALL_SECTIONS }));
   }, []);
 
   useEffect(() => {
@@ -138,26 +155,27 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     {
       label: 'التواصل',
       items: [
-        { icon: <LayoutDashboard size={18} />, label: 'الرئيسية', path: '/dashboard' },
-        { icon: <MessageSquare size={18} />, label: 'المحادثات', path: '/dashboard/conversations' },
-        { icon: <Users size={18} />, label: 'العملاء', path: '/dashboard/customers' },
-        { icon: <Star size={18} />, label: 'التقييمات', path: '/dashboard/reviews' },
+        { icon: <LayoutDashboard size={18} />, label: 'الرئيسية', path: '/dashboard', section: 'home' },
+        { icon: <MessageSquare size={18} />, label: 'المحادثات', path: '/dashboard/conversations', section: 'conversations' },
+        { icon: <Users size={18} />, label: 'العملاء', path: '/dashboard/customers', section: 'customers' },
+        { icon: <Star size={18} />, label: 'التقييمات', path: '/dashboard/reviews', section: 'reviews' },
       ],
     },
     {
       label: 'الأتمتة والقنوات',
       items: [
-        { icon: <GitBranch size={18} />, label: 'التدفقات', path: '/dashboard/flows' },
-        { icon: <MessageSquareText size={18} />, label: 'قوالب وحملات واتساب', path: '/dashboard/whatsapp-templates' },
-        { icon: <Share2 size={18} />, label: 'القنوات', path: '/dashboard/channels' },
+        { icon: <GitBranch size={18} />, label: 'التدفقات', path: '/dashboard/flows', section: 'flows' },
+        { icon: <MessageSquareText size={18} />, label: 'قوالب وحملات واتساب', path: '/dashboard/whatsapp-templates', section: 'whatsapp' },
+        { icon: <Share2 size={18} />, label: 'القنوات', path: '/dashboard/channels', section: 'channels' },
       ],
     },
     {
       label: 'الحساب',
       items: [
-        { icon: <BarChart3 size={18} />, label: 'التقارير', path: '/dashboard/analytics' },
-        { icon: <WalletCards size={18} />, label: 'الباقات والفوترة', path: '/dashboard/billing' },
-        { icon: <Settings size={18} />, label: 'الإعدادات', path: '/dashboard/settings' },
+        { icon: <BarChart3 size={18} />, label: 'التقارير', path: '/dashboard/analytics', section: 'analytics' },
+        { icon: <WalletCards size={18} />, label: 'الباقات والفوترة', path: '/dashboard/billing', section: 'billing' },
+        { icon: <UserCog size={18} />, label: 'الفريق', path: '/dashboard/team', section: 'team' },
+        { icon: <Settings size={18} />, label: 'الإعدادات', path: '/dashboard/settings', section: 'settings' },
       ],
     },
     ...(isPlatformAdmin
@@ -171,12 +189,17 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       : []),
   ];
 
+  const visibleGroups = navGroups
+    .map((group) => ({ ...group, items: group.items.filter((item) => can(item.section)) }))
+    .filter((group) => group.items.length > 0);
+
   const currentPage = navGroups.flatMap((group) => group.items).find((item) => isActivePath(location.pathname, item.path));
 
   const handleLogout = () => {
     localStorage.removeItem('access_token');
     localStorage.removeItem('user');
     localStorage.removeItem('organization');
+    cacheAccess(null);
     navigate('/login');
   };
 
@@ -228,7 +251,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
         <nav className="flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar px-3 py-4 space-y-5" aria-label="التنقل الرئيسي">
           {/* Collapsing only applies on desktop (lg:); the mobile drawer always shows labels. */}
-          {navGroups.map((group, groupIndex) => (
+          {visibleGroups.map((group, groupIndex) => (
             <div key={group.label}>
               <p className={`px-3 mb-1.5 text-[11px] font-bold text-labbaik-text-muted ${isCollapsed ? 'lg:hidden' : ''}`}>{group.label}</p>
               {isCollapsed && groupIndex > 0 && <div className="hidden lg:block mx-2 mb-3 border-t border-labbaik-border" />}
@@ -310,12 +333,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                     <p className="text-sm font-bold text-neutral-900 dark:text-white truncate">{user.fullName || 'المستخدم'}</p>
                     {user.email && <p className="text-xs text-labbaik-text-muted truncate" dir="ltr" style={{ textAlign: 'right' }}>{user.email}</p>}
                   </div>
-                  <Link role="menuitem" onClick={() => setUserMenuOpen(false)} to="/dashboard/settings" className="flex items-center gap-2.5 h-9 px-3 rounded-lg text-sm text-neutral-700 dark:text-neutral-200 hover:bg-labbaik-page">
+                  {can('settings') && <Link role="menuitem" onClick={() => setUserMenuOpen(false)} to="/dashboard/settings" className="flex items-center gap-2.5 h-9 px-3 rounded-lg text-sm text-neutral-700 dark:text-neutral-200 hover:bg-labbaik-page">
                     <Settings size={16} className="text-labbaik-text-muted" /> الإعدادات
-                  </Link>
-                  <Link role="menuitem" onClick={() => setUserMenuOpen(false)} to="/dashboard/billing" className="flex items-center gap-2.5 h-9 px-3 rounded-lg text-sm text-neutral-700 dark:text-neutral-200 hover:bg-labbaik-page">
+                  </Link>}
+                  {can('billing') && <Link role="menuitem" onClick={() => setUserMenuOpen(false)} to="/dashboard/billing" className="flex items-center gap-2.5 h-9 px-3 rounded-lg text-sm text-neutral-700 dark:text-neutral-200 hover:bg-labbaik-page">
                     <WalletCards size={16} className="text-labbaik-text-muted" /> الباقات والفوترة
-                  </Link>
+                  </Link>}
                   <button role="menuitem" type="button" onClick={handleLogout} className="w-full flex items-center gap-2.5 h-9 px-3 rounded-lg text-sm text-red-600 dark:text-red-400 hover:bg-red-500/10 cursor-pointer">
                     <LogOut size={16} className="-scale-x-100" /> تسجيل الخروج
                   </button>
@@ -327,7 +350,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
         <main className={`flex-1 ${isFullBleed ? 'min-h-0 overflow-hidden bg-labbaik-surface' : 'overflow-y-auto p-4 sm:p-6 lg:p-8 custom-scrollbar'}`}>
           <div className={isFullBleed ? 'h-full min-h-0 w-full' : 'max-w-7xl mx-auto'}>
-            {children}
+            {!access ? (
+              <div className="grid h-64 place-items-center"><Loader2 size={28} className="animate-spin text-labbaik-blue" /></div>
+            ) : currentSection && !can(currentSection) ? (
+              <Navigate to={firstAllowedPath(access)} replace />
+            ) : children}
           </div>
         </main>
       </div>

@@ -1,19 +1,21 @@
 import { Controller, Get, Post, Delete, Patch, Body, Param, UseGuards, Request, NotFoundException } from '@nestjs/common';
 import { ApiBearerAuth, ApiBody, ApiNotFoundResponse, ApiOperation, ApiParam, ApiResponse, ApiTags, ApiUnauthorizedResponse } from '@nestjs/swagger';
 import { ChannelsService } from './channels.service';
-import { StoresService } from '../stores/stores.service';
+import { OrganizationsService } from '../organizations/organizations.service';
 import { CreateChannelDto } from './dto/channel.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { examples, ids } from '../../common/swagger/api-examples';
+import { Access } from '../organizations/access';
 
 @ApiTags('Channels')
 @ApiBearerAuth()
+@Access('channels')
 @Controller('channels')
 @UseGuards(JwtAuthGuard)
 export class ChannelsController {
   constructor(
     private readonly channelsService: ChannelsService,
-    private readonly storesService: StoresService,
+    private readonly organizationsService: OrganizationsService,
   ) {}
 
   @Post()
@@ -23,7 +25,7 @@ export class ChannelsController {
   @ApiUnauthorizedResponse({ schema: { example: examples.errors.unauthorized } })
   @ApiNotFoundResponse({ schema: { example: examples.errors.storeNotFound } })
   async create(@Body() createChannelDto: CreateChannelDto, @Request() req) {
-    const store = await this.storesService.findByOwner(req.user.id);
+    const { store } = await this.organizationsService.getStoreForUser(req.user.id, req.user.organizationId);
     if (!store) {
       throw new NotFoundException('Please create a store profile first');
     }
@@ -36,7 +38,7 @@ export class ChannelsController {
   @ApiUnauthorizedResponse({ schema: { example: examples.errors.unauthorized } })
   @ApiNotFoundResponse({ schema: { example: examples.errors.storeNotFound } })
   async findAll(@Request() req) {
-    const store = await this.storesService.findByOwner(req.user.id);
+    const { store } = await this.organizationsService.getStoreForUser(req.user.id, req.user.organizationId);
     return this.channelsService.findAllByStore(store.id);
   }
 
@@ -47,7 +49,7 @@ export class ChannelsController {
   @ApiUnauthorizedResponse({ schema: { example: examples.errors.unauthorized } })
   @ApiNotFoundResponse({ schema: { example: { message: 'Channel not found', error: 'Not Found', statusCode: 404 } } })
   async findOne(@Param('id') id: string, @Request() req) {
-    const store = await this.storesService.findByOwner(req.user.id);
+    const { store } = await this.organizationsService.getStoreForUser(req.user.id, req.user.organizationId);
     return this.channelsService.findOne(id, store.id);
   }
 
@@ -58,7 +60,7 @@ export class ChannelsController {
   @ApiUnauthorizedResponse({ schema: { example: examples.errors.unauthorized } })
   @ApiNotFoundResponse({ schema: { example: { message: 'Channel not found', error: 'Not Found', statusCode: 404 } } })
   async remove(@Param('id') id: string, @Request() req) {
-    const store = await this.storesService.findByOwner(req.user.id);
+    const { store } = await this.organizationsService.getStoreForUser(req.user.id, req.user.organizationId);
     return this.channelsService.remove(id, store.id);
   }
 }

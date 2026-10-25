@@ -8,17 +8,19 @@ import type { UploadedFlowFile } from './flows.service';
 import { continueFlow, keywordMatches, startFlow, triggerOf } from './flow-engine';
 import type { FlowState } from './flow-engine';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { StoresService } from '../stores/stores.service';
+import { OrganizationsService } from '../organizations/organizations.service';
 import { examples, ids } from '../../common/swagger/api-examples';
+import { Access } from '../organizations/access';
 
 @ApiTags('Flows')
 @ApiBearerAuth()
+@Access('flows')
 @Controller('flows')
 @UseGuards(JwtAuthGuard)
 export class FlowsController {
   constructor(
     private readonly flowsService: FlowsService,
-    private readonly storesService: StoresService,
+    private readonly organizationsService: OrganizationsService,
   ) {}
 
   @Get()
@@ -27,7 +29,7 @@ export class FlowsController {
   @ApiUnauthorizedResponse({ schema: { example: examples.errors.unauthorized } })
   @ApiNotFoundResponse({ schema: { example: examples.errors.storeNotFound } })
   async findAll(@Request() req) {
-    const store = await this.storesService.findByOwner(req.user.id);
+    const { store } = await this.organizationsService.getStoreForUser(req.user.id, req.user.organizationId);
     return this.flowsService.findAllByStore(store.id);
   }
 
@@ -62,6 +64,7 @@ export class FlowsController {
   }
 
   @Get('media/:filename')
+  @Access('flows', 'conversations')
   getMedia(@Param('filename') filename: string, @Res() res: any) {
     if (filename !== basename(filename)) throw new BadRequestException('Invalid filename');
     const path = this.flowsService.mediaPath(filename);
@@ -78,7 +81,7 @@ export class FlowsController {
   @ApiUnauthorizedResponse({ schema: { example: examples.errors.unauthorized } })
   @ApiNotFoundResponse({ schema: { example: { message: 'Flow not found', error: 'Not Found', statusCode: 404 } } })
   async findOne(@Param('id') id: string, @Request() req) {
-    const store = await this.storesService.findByOwner(req.user.id);
+    const { store } = await this.organizationsService.getStoreForUser(req.user.id, req.user.organizationId);
     return this.flowsService.findOne(id, store.id);
   }
 
@@ -89,7 +92,7 @@ export class FlowsController {
   @ApiUnauthorizedResponse({ schema: { example: examples.errors.unauthorized } })
   @ApiNotFoundResponse({ schema: { example: examples.errors.storeNotFound } })
   async create(@Body() data: any, @Request() req) {
-    const store = await this.storesService.findByOwner(req.user.id);
+    const { store } = await this.organizationsService.getStoreForUser(req.user.id, req.user.organizationId);
     return this.flowsService.create(store, data);
   }
 
@@ -101,7 +104,7 @@ export class FlowsController {
   @ApiUnauthorizedResponse({ schema: { example: examples.errors.unauthorized } })
   @ApiNotFoundResponse({ schema: { example: { message: 'Flow not found', error: 'Not Found', statusCode: 404 } } })
   async update(@Param('id') id: string, @Body() data: any, @Request() req) {
-    const store = await this.storesService.findByOwner(req.user.id);
+    const { store } = await this.organizationsService.getStoreForUser(req.user.id, req.user.organizationId);
     return this.flowsService.update(id, store.id, data, store.organizationId);
   }
 
@@ -112,7 +115,7 @@ export class FlowsController {
   @ApiUnauthorizedResponse({ schema: { example: examples.errors.unauthorized } })
   @ApiNotFoundResponse({ schema: { example: { message: 'Flow not found', error: 'Not Found', statusCode: 404 } } })
   async delete(@Param('id') id: string, @Request() req) {
-    const store = await this.storesService.findByOwner(req.user.id);
+    const { store } = await this.organizationsService.getStoreForUser(req.user.id, req.user.organizationId);
     return this.flowsService.delete(id, store.id);
   }
 }

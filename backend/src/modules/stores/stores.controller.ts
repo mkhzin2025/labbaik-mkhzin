@@ -5,6 +5,10 @@ import { CreateStoreDto, UpdateStoreDto } from './dto/store.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { examples } from '../../common/swagger/api-examples';
 import { OrganizationsService } from '../organizations/organizations.service';
+import { Access } from '../organizations/access';
+
+/** Store fields the inbox saves for everyone who can work conversations. */
+const INBOX_FIELDS = ['quickReplies', 'customTags'] as const;
 
 @ApiTags('Stores')
 @ApiBearerAuth()
@@ -17,6 +21,7 @@ export class StoresController {
   ) {}
 
   @Post()
+  @Access('settings')
   @ApiOperation({ summary: 'Create or update the authenticated user store profile' })
   @ApiBody({ type: CreateStoreDto, examples: { default: { value: examples.store.create } } })
   @ApiResponse({ status: 201, description: 'Store profile created or updated.', schema: { example: examples.store.current } })
@@ -27,6 +32,7 @@ export class StoresController {
   }
 
   @Post('branch')
+  @Access('settings')
   @ApiOperation({ summary: 'Create a new branch in the active organization' })
   async createBranch(@Body() createStoreDto: CreateStoreDto, @Request() req) {
     const organization = await this.organizationsService.getForUser(req.user.id, req.user.organizationId);
@@ -57,12 +63,18 @@ export class StoresController {
   }
 
   @Patch('me')
+  @Access('settings', 'conversations')
   async update(@Body() updateStoreDto: UpdateStoreDto, @Request() req) {
     const { store } = await this.organizationsService.getStoreForUser(req.user.id, req.user.organizationId);
-    return this.storesService.updateById(store.id, store.organizationId!, updateStoreDto);
+    // Without settings access only the inbox's own lists (quick replies, conversation tags) can change.
+    const dto: UpdateStoreDto = req.orgSections?.includes('settings')
+      ? updateStoreDto
+      : Object.fromEntries(Object.entries(updateStoreDto || {}).filter(([key]) => (INBOX_FIELDS as readonly string[]).includes(key)));
+    return this.storesService.updateById(store.id, store.organizationId!, dto);
   }
 
   @Patch(':id')
+  @Access('settings')
   async updateOne(@Param('id') id: string, @Body() updateStoreDto: UpdateStoreDto, @Request() req) {
     const organization = await this.organizationsService.getForUser(req.user.id, req.user.organizationId);
     return this.storesService.updateById(id, organization.id, updateStoreDto);

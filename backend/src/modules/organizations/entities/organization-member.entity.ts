@@ -7,6 +7,7 @@ export enum OrganizationRole {
   ADMIN = 'admin',
   SUPERVISOR = 'supervisor',
   AGENT = 'agent',
+  MARKETING = 'marketing',
 }
 
 @Entity('organization_members')

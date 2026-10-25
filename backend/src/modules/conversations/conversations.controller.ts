@@ -13,6 +13,7 @@ import { Type } from 'class-transformer';
 import { CONVERSATION_STATUSES } from './schemas/conversation.schema';
 import type { ConversationStatus } from './schemas/conversation.schema';
 import type { InboxFilters, InboxTab, InboxView } from './conversations.service';
+import { Access } from '../organizations/access';
 
 export class InboxFilterQueryDto {
   @IsOptional() @IsIn(['organization', 'store'])
@@ -69,6 +70,7 @@ export class TransferCustomerDto {
 
 @ApiTags('Conversations')
 @ApiBearerAuth()
+@Access('conversations')
 @Controller('conversations')
 @UseGuards(JwtAuthGuard)
 export class ConversationsController {
@@ -93,12 +95,14 @@ export class ConversationsController {
   }
 
   @Get('stats')
+  @Access('home', 'conversations')
   async getStats(@Request() req: any, @Query('storeId') storeId?: string) {
     const { store } = await this.organizationsService.getStoreForUser(req.user.id, req.user.organizationId, storeId);
     return this.conversationsService.getStats(store.id);
   }
 
   @Get('analytics')
+  @Access('analytics')
   async getAnalytics(@Request() req: any, @Query('days') days?: string, @Query('tz') tz?: string, @Query('storeId') storeId?: string) {
     const organization = await this.organizationsService.getForUser(req.user.id, req.user.organizationId);
     const { stores } = await this.organizationsService.listStoresForUser(req.user.id, organization.id);

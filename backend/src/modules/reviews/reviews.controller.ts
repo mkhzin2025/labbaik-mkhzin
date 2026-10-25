@@ -2,17 +2,19 @@ import { Controller, Get, Post, Body, Param, UseGuards, Request, Patch } from '@
 import { ApiBearerAuth, ApiBody, ApiNotFoundResponse, ApiOperation, ApiParam, ApiResponse, ApiTags, ApiUnauthorizedResponse } from '@nestjs/swagger';
 import { ReviewsService } from './reviews.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { StoresService } from '../stores/stores.service';
+import { OrganizationsService } from '../organizations/organizations.service';
 import { examples, ids } from '../../common/swagger/api-examples';
+import { Access } from '../organizations/access';
 
 @ApiTags('Reviews')
 @ApiBearerAuth()
+@Access('reviews')
 @Controller('reviews')
 @UseGuards(JwtAuthGuard)
 export class ReviewsController {
   constructor(
     private readonly reviewsService: ReviewsService,
-    private readonly storesService: StoresService,
+    private readonly organizationsService: OrganizationsService,
   ) {}
 
   @Get()
@@ -21,7 +23,7 @@ export class ReviewsController {
   @ApiUnauthorizedResponse({ schema: { example: examples.errors.unauthorized } })
   @ApiNotFoundResponse({ schema: { example: examples.errors.storeNotFound } })
   async findAll(@Request() req) {
-    const store = await this.storesService.findByOwner(req.user.id);
+    const { store } = await this.organizationsService.getStoreForUser(req.user.id, req.user.organizationId);
     return this.reviewsService.findAllByStore(store.id);
   }
 
@@ -32,7 +34,7 @@ export class ReviewsController {
   @ApiUnauthorizedResponse({ schema: { example: examples.errors.unauthorized } })
   @ApiNotFoundResponse({ schema: { example: { message: 'Review not found', error: 'Not Found', statusCode: 404 } } })
   async getSuggestion(@Param('id') id: string, @Request() req) {
-    const store = await this.storesService.findByOwner(req.user.id);
+    const { store } = await this.organizationsService.getStoreForUser(req.user.id, req.user.organizationId);
     const suggestion = await this.reviewsService.getAiSuggestion(id, store.id);
     return { suggestion };
   }
@@ -45,7 +47,7 @@ export class ReviewsController {
   @ApiUnauthorizedResponse({ schema: { example: examples.errors.unauthorized } })
   @ApiNotFoundResponse({ schema: { example: { message: 'Review not found', error: 'Not Found', statusCode: 404 } } })
   async reply(@Param('id') id: string, @Body('reply') reply: string, @Request() req) {
-    const store = await this.storesService.findByOwner(req.user.id);
+    const { store } = await this.organizationsService.getStoreForUser(req.user.id, req.user.organizationId);
     return this.reviewsService.replyToReview(id, store.id, reply);
   }
 
@@ -57,6 +59,7 @@ export class ReviewsController {
   @ApiUnauthorizedResponse({ schema: { example: examples.errors.unauthorized } })
   @ApiNotFoundResponse({ schema: { example: examples.errors.storeNotFound } })
   async simulate(@Body() data: any, @Request() req) {
-    return this.reviewsService.simulateIncomingReview(req.user.id, data);
+    const { store } = await this.organizationsService.getStoreForUser(req.user.id, req.user.organizationId);
+    return this.reviewsService.simulateIncomingReview(store, data);
   }
 }

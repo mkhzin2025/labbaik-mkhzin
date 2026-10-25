@@ -17,9 +17,11 @@ import {
   WalletSettingsDto,
 } from './dto/billing.dto';
 import { PlatformAdminGuard } from './guards/platform-admin.guard';
+import { Access } from '../organizations/access';
 
 @ApiTags('Billing')
 @ApiBearerAuth()
+@Access('billing')
 @Controller('billing')
 @UseGuards(JwtAuthGuard)
 export class BillingController {

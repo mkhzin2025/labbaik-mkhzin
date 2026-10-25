@@ -3,6 +3,7 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { WhatsAppCampaignsService } from './whatsapp-campaigns.service';
 import type { RecipientFilter } from './whatsapp-campaigns.service';
+import { Access } from '../organizations/access';
 
 const RECIPIENT_FILTERS: RecipientFilter[] = ['all', 'pending', 'accepted', 'delivered', 'read', 'replied', 'clicked', 'failed', 'skipped'];
 
@@ -13,6 +14,7 @@ const pageOf = (page?: string, limit?: string, max = 100, fallback = 20) => ({
 
 @ApiTags('Meta WhatsApp Campaigns')
 @ApiBearerAuth()
+@Access('whatsapp')
 @Controller('integrations/meta/whatsapp/campaigns')
 @UseGuards(JwtAuthGuard)
 export class WhatsAppCampaignsController {

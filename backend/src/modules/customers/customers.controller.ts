@@ -17,9 +17,11 @@ import {
 } from './dto/customer.dto';
 import { OrganizationsService } from '../organizations/organizations.service';
 import { CustomerTaxonomyScope } from './entities/customer-category.entity';
+import { Access } from '../organizations/access';
 
 @ApiTags('Customers')
 @ApiBearerAuth()
+@Access('customers')
 @Controller('customers')
 @UseGuards(JwtAuthGuard)
 export class CustomersController {
@@ -43,6 +45,7 @@ export class CustomersController {
   }
 
   @Get()
+  @Access('customers', 'whatsapp')
   async findAll(
     @Request() req: any,
     @Query('storeId') storeId?: string,
@@ -151,6 +154,7 @@ export class CustomersController {
 
   /** Categories/tags of the selected branches with reachable-customer counts, for the campaign audience builder. */
   @Get('audience/options')
+  @Access('customers', 'whatsapp')
   async audienceOptions(@Request() req: any, @Query('storeIds') storeIds?: string, @Query('categoryIds') categoryIds?: string) {
     const organization = await this.organizationsService.getForUser(req.user.id, req.user.organizationId);
     const access = await this.organizationsService.assertRequestedStoresAccessible(req.user.id, organization.id, this.csv(storeIds));
@@ -159,6 +163,7 @@ export class CustomersController {
 
   /** How many numbers a campaign audience reaches, after opt-outs and duplicate numbers. */
   @Post('audience/summary')
+  @Access('customers', 'whatsapp')
   async audienceSummary(@Request() req: any, @Body() dto: CustomerAudienceDto) {
     const organization = await this.organizationsService.getForUser(req.user.id, req.user.organizationId);
     const access = await this.organizationsService.assertRequestedStoresAccessible(req.user.id, organization.id, dto.storeIds);
@@ -174,6 +179,7 @@ export class CustomersController {
   }
 
   @Get('taxonomy')
+  @Access('customers', 'conversations', 'whatsapp')
   async taxonomy(@Request() req: any, @Query('storeId') storeId?: string) {
     const organization = await this.organizationsService.getForUser(req.user.id, req.user.organizationId);
     if (storeId) await this.organizationsService.assertStoreAccessibleByUser(req.user.id, organization.id, storeId);
@@ -225,6 +231,7 @@ export class CustomersController {
   }
 
   @Get(':id')
+  @Access('customers', 'conversations')
   async findOne(@Param('id') id: string, @Request() req: any) {
     const organization = await this.organizationsService.getForUser(req.user.id, req.user.organizationId);
     const customer = await this.customersService.findOneInOrganization(id, organization.id);
@@ -233,6 +240,7 @@ export class CustomersController {
   }
 
   @Patch(':id')
+  @Access('customers', 'conversations')
   async update(@Param('id') id: string, @Body() updateData: UpdateCustomerDto, @Request() req: any) {
     const organization = await this.organizationsService.getForUser(req.user.id, req.user.organizationId);
     const customer = await this.customersService.findOneInOrganization(id, organization.id);

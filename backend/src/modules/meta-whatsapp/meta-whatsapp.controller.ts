@@ -9,9 +9,11 @@ import type { UploadedMediaFile } from './meta-whatsapp.service';
 import { WhatsAppCampaignsService } from './whatsapp-campaigns.service';
 import { SaveMetaWhatsAppConnectionDto, SendWhatsAppTemplateBulkDto, SendWhatsAppTemplateDto, SubscribeWebhookDto, UpdateMetaWhatsAppConnectionDto } from './dto/meta-whatsapp.dto';
 import { MetaConnectionScope, MetaWebhookMode } from './entities/meta-whatsapp-connection.entity';
+import { Access } from '../organizations/access';
 
 @ApiTags('Meta WhatsApp')
 @ApiBearerAuth()
+@Access('whatsapp')
 @Controller('integrations/meta/whatsapp')
 @UseGuards(JwtAuthGuard)
 export class MetaWhatsAppController {
@@ -21,11 +23,13 @@ export class MetaWhatsAppController {
   ) {}
 
   @Get('connections')
+  @Access('whatsapp', 'channels')
   listConnections(@Request() req: any) {
     return this.service.listConnectionsForUser(req.user.id, req.user.organizationId);
   }
 
   @Get()
+  @Access('whatsapp', 'channels')
   getConnection(
     @Request() req: any,
     @Query('storeId') storeId?: string,
@@ -36,21 +40,25 @@ export class MetaWhatsAppController {
   }
 
   @Post()
+  @Access('channels')
   createConnection(@Request() req: any, @Body() dto: SaveMetaWhatsAppConnectionDto) {
     return this.service.saveForUser(req.user.id, dto, req.user.organizationId);
   }
 
   @Patch()
+  @Access('channels')
   updateConnection(@Request() req: any, @Body() dto: UpdateMetaWhatsAppConnectionDto) {
     return this.service.saveForUser(req.user.id, dto, req.user.organizationId);
   }
 
   @Post('test')
+  @Access('channels')
   test(@Request() req: any, @Query('connectionId') connectionId?: string, @Query('storeId') storeId?: string, @Query('scope') scope?: MetaConnectionScope) {
     return this.service.testForUser(req.user.id, req.user.organizationId, { connectionId, storeId, scope });
   }
 
   @Post('subscribe-webhook')
+  @Access('channels')
   subscribeWebhook(
     @Request() req: any,
     @Query('connectionId') connectionId?: string,

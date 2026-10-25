@@ -7,6 +7,7 @@ import DashboardLayout from './components/DashboardLayout';
 import DashboardHome from './pages/DashboardHome';
 import ConversationsPage from './pages/ConversationsPage';
 import SettingsPage from './pages/SettingsPage';
+import TeamPage from './pages/TeamPage';
 import ChannelsPage from './pages/ChannelsPage';
 import ReviewsPage from './pages/ReviewsPage';
 import CustomersPage from './pages/CustomersPage';
@@ -94,6 +95,7 @@ function App() {
                     <Route path="deletion-requests" element={<AccountDeletionAdminPage />} />
                     <Route path="analytics" element={<AnalyticsPage />} />
                     <Route path="settings" element={<SettingsPage />} />
+                    <Route path="team" element={<TeamPage />} />
                   </Routes>
                 </DashboardLayout>
               </PrivateRoute>

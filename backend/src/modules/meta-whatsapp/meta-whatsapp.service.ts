@@ -18,6 +18,7 @@ import {
 import { WhatsAppTemplate } from './entities/whatsapp-template.entity';
 import { SaveMetaWhatsAppConnectionDto, SendWhatsAppTemplateBulkDto, SendWhatsAppTemplateDto, UpdateMetaWhatsAppConnectionDto } from './dto/meta-whatsapp.dto';
 import { OrganizationsService } from '../organizations/organizations.service';
+import { OrganizationRole } from '../organizations/entities/organization-member.entity';
 import { CredentialEncryptionService } from '../channels/credential-encryption.service';
 import { Channel, ChannelStatus, ChannelType } from '../channels/entities/channel.entity';
 import { ConversationsService } from '../conversations/conversations.service';
@@ -76,14 +77,22 @@ export class MetaWhatsAppService implements OnModuleInit {
     }
   }
 
+  /**
+   * Read-only list; the controller limits it to members with WhatsApp or channels access. Members who
+   * cannot manage integrations (e.g. campaign staff) also get the webhook verify token masked.
+   */
   async listConnectionsForUser(userId: string, organizationId?: string) {
-    const { organization } = await this.organizationsService.assertCanManageIntegrations(userId, organizationId);
+    const { organization, membership } = await this.organizationsService.getMembership(userId, organizationId);
+    const canManage = [OrganizationRole.OWNER, OrganizationRole.ADMIN].includes(membership.role);
     const rows = await this.connectionRepository.find({
       where: { organizationId: organization.id },
       relations: ['store', 'defaultStore'],
       order: { createdAt: 'ASC' },
     });
-    return Promise.all(rows.map(async (row) => this.toPublicConnection(await this.getConnectionWithSecrets(row.id))));
+    return Promise.all(rows.map(async (row) => {
+      const connection = this.toPublicConnection(await this.getConnectionWithSecrets(row.id));
+      return canManage ? connection : { ...connection, verifyToken: '********' };
+    }));
   }
 
   async getForUser(userId: string, organizationId?: string, storeId?: string, scope: MetaConnectionScope = MetaConnectionScope.STORE, connectionId?: string) {

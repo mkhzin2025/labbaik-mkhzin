@@ -3,7 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Review } from './entities/review.entity';
 import { AiService } from '../ai/ai.service';
-import { StoresService } from '../stores/stores.service';
+import { Store } from '../stores/entities/store.entity';
 import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
@@ -12,7 +12,6 @@ export class ReviewsService {
     @InjectRepository(Review)
     private readonly reviewRepository: Repository<Review>,
     private readonly aiService: AiService,
-    private readonly storesService: StoresService,
     private readonly notificationsService: NotificationsService,
   ) {}
 
@@ -60,8 +59,7 @@ export class ReviewsService {
   }
 
   // Simulator: Create a fake review for testing
-  async simulateIncomingReview(storeId: string, data: any) {
-    const store = await this.storesService.findByOwner(storeId); // Actually find by store context
+  async simulateIncomingReview(store: Store, data: any) {
     
     const review = this.reviewRepository.create({
       reviewerName: data.name || 'عميل تجريبي',

@@ -55,6 +55,7 @@ export default function RegisterPage() {
 
       localStorage.setItem('access_token', data.token);
       localStorage.setItem('user', JSON.stringify(data.user));
+      localStorage.removeItem('access'); // the dashboard fetches this account's role
       if (data.organization) {
         localStorage.setItem('organization', JSON.stringify(data.organization));
       }
