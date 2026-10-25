@@ -1,6 +1,12 @@
-import { Controller, Get, Post, Patch, Delete, Body, Param, UseGuards, Request } from '@nestjs/common';
+import { BadRequestException, Controller, Get, Post, Patch, Delete, Body, Param, UseGuards, Request, Res, UploadedFile, UseInterceptors, NotFoundException } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiBody, ApiNotFoundResponse, ApiOperation, ApiParam, ApiResponse, ApiTags, ApiUnauthorizedResponse } from '@nestjs/swagger';
+import { existsSync, createReadStream } from 'fs';
+import { basename, extname } from 'path';
 import { FlowsService } from './flows.service';
+import type { UploadedFlowFile } from './flows.service';
+import { continueFlow, keywordMatches, startFlow, triggerOf } from './flow-engine';
+import type { FlowState } from './flow-engine';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { StoresService } from '../stores/stores.service';
 import { examples, ids } from '../../common/swagger/api-examples';
@@ -23,6 +29,46 @@ export class FlowsController {
   async findAll(@Request() req) {
     const store = await this.storesService.findByOwner(req.user.id);
     return this.flowsService.findAllByStore(store.id);
+  }
+
+  @Post('validate')
+  @ApiOperation({ summary: 'Check a flow graph for problems before saving or activating it' })
+  validate(@Body() graph: any) {
+    return this.flowsService.validate(graph);
+  }
+
+  /** Runs one turn of an unsaved flow with the same engine the webhook uses, for the editor's test chat. */
+  @Post('simulate')
+  @ApiOperation({ summary: 'Simulate one customer turn through a flow graph' })
+  simulate(@Body() body: { nodes?: any[]; edges?: any[]; state?: FlowState | null; input?: string; replyId?: string }) {
+    const graph = { nodes: Array.isArray(body?.nodes) ? body.nodes : [], edges: Array.isArray(body?.edges) ? body.edges : [] };
+    const input = String(body?.input || '');
+    if (body?.state?.nodeId) {
+      return { triggered: true, ...continueFlow(graph, { nodeId: body.state.nodeId, invalidReplies: Number(body.state.invalidReplies) || 0 }, input, body.replyId) };
+    }
+    const trigger = triggerOf(graph);
+    if (trigger.type === 'keyword' && !keywordMatches(trigger, input)) {
+      return { triggered: false, send: [], state: null, handoff: false, released: false };
+    }
+    return { triggered: true, ...startFlow(graph) };
+  }
+
+  /** Stores a file to send from a flow message; it is uploaded to Meta when a customer reaches the node. */
+  @Post('media')
+  @ApiOperation({ summary: 'Upload an image, video, audio or document for a flow message' })
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 16 * 1024 * 1024 } }))
+  uploadMedia(@UploadedFile() file: UploadedFlowFile) {
+    return this.flowsService.storeMedia(file);
+  }
+
+  @Get('media/:filename')
+  getMedia(@Param('filename') filename: string, @Res() res: any) {
+    if (filename !== basename(filename)) throw new BadRequestException('Invalid filename');
+    const path = this.flowsService.mediaPath(filename);
+    if (!existsSync(path)) throw new NotFoundException('File not found');
+    res.type(extname(filename));
+    res.setHeader('Cache-Control', 'private, max-age=86400');
+    return createReadStream(path).pipe(res);
   }
 
   @Get(':id')

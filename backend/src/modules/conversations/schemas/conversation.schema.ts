@@ -86,6 +86,10 @@ export class Conversation extends Document {
   @Prop({ nullable: true })
   currentFlowNodeId: string;
 
+  // Replies in a row that matched none of the waiting question's options; the flow lets go after a few.
+  @Prop({ default: 0 })
+  flowInvalidReplies: number;
+
   @Prop()
   lastMessage: string;
 

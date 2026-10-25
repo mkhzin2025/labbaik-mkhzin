@@ -656,10 +656,11 @@ export class ConversationsService implements OnModuleInit {
     }, { returnDocument: 'after' });
   }
 
-  async updateFlowState(id: string, flowId: string | null, nodeId: string | null) {
+  async updateFlowState(id: string, flowId: string | null, nodeId: string | null, invalidReplies = 0) {
     return this.conversationModel.findByIdAndUpdate(id, {
       currentFlowId: flowId,
-      currentFlowNodeId: nodeId
+      currentFlowNodeId: nodeId,
+      flowInvalidReplies: invalidReplies,
     });
   }
 

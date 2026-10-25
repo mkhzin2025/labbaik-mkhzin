@@ -87,6 +87,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const navigate = useNavigate();
   const location = useLocation();
   const isConversationsPage = location.pathname === '/dashboard/conversations';
+  // Full-bleed workspaces that manage their own scrolling.
+  const isFullBleed = isConversationsPage || /^\/dashboard\/flows\/[^/]+$/.test(location.pathname);
   const user = JSON.parse(localStorage.getItem('user') || '{}');
   const sidebarLogo = theme === 'light' ? LogoAltImage : LogoImage;
   const roleLabel = user.role === 'admin' ? 'مدير النظام' : 'موظف';
@@ -323,8 +325,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </div>
         </header>
 
-        <main className={`flex-1 ${isConversationsPage ? 'min-h-0 overflow-hidden bg-labbaik-surface' : 'overflow-y-auto p-4 sm:p-6 lg:p-8 custom-scrollbar'}`}>
-          <div className={isConversationsPage ? 'h-full min-h-0 w-full' : 'max-w-7xl mx-auto'}>
+        <main className={`flex-1 ${isFullBleed ? 'min-h-0 overflow-hidden bg-labbaik-surface' : 'overflow-y-auto p-4 sm:p-6 lg:p-8 custom-scrollbar'}`}>
+          <div className={isFullBleed ? 'h-full min-h-0 w-full' : 'max-w-7xl mx-auto'}>
             {children}
           </div>
         </main>

@@ -6,7 +6,11 @@ import { ConversationsService } from '../conversations/conversations.service';
 import { ChannelsService } from '../channels/channels.service';
 import { AiService } from '../ai/ai.service';
 import { CustomersService } from '../customers/customers.service';
+import { existsSync, readFileSync } from 'fs';
 import { FlowsService } from '../flows/flows.service';
+import { Flow } from '../flows/entities/flow.entity';
+import { continueFlow, fillVariables, NEW_CONVERSATION_GAP_MS, nodeAsText, startFlow } from '../flows/flow-engine';
+import type { FlowMedia, FlowNode, FlowStep } from '../flows/flow-engine';
 import { MessagingService } from '../channels/messaging.service';
 import { WhatsAppMediaService } from '../channels/whatsapp-media.service';
 import { MetaWhatsAppService } from '../meta-whatsapp/meta-whatsapp.service';
@@ -21,6 +25,15 @@ type NormalizedWhatsAppMessage = {
   timestamp: number;
   attachments: Record<string, any>[];
   metadata: Record<string, any>;
+};
+
+/** One outgoing message produced by a flow node; `payload` is the Cloud API body (null off WhatsApp). */
+type FlowMessagePart = {
+  payload: Record<string, any> | null;
+  interactive: boolean;
+  type: string;
+  text: string;
+  attachments: Record<string, any>[];
 };
 
 @Injectable()
@@ -312,7 +325,7 @@ export class WebhooksService {
     }
 
     try {
-      await this.processFlowOrAi(normalized.from, analysisText, storeId, 'whatsapp', currentStore, ownerId, savedConv);
+      await this.processFlowOrAi(normalized.from, analysisText, storeId, 'whatsapp', currentStore, ownerId, savedConv, normalized.metadata?.reply?.id);
     } catch (error) {
       this.logger.error(`WhatsApp auto-reply failed for ${normalized.from}: ${error.message}`);
       await this.conversationsService.addSystemError(
@@ -387,42 +400,31 @@ export class WebhooksService {
     return numericTimestamp < 10_000_000_000 ? numericTimestamp * 1000 : numericTimestamp;
   }
 
-  private async processFlowOrAi(from: string, text: string, storeId: string, platform: string, store: any, ownerId: any, conversation: any) {
+  private async processFlowOrAi(from: string, text: string, storeId: string, platform: string, store: any, ownerId: any, conversation: any, replyId?: string) {
     const aiManuallyEnabled = await this.conversationsService.isAiEnabled(from, storeId, platform);
     if (!aiManuallyEnabled) return false;
 
-    this.logger.log(`Checking Flow for ${from}. Current Flow: ${conversation.currentFlowId || 'NONE'}`);
-
-    if (conversation.currentFlowId) {
-      try {
-        const flow = await this.flowsService.findOne(conversation.currentFlowId, storeId);
-        if (flow && flow.isActive) {
-          const nextNode = this.flowsService.getNextNode(flow, conversation.currentFlowNodeId, text);
-          if (nextNode) {
-            await this.executeNode(nextNode, from, storeId, platform, ownerId, conversation, flow);
-            return true;
-          }
+    let releasedFlowId: string | null = null;
+    if (conversation.currentFlowId && conversation.currentFlowNodeId) {
+      const flow = await this.flowsService.findLive(conversation.currentFlowId, storeId);
+      if (flow) {
+        const step = continueFlow(flow, { nodeId: conversation.currentFlowNodeId, invalidReplies: conversation.flowInvalidReplies || 0 }, text, replyId);
+        if (!step.released) {
+          await this.runFlowStep(step, flow, from, storeId, platform, conversation);
+          return true;
         }
-      } catch (e) {
-        await this.conversationsService.updateFlowState(conversation._id, null, null);
-        conversation.currentFlowId = null;
+        this.logger.log(`Flow ${flow.id} released ${from} after repeated replies outside its options`);
+        releasedFlowId = flow.id;
       }
+      await this.conversationsService.updateFlowState(conversation._id, null, null);
     }
 
-    const defaultFlow = await this.flowsService.findDefault(storeId);
-    if (defaultFlow) {
-      const startNode = defaultFlow.nodes.find(n => n.type === 'start' || n.data?.isStart) || defaultFlow.nodes[0];
-      if (startNode) {
-        if (startNode.type === 'start') {
-          const firstActualNode = this.flowsService.getNextNode(defaultFlow, startNode.id, '');
-          if (firstActualNode) {
-            await this.executeNode(firstActualNode, from, storeId, platform, ownerId, conversation, defaultFlow);
-            return true;
-          }
-        }
-        await this.executeNode(startNode, from, storeId, platform, ownerId, conversation, defaultFlow);
-        return true;
-      }
+    const flow = await this.flowsService.findTriggered(storeId, text, this.isNewConversation(conversation));
+    // A customer who just left a flow by ignoring its options is not pulled straight back into it.
+    if (flow && flow.id !== releasedFlowId) {
+      this.logger.log(`Starting flow ${flow.id} for ${from}`);
+      await this.runFlowStep(startFlow(flow), flow, from, storeId, platform, conversation);
+      return true;
     }
 
     const aiScheduledAllowed = this.shouldAiRespond(store);
@@ -434,58 +436,168 @@ export class WebhooksService {
     return false;
   }
 
-  private async executeNode(node: any, from: string, storeId: string, platform: string, ownerId: any, conversation: any, flow: any) {
-    const responseText = node.data.text || 'مرحباً!';
-    const buttons = node.data.buttons || [];
+  /** First message in this thread, or the first after a day of silence. */
+  private isNewConversation(conversation: any) {
+    const messages: any[] = conversation?.messages || [];
+    if (messages.length <= 1) return true;
+    const latest = Number(messages[messages.length - 1]?.timestamp) || Date.now();
+    const previous = Number(messages[messages.length - 2]?.timestamp) || 0;
+    return latest - previous > NEW_CONVERSATION_GAP_MS;
+  }
 
+  private async runFlowStep(step: FlowStep, flow: Flow, from: string, storeId: string, platform: string, conversation: any) {
+    // Saved before sending so a quick second message from the customer sees where the flow is.
+    await this.conversationsService.updateFlowState(conversation._id, step.state ? flow.id : null, step.state?.nodeId ?? null, step.state?.invalidReplies ?? 0);
     const availableChannels = await this.channelsService.findAllByStore(storeId, { maskCredentials: false });
     const channel = availableChannels.find(c => c.type === platform && (!conversation?.metaConnectionId || c.credentials?.metaConnectionId === conversation.metaConnectionId))
       || availableChannels.find(c => c.type === platform);
-    let providerResponse: any = null;
-    let walletCharge: any = null;
-    if (channel) {
-      if (platform === 'whatsapp') {
-        walletCharge = await this.billingService.chargeMetaUsageForStore(
-          storeId,
-          buttons.length > 0 ? MetaUsageType.INTERACTIVE : MetaUsageType.SESSION_TEXT,
-          { referenceId: String(conversation._id), source: 'flow', flowId: flow.id, nodeId: node.id },
-        );
-      }
-      try {
-        if (platform === 'whatsapp' && buttons.length > 0) {
-          const imageUrl = node.data?.imageUrl;
-          providerResponse = await this.messagingService.sendWhatsAppButtons(channel.credentials!.phoneNumberId, channel.credentials!.accessToken, from, responseText, buttons, imageUrl);
-        } else if (platform === 'whatsapp') {
-          providerResponse = await this.messagingService.sendWhatsAppMessage(channel.credentials!.phoneNumberId, channel.credentials!.accessToken, from, responseText);
-        } else if (platform === 'instagram') {
-          providerResponse = await this.messagingService.sendInstagramMessage(channel.credentials!.accessToken, from, responseText);
-        } else if (platform === 'facebook') {
-          providerResponse = await this.messagingService.sendFacebookMessage(channel.credentials!.accessToken, from, responseText);
+    for (const node of step.send) {
+      await this.sendFlowNode(node, flow, from, storeId, platform, conversation, channel);
+    }
+    if (step.handoff) {
+      await this.conversationsService.toggleAi(String(conversation._id), false);
+      this.eventsGateway.server.to(`store_${storeId}`).emit('flow_handoff', { storeId, conversationId: String(conversation._id), customerPhone: from, flowId: flow.id });
+    }
+  }
+
+  private async sendFlowNode(node: FlowNode, flow: Flow, from: string, storeId: string, platform: string, conversation: any, channel: any) {
+    const text = fillVariables(node.data?.text || '', { name: conversation?.customerName, phone: from });
+    const parts: FlowMessagePart[] = platform === 'whatsapp' && channel
+      ? await this.whatsAppFlowParts(node, text, channel)
+      : [{ payload: null, interactive: false, type: 'text', text: nodeAsText(node, text), attachments: [] }];
+
+    for (const part of parts) {
+      if (!part.payload && !part.text) continue;
+      let providerResponse: any = null;
+      let walletCharge: any = null;
+      if (channel) {
+        if (platform === 'whatsapp') {
+          walletCharge = await this.billingService.chargeMetaUsageForStore(
+            storeId,
+            part.interactive ? MetaUsageType.INTERACTIVE : MetaUsageType.SESSION_TEXT,
+            { referenceId: String(conversation._id), source: 'flow', flowId: flow.id, nodeId: node.id },
+          );
         }
-      } catch (error) {
-        if (walletCharge) await this.billingService.refundMetaUsage(walletCharge.id, 'Flow WhatsApp send failed');
-        throw error;
+        try {
+          if (platform === 'whatsapp' && part.payload) {
+            providerResponse = await this.messagingService.sendWhatsAppPayload(channel.credentials!.phoneNumberId, channel.credentials!.accessToken, from, part.payload);
+          } else if (platform === 'instagram') {
+            providerResponse = await this.messagingService.sendInstagramMessage(channel.credentials!.accessToken, from, part.text);
+          } else if (platform === 'facebook') {
+            providerResponse = await this.messagingService.sendFacebookMessage(channel.credentials!.accessToken, from, part.text);
+          }
+        } catch (error) {
+          if (walletCharge) await this.billingService.refundMetaUsage(walletCharge.id, 'Flow WhatsApp send failed');
+          throw error;
+        }
       }
+
+      const whatsappMessageId = platform === 'whatsapp'
+        ? (providerResponse?.messages?.[0]?.id || providerResponse?.message_id)
+        : undefined;
+      const messageData = {
+        from: 'me', text: part.text, type: part.type, attachments: part.attachments, isManual: false, timestamp: Date.now(),
+        metadata: {
+          source: 'flow', flowId: flow.id, nodeId: node.id,
+          ...(whatsappMessageId ? { whatsappMessageId, status: 'accepted', walletTransactionId: walletCharge?.id || null, metaConnectionId: channel?.credentials?.metaConnectionId || conversation?.metaConnectionId || null } : {}),
+        },
+      };
+      await this.conversationsService.addMessage(from, storeId, platform, messageData);
+      this.eventsGateway.server.to(`store_${storeId}`).emit('new_message', {
+        ...messageData, platform, customerPhone: from, storeId,
+      });
     }
+  }
 
-    await this.conversationsService.updateFlowState(conversation._id, flow.id, node.id);
+  /** The Cloud API messages a node becomes. Most nodes are one message; audio with text is two (audio has no caption). */
+  private async whatsAppFlowParts(node: FlowNode, text: string, channel: any): Promise<FlowMessagePart[]> {
+    const data = node.data || {};
+    const inboxText = nodeAsText(node, text);
+    const footer = data.footer?.trim() ? { footer: { text: data.footer.trim() } } : {};
+    const interactive = (body: Record<string, any>, media?: FlowMedia | null): FlowMessagePart[] => [
+      { payload: { type: 'interactive', interactive: body }, interactive: true, type: 'text', text: inboxText, attachments: this.flowAttachments(media) },
+    ];
+    const textPart = (body: string): FlowMessagePart => ({ payload: { type: 'text', text: { body, preview_url: /https?:\/\//i.test(body) } }, interactive: false, type: 'text', text: body, attachments: [] });
 
-    if (node.type === 'end' || node.data?.isEnd) {
-      await this.conversationsService.updateFlowState(conversation._id, null, null);
+    switch (node.type) {
+      case 'buttons': {
+        const media: FlowMedia | null = data.media || (data.imageUrl ? { type: 'image', link: data.imageUrl } : null);
+        const header = media
+          ? { header: { type: media.type, [media.type]: { ...(await this.flowMediaRef(media, channel)), ...(media.type === 'document' && media.filename ? { filename: media.filename } : {}) } } }
+          : {};
+        return interactive({
+          type: 'button',
+          ...header,
+          body: { text },
+          ...footer,
+          action: { buttons: (data.buttons || []).map((option) => ({ type: 'reply', reply: { id: option.id, title: option.label.slice(0, 20) } })) },
+        }, media);
+      }
+      case 'list': {
+        const title = (data.buttonText || 'الخيارات').trim();
+        return interactive({
+          type: 'list',
+          body: { text },
+          ...footer,
+          action: {
+            button: title.slice(0, 20),
+            sections: [{
+              title: title.slice(0, 24),
+              rows: (data.buttons || []).map((option) => ({
+                id: option.id,
+                title: option.label.slice(0, 24),
+                ...(option.description?.trim() ? { description: option.description.trim().slice(0, 72) } : {}),
+              })),
+            }],
+          },
+        });
+      }
+      case 'link':
+        return interactive({
+          type: 'cta_url',
+          body: { text },
+          ...footer,
+          action: { name: 'cta_url', parameters: { display_text: (data.buttonText || '').slice(0, 20), url: data.url } },
+        });
+      case 'message': {
+        const media = data.media;
+        if (!media) return text ? [textPart(text)] : [];
+        const captioned = media.type !== 'audio' && Boolean(text);
+        const object = {
+          ...(await this.flowMediaRef(media, channel)),
+          ...(captioned ? { caption: text } : {}),
+          ...(media.type === 'document' && media.filename ? { filename: media.filename } : {}),
+        };
+        const mediaPart: FlowMessagePart = {
+          payload: { type: media.type, [media.type]: object },
+          interactive: false,
+          type: media.type,
+          text: captioned ? text : (media.link || media.filename || `[${media.type}]`),
+          attachments: this.flowAttachments(media),
+        };
+        return media.type === 'audio' && text ? [mediaPart, textPart(text)] : [mediaPart];
+      }
+      default:
+        return text ? [textPart(text)] : [];
     }
+  }
 
-    const whatsappMessageId = platform === 'whatsapp'
-      ? (providerResponse?.messages?.[0]?.id || providerResponse?.message_id)
-      : undefined;
-    const messageData = {
-      from: 'me', text: responseText, type: 'text', isManual: false, timestamp: Date.now(),
-      metadata: whatsappMessageId ? { whatsappMessageId, status: 'accepted', walletTransactionId: walletCharge?.id || null, metaConnectionId: channel?.credentials?.metaConnectionId || conversation?.metaConnectionId || null } : {},
-    };
-    await this.conversationsService.addMessage(from, storeId, platform, messageData);
-
-    this.eventsGateway.server.to(`store_${storeId}`).emit('new_message', {
-      ...messageData, platform, customerPhone: from, storeId,
+  private async flowMediaRef(media: FlowMedia, channel: any): Promise<{ id: string } | { link: string }> {
+    if (media.link) return { link: media.link };
+    const path = this.flowsService.mediaPath(String(media.file || ''));
+    if (!media.file || !existsSync(path)) throw new Error(`ملف التدفق غير موجود على الخادم (${media.filename || media.file}). أعد رفعه من محرر التدفق.`);
+    const id = await this.messagingService.uploadWhatsAppMedia(channel.credentials!.phoneNumberId, channel.credentials!.accessToken, media.file, {
+      buffer: readFileSync(path),
+      mimeType: media.mimeType || 'application/octet-stream',
+      filename: media.filename || media.file,
     });
+    return { id };
+  }
+
+  /** Lets the inbox show the file a flow sent, like a customer's attachment. */
+  private flowAttachments(media?: FlowMedia | null): Record<string, any>[] {
+    if (!media?.file) return [];
+    return [{ id: media.file, type: media.type, mimeType: media.mimeType, filename: media.file, originalFilename: media.filename, url: `/flows/media/${media.file}` }];
   }
 
   private shouldAiRespond(store: any): boolean {
