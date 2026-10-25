@@ -73,6 +73,11 @@ export class Conversation extends Document {
   @Prop({ type: Date, nullable: true })
   aiDisabledUntil: Date;
 
+  // Why automatic replies are paused: 'ai_error' pauses only the AI, while 'manual' / 'agent_reply' / 'handoff'
+  // pause flows too. Pauses from before this field existed read as manual.
+  @Prop({ type: String, default: null })
+  aiPausedReason: string | null;
+
   @Prop({ default: 'neutral' })
   lastSentiment: string;
 

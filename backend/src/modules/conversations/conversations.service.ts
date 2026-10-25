@@ -639,20 +639,20 @@ export class ConversationsService implements OnModuleInit {
     };
   }
 
-  async isAiEnabled(customerPhone: string, storeId: string, platform: string): Promise<boolean> {
+  /** Why automatic replies are paused for this customer right now, or null when they are not. */
+  async getAutoReplyPause(customerPhone: string, storeId: string, platform: string): Promise<string | null> {
     customerPhone = this.normalizeCustomerPhone(customerPhone, platform);
     const conversation = await this.conversationModel.findOne({ customerPhone, storeId, platform }).sort({ lastMessageAt: -1 });
-    if (!conversation) return true;
-    if (conversation.aiEnabled === false && conversation.aiDisabledUntil) {
-      const now = new Date();
-      if (now < conversation.aiDisabledUntil) return false;
-    }
-    return true;
+    if (!conversation || conversation.aiEnabled !== false || !conversation.aiDisabledUntil) return null;
+    if (new Date() >= conversation.aiDisabledUntil) return null;
+    return conversation.aiPausedReason || 'manual';
   }
 
-  async toggleAi(conversationId: string, enabled: boolean) {
-    return this.conversationModel.findByIdAndUpdate(conversationId, { 
-      aiEnabled: enabled, aiDisabledUntil: enabled ? null : new Date(Date.now() + 24 * 60 * 60 * 1000)
+  async toggleAi(conversationId: string, enabled: boolean, reason: 'manual' | 'handoff' | 'ai_error' = 'manual') {
+    return this.conversationModel.findByIdAndUpdate(conversationId, {
+      aiEnabled: enabled,
+      aiDisabledUntil: enabled ? null : new Date(Date.now() + 24 * 60 * 60 * 1000),
+      aiPausedReason: enabled ? null : reason,
     }, { returnDocument: 'after' });
   }
 
@@ -710,7 +710,7 @@ export class ConversationsService implements OnModuleInit {
     };
     await this.addMessage(conversation.customerPhone, storeId, conversation.platform, messageData);
     const thirtyMinutesFromNow = new Date(Date.now() + 30 * 60 * 1000);
-    await this.conversationModel.findByIdAndUpdate(conversationId, { aiEnabled: false, aiDisabledUntil: thirtyMinutesFromNow });
+    await this.conversationModel.findByIdAndUpdate(conversationId, { aiEnabled: false, aiDisabledUntil: thirtyMinutesFromNow, aiPausedReason: 'agent_reply' });
     const store = await this.channelsService.getStoreContext(storeId);
     const ownerId = store.owner?.id || (typeof store.owner === 'string' ? store.owner : null);
     if (ownerId) this.eventsGateway.server.to(`store_${storeId}`).emit('new_message', { ...messageData, customerPhone: conversation.customerPhone, platform: conversation.platform, storeId });

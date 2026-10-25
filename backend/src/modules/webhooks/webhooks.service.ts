@@ -401,8 +401,12 @@ export class WebhooksService {
   }
 
   private async processFlowOrAi(from: string, text: string, storeId: string, platform: string, store: any, ownerId: any, conversation: any, replyId?: string) {
-    const aiManuallyEnabled = await this.conversationsService.isAiEnabled(from, storeId, platform);
-    if (!aiManuallyEnabled) return false;
+    // A team pause (manual, agent reply, handoff) stops everything; an AI failure only stops the AI, so flows keep working.
+    const pause = await this.conversationsService.getAutoReplyPause(from, storeId, platform);
+    if (pause && pause !== 'ai_error') {
+      this.logger.log(`Auto-reply paused (${pause}) for ${from}; skipping flows and AI`);
+      return false;
+    }
 
     let releasedFlowId: string | null = null;
     if (conversation.currentFlowId && conversation.currentFlowNodeId) {
@@ -427,6 +431,7 @@ export class WebhooksService {
       return true;
     }
 
+    if (pause === 'ai_error') return false;
     const aiScheduledAllowed = this.shouldAiRespond(store);
     if (aiScheduledAllowed) {
       await this.processAiResponse(from, text, storeId, platform, store, String(ownerId), conversation);
@@ -455,7 +460,7 @@ export class WebhooksService {
       await this.sendFlowNode(node, flow, from, storeId, platform, conversation, channel);
     }
     if (step.handoff) {
-      await this.conversationsService.toggleAi(String(conversation._id), false);
+      await this.conversationsService.toggleAi(String(conversation._id), false, 'handoff');
       this.eventsGateway.server.to(`store_${storeId}`).emit('flow_handoff', { storeId, conversationId: String(conversation._id), customerPhone: from, flowId: flow.id });
     }
   }
@@ -628,7 +633,7 @@ export class WebhooksService {
     if (!aiResponseText) {
       // AI failed on our side: silently stop auto-reply for this conversation and leave it to a human agent.
       this.logger.warn(`AI reply failed for ${from} (store ${storeId}); auto-reply disabled for this conversation`);
-      if (conversation?._id) await this.conversationsService.toggleAi(String(conversation._id), false);
+      if (conversation?._id) await this.conversationsService.toggleAi(String(conversation._id), false, 'ai_error');
       return;
     }
     const availableChannels = await this.channelsService.findAllByStore(storeId, { maskCredentials: false });
