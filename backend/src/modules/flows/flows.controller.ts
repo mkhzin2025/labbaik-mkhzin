@@ -102,7 +102,7 @@ export class FlowsController {
   @ApiNotFoundResponse({ schema: { example: { message: 'Flow not found', error: 'Not Found', statusCode: 404 } } })
   async update(@Param('id') id: string, @Body() data: any, @Request() req) {
     const store = await this.storesService.findByOwner(req.user.id);
-    return this.flowsService.update(id, store.id, data);
+    return this.flowsService.update(id, store.id, data, store.organizationId);
   }
 
   @Delete(':id')
