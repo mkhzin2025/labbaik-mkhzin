@@ -14,7 +14,9 @@ import { MetaWhatsAppService } from './meta-whatsapp.service';
 import { MetaTemplatePayloadBuilder } from './services/meta-template-payload.builder';
 
 /** Upper bound on parallel sends per campaign; the chosen messages/second paces them. */
-const MAX_SEND_CONCURRENCY = 40;
+const MAX_SEND_CONCURRENCY = 160;
+/** Workers per message/second of pace: covers a send that takes up to ~2s end to end. */
+const SEND_CONCURRENCY_PER_MPS = 2;
 const CLAIM_BATCH = 40;
 const DEFAULT_SPEED = 20;
 /** How often due scheduled campaigns are picked up. */
@@ -276,7 +278,8 @@ export class WhatsAppCampaignsService implements OnApplicationBootstrap, OnModul
       const dto = { ...this.campaignDto(campaign.parameters), nameFallback: campaign.parameters.nameFallback || undefined };
       const stores = new Map<string, Store>();
       const speed = campaign.messagesPerSecond || DEFAULT_SPEED;
-      const concurrency = Math.min(MAX_SEND_CONCURRENCY, speed);
+      // A send (billing, Meta round-trip, bookkeeping) takes about a second, so `speed` workers alone fall short of `speed`/s.
+      const concurrency = Math.min(MAX_SEND_CONCURRENCY, speed * SEND_CONCURRENCY_PER_MPS);
       // Each send takes the next free slot on a shared clock, so the campaign never exceeds its messages/second.
       const interval = 1000 / speed;
       let nextSlot = Date.now();
@@ -289,47 +292,80 @@ export class WhatsAppCampaignsService implements OnApplicationBootstrap, OnModul
       let consecutiveFailures = 0;
       let lastError = '';
 
-      while (true) {
-        const current = await this.campaignRepository.findOne({ where: { id: campaign.id }, select: ['id', 'status'] });
-        if (current?.status !== WhatsAppCampaignStatus.SENDING) return;
+      // Workers pull from one shared queue that is topped up in the background, so a single slow Meta call
+      // only holds up its own worker instead of the whole batch. Claimed numbers are always sent, even after
+      // a pause or cancel, so none is left stuck in 'sending'.
+      const queue: WhatsAppCampaignRecipient[] = [];
+      const customers = new Map<string, any>();
+      let halt: 'done' | 'status' | 'failures' | 'error' | null = null;
+      let fatal: unknown = null;
+      let refilling: Promise<void> | null = null;
 
-        const batch = await this.claimBatch(campaign.id);
-        if (!batch.length) break;
-        const customers = await this.customersService.findAudienceRowsByIds(batch.map((item) => item.customerId).filter(Boolean) as string[]);
-
-        const queue = [...batch];
-        await Promise.all(Array.from({ length: Math.min(concurrency, queue.length) }, async () => {
-          for (let recipient = queue.shift(); recipient; recipient = queue.shift()) {
-            await pace();
-            try {
-              const store = stores.get(recipient.storeId)
-                || await this.organizationsService.assertStoreBelongsToOrganization(campaign.organizationId, recipient.storeId);
-              stores.set(recipient.storeId, store);
-              const customer = (recipient.customerId && customers.get(recipient.customerId))
-                || { fullName: recipient.customerName, phoneNumber: recipient.phone, storeName: recipient.storeName };
-              const personalized = this.metaWhatsAppService.personalizeTemplateDto(dto, customer);
-              const response = await this.metaWhatsAppService.sendOneTemplate(
-                store, context.connection, context.template, recipient.phone, personalized, { campaignId: campaign.id },
-              );
-              await this.recipientRepository.update(recipient.id, {
-                status: CampaignRecipientStatus.SENT,
-                whatsappMessageId: response?.message?.metadata?.whatsappMessageId || null,
-                sentAt: new Date(),
-              });
-              consecutiveFailures = 0;
-            } catch (error: any) {
-              lastError = errorText(error);
-              consecutiveFailures += 1;
-              await this.recipientRepository.update(recipient.id, { status: CampaignRecipientStatus.FAILED, error: lastError, failedAt: new Date() });
-            }
-          }
-        }));
-
-        if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-          await this.stop(campaign.id, `أُوقفت الحملة بعد فشل ${consecutiveFailures} رسالة متتالية. آخر خطأ: ${lastError}`);
-          return;
+      const claimMore = async () => {
+        try {
+          if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) { halt = 'failures'; return; }
+          const current = await this.campaignRepository.findOne({ where: { id: campaign.id }, select: ['id', 'status'] });
+          if (current?.status !== WhatsAppCampaignStatus.SENDING) { halt = 'status'; return; }
+          const batch = await this.claimBatch(campaign.id, Math.max(CLAIM_BATCH, concurrency));
+          if (!batch.length) { halt = 'done'; return; }
+          const rows = await this.customersService.findAudienceRowsByIds(batch.map((item) => item.customerId).filter(Boolean) as string[]);
+          for (const [id, row] of rows) customers.set(id, row);
+          queue.push(...batch);
+        } catch (error) {
+          fatal = error;
+          halt = 'error';
         }
+      };
+      const refill = () => {
+        if (!refilling && !halt) refilling = claimMore().finally(() => { refilling = null; });
+        return refilling ?? Promise.resolve();
+      };
+      const next = async () => {
+        for (;;) {
+          if (queue.length) {
+            if (queue.length <= concurrency) void refill();
+            return queue.shift();
+          }
+          if (halt) return undefined;
+          await refill();
+        }
+      };
+
+      await Promise.all(Array.from({ length: concurrency }, async () => {
+        for (let recipient = await next(); recipient; recipient = await next()) {
+          await pace();
+          const audienceRow = recipient.customerId ? customers.get(recipient.customerId) : undefined;
+          if (recipient.customerId) customers.delete(recipient.customerId);
+          try {
+            const store = stores.get(recipient.storeId)
+              || await this.organizationsService.assertStoreBelongsToOrganization(campaign.organizationId, recipient.storeId);
+            stores.set(recipient.storeId, store);
+            const customer = audienceRow
+              || { fullName: recipient.customerName, phoneNumber: recipient.phone, storeName: recipient.storeName };
+            const personalized = this.metaWhatsAppService.personalizeTemplateDto(dto, customer);
+            const response = await this.metaWhatsAppService.sendOneTemplate(
+              store, context.connection, context.template, recipient.phone, personalized, { campaignId: campaign.id },
+            );
+            await this.recipientRepository.update(recipient.id, {
+              status: CampaignRecipientStatus.SENT,
+              whatsappMessageId: response?.message?.metadata?.whatsappMessageId || null,
+              sentAt: new Date(),
+            });
+            consecutiveFailures = 0;
+          } catch (error: any) {
+            lastError = errorText(error);
+            consecutiveFailures += 1;
+            await this.recipientRepository.update(recipient.id, { status: CampaignRecipientStatus.FAILED, error: lastError, failedAt: new Date() });
+          }
+        }
+      }));
+
+      if (fatal) throw fatal;
+      if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+        await this.stop(campaign.id, `أُوقفت الحملة بعد فشل ${consecutiveFailures} رسالة متتالية. آخر خطأ: ${lastError}`);
+        return;
       }
+      if (halt === 'status') return;
 
       await this.campaignRepository.update(campaign.id, { status: WhatsAppCampaignStatus.COMPLETED, completedAt: new Date() });
     } catch (error: any) {
@@ -341,7 +377,7 @@ export class WhatsAppCampaignsService implements OnApplicationBootstrap, OnModul
   }
 
   /** Atomically takes the next pending numbers, so two server instances never send the same one. */
-  private async claimBatch(campaignId: string): Promise<WhatsAppCampaignRecipient[]> {
+  private async claimBatch(campaignId: string, limit = CLAIM_BATCH): Promise<WhatsAppCampaignRecipient[]> {
     return this.recipientRepository.query(
       `WITH claimed AS (
          UPDATE whatsapp_campaign_recipients SET status = 'sending'
@@ -351,7 +387,7 @@ export class WhatsAppCampaignsService implements OnApplicationBootstrap, OnModul
              ORDER BY id LIMIT $2 FOR UPDATE SKIP LOCKED)
           RETURNING *)
        SELECT * FROM claimed`,
-      [campaignId, CLAIM_BATCH],
+      [campaignId, limit],
     );
   }
 

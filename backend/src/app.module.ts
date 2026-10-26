@@ -60,6 +60,9 @@ import { AccountDeletionRequest } from './modules/account-deletion/entities/acco
         database: configService.get<string>('POSTGRES_DB'),
         entities: [User, Store, Channel, Review, Notification, Customer, CustomerCategory, CustomerTag, CompetitionSyncState, Flow, Organization, OrganizationMember, StoreMember, MetaWhatsAppConnection, WhatsAppTemplate, WhatsAppCampaign, WhatsAppCampaignRecipient, BillingPlan, Subscription, Wallet, WalletTransaction, PaymentMethod, BillingPayment, PricingRule, AccountDeletionRequest],
         synchronize: configService.get<string>('TYPEORM_SYNCHRONIZE') === 'true',
+        // node-postgres defaults to 10 connections; a running campaign alone keeps more than that busy
+        // (each wallet debit holds one while it waits for the wallet row lock), starving webhooks and the UI.
+        extra: { max: Number(configService.get<string>('POSTGRES_POOL_MAX') || 30) },
       }),
     }),
     MongooseModule.forRootAsync({

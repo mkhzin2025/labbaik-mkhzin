@@ -17,6 +17,9 @@ import { CustomerTag } from './customer-tag.entity';
 @Entity('customers')
 @Index(['phoneNumber', 'storeId'], { unique: true })
 @Index(['storeId', 'updatedAt'])
+// findByIdentifier matches phoneNumber OR whatsappId; without this the whatsappId side scans the whole store.
+// Named so the copy created by hand on production (CREATE INDEX CONCURRENTLY) is kept by synchronize.
+@Index('IDX_customers_whatsapp_store', ['whatsappId', 'storeId'])
 export class Customer {
   @PrimaryGeneratedColumn('uuid')
   id: string;
