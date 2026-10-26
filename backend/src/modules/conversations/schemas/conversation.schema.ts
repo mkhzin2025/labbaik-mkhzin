@@ -109,4 +109,8 @@ export class Conversation extends Document {
 export const ConversationSchema = SchemaFactory.createForClass(Conversation);
 // Inbox pages: newest first per store (and per status tab), with _id as the cursor tie-breaker.
 ConversationSchema.index({ storeId: 1, lastMessageAt: -1, _id: -1 });
+// addMessage / getAutoReplyPause look up a customer's thread on every incoming message.
+ConversationSchema.index({ customerPhone: 1, storeId: 1, platform: 1, lastMessageAt: -1 });
+// Webhook dedupe and delivery-status updates (sent/delivered/read) match by message id.
+ConversationSchema.index({ 'messages.metadata.whatsappMessageId': 1 }, { sparse: true });
 ConversationSchema.index({ storeId: 1, status: 1, lastMessageAt: -1, _id: -1 });

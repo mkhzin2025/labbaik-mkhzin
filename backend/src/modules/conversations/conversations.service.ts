@@ -186,7 +186,8 @@ export class ConversationsService implements OnModuleInit {
     return this.conversationModel.findOneAndUpdate(
       { customerPhone, storeId, platform },
       updateQuery,
-      { upsert: true, returnDocument: 'after', sort: { lastMessageAt: -1 } }
+      // Callers only look at the last two messages (new-conversation check); don't ship the whole thread back.
+      { upsert: true, returnDocument: 'after', sort: { lastMessageAt: -1 }, projection: { messages: { $slice: -2 } } }
     );
   }
 
@@ -298,7 +299,7 @@ export class ConversationsService implements OnModuleInit {
     return this.conversationModel.findOneAndUpdate(
       { storeId: { $in: storeIds }, platform: 'whatsapp', 'messages.metadata.whatsappMessageId': whatsappMessageId },
       { $set: set },
-      { returnDocument: 'after' },
+      { returnDocument: 'after', projection: this.statusUpdateProjection(whatsappMessageId) },
     );
   }
 
@@ -312,8 +313,13 @@ export class ConversationsService implements OnModuleInit {
     return this.conversationModel.findOneAndUpdate(
       { storeId, platform: 'whatsapp', 'messages.metadata.whatsappMessageId': whatsappMessageId },
       { $set: set },
-      { returnDocument: 'after' },
+      { returnDocument: 'after', projection: this.statusUpdateProjection(whatsappMessageId) },
     );
+  }
+
+  /** Status callers only need the store and the updated message, not the whole thread. */
+  private statusUpdateProjection(whatsappMessageId: string) {
+    return { storeId: 1, messages: { $elemMatch: { 'metadata.whatsappMessageId': whatsappMessageId } } };
   }
 
   async markAsRead(id: string) {
@@ -642,7 +648,10 @@ export class ConversationsService implements OnModuleInit {
   /** Why automatic replies are paused for this customer right now, or null when they are not. */
   async getAutoReplyPause(customerPhone: string, storeId: string, platform: string): Promise<string | null> {
     customerPhone = this.normalizeCustomerPhone(customerPhone, platform);
-    const conversation = await this.conversationModel.findOne({ customerPhone, storeId, platform }).sort({ lastMessageAt: -1 });
+    const conversation = await this.conversationModel.findOne({ customerPhone, storeId, platform })
+      .sort({ lastMessageAt: -1 })
+      .select('aiEnabled aiDisabledUntil aiPausedReason')
+      .lean();
     if (!conversation || conversation.aiEnabled !== false || !conversation.aiDisabledUntil) return null;
     if (new Date() >= conversation.aiDisabledUntil) return null;
     return conversation.aiPausedReason || 'manual';

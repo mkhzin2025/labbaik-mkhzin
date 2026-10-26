@@ -3,6 +3,10 @@ import { ConfigService } from '@nestjs/config';
 import OpenAI from 'openai';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
+// The SDK default is a 10-minute timeout with 2 retries; a stuck provider would stall the webhook.
+// Fail fast instead and let the caller fall through to the next model.
+const AI_CLIENT_LIMITS = { timeout: 30_000, maxRetries: 1 };
+
 @Injectable()
 export class AiService implements OnModuleInit {
   private readonly logger = new Logger(AiService.name);
@@ -15,14 +19,14 @@ export class AiService implements OnModuleInit {
 
   onModuleInit() {
     const openAiKey = this.configService.get<string>('OPENAI_API_KEY');
-    if (openAiKey) this.openai = new OpenAI({ apiKey: openAiKey });
+    if (openAiKey) this.openai = new OpenAI({ apiKey: openAiKey, ...AI_CLIENT_LIMITS });
 
     const groqKey = this.configService.get<string>('GROQ_API_KEY');
-    if (groqKey) this.groq = new OpenAI({ apiKey: groqKey, baseURL: 'https://api.groq.com/openai/v1' });
+    if (groqKey) this.groq = new OpenAI({ apiKey: groqKey, baseURL: 'https://api.groq.com/openai/v1', ...AI_CLIENT_LIMITS });
 
     const deepseekKey = this.configService.get<string>('DEEPSEEK_API_KEY');
     if (deepseekKey) {
-      this.deepseek = new OpenAI({ apiKey: deepseekKey, baseURL: 'https://api.deepseek.com' });
+      this.deepseek = new OpenAI({ apiKey: deepseekKey, baseURL: 'https://api.deepseek.com', ...AI_CLIENT_LIMITS });
     }
 
     const geminiKey = this.configService.get<string>('GEMINI_API_KEY');

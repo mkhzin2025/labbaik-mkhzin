@@ -79,8 +79,10 @@ export class WebhooksService {
           facebookId: platform === 'facebook' ? from : undefined,
         }, platform);
 
-        const sentiment = await this.aiService.analyzeSentiment(text);
-        const tags = await this.aiService.categorizeMessage(text);
+        const [sentiment, tags] = await Promise.all([
+          this.aiService.analyzeSentiment(text),
+          this.aiService.categorizeMessage(text),
+        ]);
 
         const savedConv = await this.conversationsService.addMessage(from, storeId, platform, {
           from, text, type: 'text', timestamp: Date.now(), sentiment, tags, customerId: customer.id,
@@ -285,8 +287,10 @@ export class WebhooksService {
     const customerName = this.customersService.isPlaceholderName(customer.fullName, normalized.from) ? profileName : customer.fullName;
 
     const analysisText = normalized.text || `[${normalized.type}]`;
-    const sentiment = await this.aiService.analyzeSentiment(analysisText);
-    const tags = await this.aiService.categorizeMessage(analysisText);
+    const [sentiment, tags] = await Promise.all([
+      this.aiService.analyzeSentiment(analysisText),
+      this.aiService.categorizeMessage(analysisText),
+    ]);
 
     const savedConv = await this.conversationsService.addMessage(normalized.from, storeId, 'whatsapp', {
       from: normalized.from,

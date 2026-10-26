@@ -1,3 +1,9 @@
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   frontend:
     build:
@@ -8,6 +14,7 @@ services:
         VITE_WEBHOOK_BASE_URL: ${PUBLIC_WEBHOOK_URL:-${PUBLIC_API_URL:-https://taelbot.com}}
     container_name: labbaik-frontend
     restart: unless-stopped
+    logging: *default-logging
     ports:
       - "127.0.0.1:3001:80"
     depends_on:
@@ -19,10 +26,12 @@ services:
       dockerfile: Dockerfile.prod
     container_name: labbaik-backend
     restart: unless-stopped
+    logging: *default-logging
     ports:
       - "127.0.0.1:3000:3000"
     environment:
       NODE_ENV: production
+      NODE_OPTIONS: --max-old-space-size=${BACKEND_HEAP_MB:-1024}
       PORT: 3000
       TYPEORM_SYNCHRONIZE: ${TYPEORM_SYNCHRONIZE:-true}
       POSTGRES_HOST: postgres
@@ -62,6 +71,7 @@ services:
     image: adminer:4
     container_name: labbaik-adminer
     restart: unless-stopped
+    logging: *default-logging
     environment:
       ADMINER_DEFAULT_SERVER: postgres
     ports:
@@ -76,6 +86,7 @@ services:
     image: postgres:15-alpine
     container_name: labbaik-postgres
     restart: unless-stopped
+    logging: *default-logging
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-labbaik_admin}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-labbaik_postgres_change_me}
@@ -92,24 +103,31 @@ services:
 
   mongodb:
     image: mongo:6.0
+    # Mongo takes ~50% of host RAM for its cache by default, starving the backend and Postgres.
+    command: ["mongod", "--wiredTigerCacheSizeGB", "${MONGO_CACHE_GB:-1}"]
     container_name: labbaik-mongodb
     restart: unless-stopped
+    logging: *default-logging
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME:-labbaik_mongo_admin}
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD:-labbaik_mongo_change_me}
     volumes:
       - mongo_data:/data/db
+    # mongosh is a full Node process; a tight interval piles them up when Mongo is slow.
+    # ping needs no auth, so skip the login round-trip too.
     healthcheck:
-      test: ["CMD-SHELL", "mongosh --quiet --username \"$${MONGO_INITDB_ROOT_USERNAME}\" --password \"$${MONGO_INITDB_ROOT_PASSWORD}\" --authenticationDatabase admin --eval \"db.adminCommand('ping').ok\""]
-      interval: 10s
-      timeout: 5s
-      retries: 20
+      test: ["CMD", "mongosh", "--quiet", "--norc", "--eval", "db.adminCommand('ping').ok"]
+      interval: 30s
+      timeout: 20s
+      start_period: 30s
+      retries: 5
 
   redis:
     image: redis:7-alpine
     container_name: labbaik-redis
     restart: unless-stopped
-    command: ["redis-server", "--appendonly", "yes"]
+    logging: *default-logging
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "${REDIS_MAXMEMORY:-128mb}", "--maxmemory-policy", "allkeys-lru"]
     volumes:
       - redis_data:/data
     healthcheck:

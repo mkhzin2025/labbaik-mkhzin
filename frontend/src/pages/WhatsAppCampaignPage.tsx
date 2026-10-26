@@ -66,7 +66,7 @@ export default function WhatsAppCampaignPage() {
     let stopped = false;
     const tick = async () => {
       const data = await load();
-      if (!stopped) timer = setTimeout(tick, data && isActive(data.status) ? 3000 : 30000);
+      if (!stopped) timer = setTimeout(tick, data && isActive(data.status) ? 10000 : 30000);
     };
     void tick();
     return () => { stopped = true; clearTimeout(timer); };

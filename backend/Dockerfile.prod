@@ -23,4 +23,5 @@ COPY --from=build /app/scripts ./scripts
 
 EXPOSE 3000
 
-CMD ["npm", "run", "start:prod"]
+# Run node directly (not via npm) so it receives SIGTERM and shuts down cleanly on redeploy.
+CMD ["node", "dist/main"]
