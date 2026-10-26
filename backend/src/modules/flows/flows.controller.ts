@@ -30,7 +30,7 @@ export class FlowsController {
   @ApiNotFoundResponse({ schema: { example: examples.errors.storeNotFound } })
   async findAll(@Request() req) {
     const { store } = await this.organizationsService.getStoreForUser(req.user.id, req.user.organizationId);
-    return this.flowsService.findAllByStore(store.id);
+    return this.flowsService.findAllByStore(store.id, store.organizationId);
   }
 
   @Post('validate')
@@ -82,7 +82,7 @@ export class FlowsController {
   @ApiNotFoundResponse({ schema: { example: { message: 'Flow not found', error: 'Not Found', statusCode: 404 } } })
   async findOne(@Param('id') id: string, @Request() req) {
     const { store } = await this.organizationsService.getStoreForUser(req.user.id, req.user.organizationId);
-    return this.flowsService.findOne(id, store.id);
+    return this.flowsService.findOne(id, store.id, store.organizationId);
   }
 
   @Post()
@@ -116,6 +116,6 @@ export class FlowsController {
   @ApiNotFoundResponse({ schema: { example: { message: 'Flow not found', error: 'Not Found', statusCode: 404 } } })
   async delete(@Param('id') id: string, @Request() req) {
     const { store } = await this.organizationsService.getStoreForUser(req.user.id, req.user.organizationId);
-    return this.flowsService.delete(id, store.id);
+    return this.flowsService.delete(id, store.id, store.organizationId);
   }
 }

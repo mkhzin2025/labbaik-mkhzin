@@ -70,24 +70,25 @@ export class FlowsService {
     return { ...flow, isActive: FlowsService.isLive(flow), trigger: triggerOf(flow) };
   }
 
-  async findAllByStore(storeId: string) {
+  /** Flows run for every branch of the organization (see findTriggered), so they are listed and managed organization-wide too. */
+  async findAllByStore(storeId: string, organizationId?: string | null) {
     const flows = await this.flowRepository.find({
-      where: { store: { id: storeId } },
+      where: this.scope(storeId, organizationId),
       order: { updatedAt: 'DESC' }
     });
     return flows.map((flow) => this.present(flow));
   }
 
-  private async findEntity(id: string, storeId: string) {
+  private async findEntity(id: string, storeId: string, organizationId?: string | null) {
     const flow = await this.flowRepository.findOne({
-      where: { id, store: { id: storeId } }
+      where: { id, ...this.scope(storeId, organizationId) }
     });
     if (!flow) throw new NotFoundException('Flow not found');
     return flow;
   }
 
-  async findOne(id: string, storeId: string) {
-    return this.present(await this.findEntity(id, storeId));
+  async findOne(id: string, storeId: string, organizationId?: string | null) {
+    return this.present(await this.findEntity(id, storeId, organizationId));
   }
 
   async create(store: Store, data: any) {
@@ -104,7 +105,7 @@ export class FlowsService {
   }
 
   async update(id: string, storeId: string, data: any, organizationId?: string | null) {
-    const flow = await this.findEntity(id, storeId);
+    const flow = await this.findEntity(id, storeId, organizationId);
     if (typeof data?.name === 'string') flow.name = data.name.trim().slice(0, 120) || flow.name;
     if (Array.isArray(data?.nodes)) flow.nodes = data.nodes;
     if (Array.isArray(data?.edges)) flow.edges = data.edges;
@@ -121,8 +122,8 @@ export class FlowsService {
     return this.present(await this.flowRepository.save(flow));
   }
 
-  async delete(id: string, storeId: string) {
-    const flow = await this.findEntity(id, storeId);
+  async delete(id: string, storeId: string, organizationId?: string | null) {
+    const flow = await this.findEntity(id, storeId, organizationId);
     return this.flowRepository.remove(flow);
   }
 

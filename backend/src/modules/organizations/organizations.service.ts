@@ -135,7 +135,15 @@ export class OrganizationsService {
     const { organization, stores } = await this.listStoresForUser(userId, organizationId);
     let store: Store | undefined;
     if (storeId) store = stores.find((row) => row.id === storeId);
-    else store = stores[0];
+    else {
+      // The user's own store first, as it was before members existed; invited members get their first branch.
+      const owned = await this.storeRepository.findOne({
+        where: { owner: { id: userId }, organizationId: organization.id },
+        select: ['id'],
+        order: { createdAt: 'ASC' },
+      });
+      store = stores.find((row) => row.id === owned?.id) || stores[0];
+    }
 
     if (!store) throw new ForbiddenException(storeId ? 'You do not have access to this branch' : 'No accessible branch found');
     return { organization, store };
