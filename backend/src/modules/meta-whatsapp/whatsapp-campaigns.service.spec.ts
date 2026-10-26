@@ -1,13 +1,13 @@
 import { WhatsAppCampaignStatus } from './entities/whatsapp-campaign.entity';
-import { WhatsAppCampaignsService } from './whatsapp-campaigns.service';
+import { WhatsAppCampaignsService, parseTestPhones } from './whatsapp-campaigns.service';
 
 describe('WhatsAppCampaignsService.run', () => {
-  function setup(opts: { total: number; status?: () => WhatsAppCampaignStatus; send?: (phone: string) => Promise<any> }) {
+  function setup(opts: { total: number; status?: () => WhatsAppCampaignStatus; send?: (phone: string) => Promise<any>; test?: boolean }) {
     const recipients = Array.from({ length: opts.total }, (_, i) => ({
       id: `r${i}`, campaignId: 'c1', storeId: 's1', customerId: `cu${i}`, phone: `9665${String(i).padStart(8, '0')}`, status: 'pending',
     }));
     const updates = new Map<string, any>();
-    const campaign = { id: 'c1', organizationId: 'o1', templateId: 't1', status: WhatsAppCampaignStatus.QUEUED, messagesPerSecond: 1000, parameters: {} };
+    const campaign = { id: 'c1', organizationId: 'o1', templateId: 't1', status: WhatsAppCampaignStatus.QUEUED, messagesPerSecond: 1000, parameters: {}, audience: { test: opts.test } };
     const campaignRepository: any = {
       findOne: jest.fn(async () => ({ ...campaign, status: opts.status ? opts.status() : campaign.status === WhatsAppCampaignStatus.QUEUED ? WhatsAppCampaignStatus.SENDING : campaign.status })),
       update: jest.fn(async (_id: string, patch: any) => Object.assign(campaign, patch)),
@@ -80,5 +80,26 @@ describe('WhatsAppCampaignsService.run', () => {
     const { service, campaign } = setup({ total: 2000, send: async () => { throw new Error('wallet empty'); } });
     await (service as any).run('c1');
     expect(campaign.status).toBe(WhatsAppCampaignStatus.FAILED);
+  });
+
+  it('sends test campaigns without recording customers or conversations', async () => {
+    const { service, metaWhatsAppService } = setup({ total: 3, test: true });
+    await (service as any).run('c1');
+    expect(metaWhatsAppService.sendOneTemplate.mock.calls.map((c: any[]) => c[6])).toEqual([false, false, false]);
+  });
+
+  it('records normal campaign sends', async () => {
+    const { service, metaWhatsAppService } = setup({ total: 2 });
+    await (service as any).run('c1');
+    expect(metaWhatsAppService.sendOneTemplate.mock.calls.map((c: any[]) => c[6])).toEqual([true, true]);
+  });
+});
+
+describe('parseTestPhones', () => {
+  it('normalizes local, international and Arabic-digit numbers, dropping junk and repeats', () => {
+    expect(parseTestPhones(['0501234567', '+966 50 123 4567', '٠٥٠٧٦٥٤٣٢١', '00966551112222', '123', 'abc'])).toEqual({
+      phones: ['966501234567', '966507654321', '966551112222'],
+      duplicates: 1,
+    });
   });
 });

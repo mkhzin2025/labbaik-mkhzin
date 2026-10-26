@@ -138,7 +138,8 @@ export default function MessageComposer({
 
 function Step({ done, title, hint, children }: { done: boolean; title: string; hint?: string; children: ReactNode }) {
   return (
-    <fieldset className="rounded-lg border border-labbaik-border p-3 space-y-2">
+    // min-w-0: a fieldset defaults to min-content width, so a long file name would push it out of the sidebar.
+    <fieldset className="min-w-0 rounded-lg border border-labbaik-border p-3 space-y-2">
       <legend className="sr-only">{title}</legend>
       <div>
         <p className="flex items-center gap-1.5 text-sm font-black text-neutral-900 dark:text-white">
@@ -279,8 +280,8 @@ function MediaPicker({
     return (
       <div className="flex items-center gap-2 rounded-lg bg-emerald-500/10 px-3 py-2">
         <CheckCircle2 size={16} className="shrink-0 text-emerald-700 dark:text-emerald-300" />
-        <span className="flex-1 min-w-0 text-xs font-bold text-emerald-900 dark:text-emerald-200 truncate" dir="auto">
-          {media.link ? media.link : `${media.filename || info.noun} · مرفوعة إلى Meta`}
+        <span className="flex-1 min-w-0 text-xs font-bold text-emerald-900 dark:text-emerald-200 truncate" title={media.link || media.filename || undefined}>
+          {media.link ? <bdi dir="ltr">{media.link}</bdi> : <>مرفوعة إلى Meta · <bdi dir="ltr">{media.filename || info.noun}</bdi></>}
         </span>
         <button type="button" onClick={() => fileRef.current?.click()} className="inline-flex items-center gap-1 text-xs font-bold text-labbaik-blue dark:text-purple-300 hover:underline cursor-pointer"><RefreshCw size={12} /> تغيير</button>
         <button type="button" onClick={() => onChange(null, null)} aria-label="إزالة الملف" className="text-labbaik-text-muted hover:text-red-600 cursor-pointer"><Trash2 size={14} /></button>

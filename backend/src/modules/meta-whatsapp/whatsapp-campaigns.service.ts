@@ -1,6 +1,6 @@
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException, OnApplicationBootstrap, OnModuleDestroy } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { EntityManager, Repository } from 'typeorm';
 import { normalizePhoneNumber } from '../../common/utils/phone.util';
 import { AUDIENCE_LIMIT, CustomersService, audienceToFilters } from '../customers/customers.service';
 import { CustomerAudienceDto } from '../customers/dto/customer.dto';
@@ -145,15 +145,20 @@ export class WhatsAppCampaignsService implements OnApplicationBootstrap, OnModul
     const { connection, template, organization } = await this.metaWhatsAppService.getOwnedTemplate(userId, organizationId, templateId);
     if ((template.status || '').toUpperCase() !== 'APPROVED') throw new BadRequestException('Only APPROVED WhatsApp templates can be sent');
 
-    const audience: CustomerAudienceDto | null = dto.audience
-      ?? (dto.customerIds?.length ? Object.assign(new CustomerAudienceDto(), { mode: 'manual' as const, customerIds: dto.customerIds }) : null);
+    const testPhones = dto.testPhones?.length ? parseTestPhones(dto.testPhones) : null;
+    const audience: CustomerAudienceDto | null = testPhones
+      ? Object.assign(new CustomerAudienceDto(), { mode: 'manual' as const })
+      : dto.audience ?? (dto.customerIds?.length ? Object.assign(new CustomerAudienceDto(), { mode: 'manual' as const, customerIds: dto.customerIds }) : null);
     if (!audience) throw new BadRequestException('حدّد جمهور الحملة.');
     const scheduledAt = this.resolveSchedule(dto.scheduledAt);
     const storeIds = await this.resolveStoreIds(userId, organization.id, connection, dto, audience);
 
     const filters = audienceToFilters(audience, storeIds);
-    const plan = await this.customersService.summarizeAudience(organization.id, filters);
-    if (plan.overLimit) {
+    const plan = testPhones
+      ? { records: dto.testPhones!.length, duplicates: testPhones.duplicates, optedOut: 0, recipients: testPhones.phones.length }
+      : await this.customersService.summarizeAudience(organization.id, filters);
+    if (testPhones && !testPhones.phones.length) throw new BadRequestException('لا توجد أرقام صالحة في أرقام التجربة.');
+    if ('overLimit' in plan && plan.overLimit) {
       throw new BadRequestException(`الجمهور أكبر من الحد المسموح للحملة الواحدة (${AUDIENCE_LIMIT.toLocaleString('en')}). ضيّقه بفئة أو تاق أو فرع.`);
     }
     if (!plan.recipients) throw new BadRequestException('لا يوجد مستلمون في هذا الجمهور بعد استبعاد الرافضين للتسويق والمكررين.');
@@ -196,8 +201,9 @@ export class WhatsAppCampaignsService implements OnApplicationBootstrap, OnModul
           tagMatch: audience.tagMatch,
           excludeCategoryIds: audience.excludeCategoryIds,
           excludeTagIds: audience.excludeTagIds,
-          manualCount: audience.mode === 'manual' ? audience.customerIds?.length || 0 : undefined,
+          manualCount: testPhones ? testPhones.phones.length : audience.mode === 'manual' ? audience.customerIds?.length || 0 : undefined,
           excludedCount: audience.mode !== 'manual' ? audience.excludeCustomerIds?.length || 0 : undefined,
+          test: testPhones ? true : undefined,
           labels,
         },
         parameters,
@@ -207,7 +213,9 @@ export class WhatsAppCampaignsService implements OnApplicationBootstrap, OnModul
         optedOutSkipped: plan.optedOut,
         totalRecipients: plan.recipients,
       }));
-      const total = await this.customersService.insertAudienceRecipients(manager, saved.id, organization.id, filters);
+      const total = testPhones
+        ? await this.insertTestRecipients(manager, saved.id, organization.id, storeIds[0], testPhones.phones)
+        : await this.customersService.insertAudienceRecipients(manager, saved.id, organization.id, filters);
       if (!total) throw new BadRequestException('لا يوجد مستلمون في هذا الجمهور بعد استبعاد الرافضين للتسويق والمكررين.');
       // Customers may change between the count above and the insert; the saved recipients are what counts.
       if (total !== saved.totalRecipients) {
@@ -219,6 +227,17 @@ export class WhatsAppCampaignsService implements OnApplicationBootstrap, OnModul
 
     if (!scheduledAt) void this.run(campaign.id);
     return { ...this.toPublic(campaign), stats: toStats({ total: campaign.totalRecipients, pending: campaign.totalRecipients }) };
+  }
+
+  /** Recipients for a test send: bare numbers on the chosen branch, with no customer behind them. */
+  private async insertTestRecipients(manager: EntityManager, campaignId: string, organizationId: string, storeId: string, phones: string[]) {
+    const [store] = await manager.query('SELECT name FROM stores WHERE id = $1', [storeId]);
+    for (let i = 0; i < phones.length; i += 1000) {
+      await manager.insert(WhatsAppCampaignRecipient, phones.slice(i, i + 1000).map((phone) => ({
+        campaignId, organizationId, customerId: null, storeId, storeName: store?.name || null, phone, customerName: null, status: CampaignRecipientStatus.PENDING,
+      })));
+    }
+    return phones.length;
   }
 
   /** A future start time, or null to send now. Times already reached (or within a minute) send right away. */
@@ -344,7 +363,7 @@ export class WhatsAppCampaignsService implements OnApplicationBootstrap, OnModul
               || { fullName: recipient.customerName, phoneNumber: recipient.phone, storeName: recipient.storeName };
             const personalized = this.metaWhatsAppService.personalizeTemplateDto(dto, customer);
             const response = await this.metaWhatsAppService.sendOneTemplate(
-              store, context.connection, context.template, recipient.phone, personalized, { campaignId: campaign.id },
+              store, context.connection, context.template, recipient.phone, personalized, { campaignId: campaign.id }, !campaign.audience?.test,
             );
             await this.recipientRepository.update(recipient.id, {
               status: CampaignRecipientStatus.SENT,
@@ -764,4 +783,17 @@ function errorText(error: any) {
   const response = error?.getResponse?.();
   const message = (typeof response === 'object' && response?.message) || error?.message || 'Send failed';
   return String(Array.isArray(message) ? message.join(' · ') : message).slice(0, 1000);
+}
+
+/** Normalizes pasted test numbers (05…, +966…, Arabic digits), dropping invalid ones and repeats. */
+export function parseTestPhones(values: string[]) {
+  const seen = new Set<string>();
+  let duplicates = 0;
+  for (const value of values) {
+    const phone = normalizePhoneNumber(String(value).replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d))));
+    if (phone.length < 10 || phone.length > 15) continue;
+    if (seen.has(phone)) duplicates += 1;
+    else seen.add(phone);
+  }
+  return { phones: [...seen], duplicates };
 }

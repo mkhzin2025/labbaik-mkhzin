@@ -490,6 +490,8 @@ export class MetaWhatsAppService implements OnModuleInit {
     to: string,
     dto: Partial<SendWhatsAppTemplateDto>,
     extraMetadata: Record<string, unknown> = {},
+    // false for test sends: no customer record, no inbox conversation.
+    record = true,
   ) {
     const secretConnection = await this.getConnectionWithSecrets(connection.id);
     const accessToken = this.credentialEncryption.decryptSecret(secretConnection.accessToken)!;
@@ -519,18 +521,20 @@ export class MetaWhatsAppService implements OnModuleInit {
         payload,
         { headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' }, timeout: 20000 },
       );
-      const customer = await this.customersService.findOrCreate(store, normalizedTo, {
-        fullName: `WhatsApp ${normalizedTo}`,
-        phoneNumber: normalizedTo,
-        whatsappId: normalizedTo,
-      }, 'whatsapp');
+      const customer = record
+        ? await this.customersService.findOrCreate(store, normalizedTo, {
+          fullName: `WhatsApp ${normalizedTo}`,
+          phoneNumber: normalizedTo,
+          whatsappId: normalizedTo,
+        }, 'whatsapp')
+        : null;
       const messageData = {
         from: 'me',
         text: buildResult.renderedPreview,
         type: 'template',
         isManual: true,
         timestamp: Date.now(),
-        customerId: customer.id,
+        customerId: customer?.id,
         metadata: {
           whatsappMessageId: data?.messages?.[0]?.id,
           metaConnectionId: connection.id,
@@ -548,6 +552,7 @@ export class MetaWhatsAppService implements OnModuleInit {
           ...extraMetadata,
         },
       };
+      if (!record) return { success: true, meta: data, message: messageData };
       await this.conversationsService.addMessage(normalizedTo, store.id, 'whatsapp', messageData);
       this.eventsGateway.server.to(`store_${store.id}`).emit('new_message', { ...messageData, customerPhone: normalizedTo, platform: 'whatsapp', storeId: store.id });
       this.eventsGateway.server.to(`organization_${connection.organizationId}`).emit('organization_message', { ...messageData, customerPhone: normalizedTo, platform: 'whatsapp', storeId: store.id, organizationId: connection.organizationId });

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent }
 import { Loader2, Mic, Pencil, Plus, Send, Smile, StickyNote, Trash2, X, Zap } from 'lucide-react';
 import api from '../../api/client';
 import { useToast } from '../Toast';
+import { EMOJIS } from './emojis';
 
 export interface QuickReply {
   id: string;
@@ -9,12 +10,6 @@ export interface QuickReply {
   text: string;
 }
 
-const EMOJIS = [
-  '😊', '😂', '🙏', '👍', '❤️', '🌷', '🌹', '✨', '🎉', '👏', '🤝', '💐',
-  '😍', '🥰', '😉', '😅', '🤔', '😔', '😢', '😮', '🙌', '💯', '✅', '❌',
-  '📦', '🚚', '🛒', '🛍️', '💳', '💰', '🏷️', '🎁', '📍', '📞', '⏰', '📅',
-  '👋', '🤗', '☺️', '😁', '🙂', '👌', '💪', '🔥', '⭐', '🌟', '☕', '🍃',
-];
 
 const SHORTCUT_RE = /^[\p{L}\p{N}_-]{1,32}$/u;
 const MIN_SUGGEST_CHARS = 2;

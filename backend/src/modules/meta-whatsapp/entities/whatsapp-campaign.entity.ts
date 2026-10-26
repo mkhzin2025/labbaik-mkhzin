@@ -22,6 +22,8 @@ export type WhatsAppCampaignAudience = {
   excludeTagIds?: string[];
   manualCount?: number;
   excludedCount?: number;
+  /** Pasted test numbers: sent without creating customers or inbox conversations. */
+  test?: boolean;
   labels: {
     branches: { id: string; name: string }[];
     categories: TaxonomyLabel[];

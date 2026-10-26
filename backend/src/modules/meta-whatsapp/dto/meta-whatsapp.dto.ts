@@ -6,6 +6,8 @@ import { CustomerAudienceDto } from '../../customers/dto/customer.dto';
 
 /** Allowed campaign send rates in messages/second; 80 is Meta's default throughput per number. */
 export const CAMPAIGN_SPEEDS = [5, 20, 40, 80];
+/** Most numbers a test campaign may paste in. */
+export const TEST_PHONES_LIMIT = 5000;
 
 export class SubscribeWebhookDto {
   @ApiPropertyOptional({ enum: MetaWebhookMode, default: MetaWebhookMode.GLOBAL })
@@ -195,6 +197,14 @@ export class SendWhatsAppTemplateBulkDto {
   @ArrayMaxSize(10000)
   @IsUUID('4', { each: true })
   customerIds?: string[];
+
+  @ApiPropertyOptional({ type: [String], description: 'Test send: these numbers replace the audience. They are not saved as customers and get no inbox conversation.' })
+  @IsOptional()
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(TEST_PHONES_LIMIT)
+  @IsString({ each: true })
+  testPhones?: string[];
 
   @ApiPropertyOptional({ description: 'Campaign name shown in the campaigns log; defaults to the template name and date.' })
   @IsOptional()

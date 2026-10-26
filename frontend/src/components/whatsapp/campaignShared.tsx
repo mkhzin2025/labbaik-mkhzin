@@ -24,6 +24,7 @@ export type CampaignAudience = {
   tagMatch?: 'any' | 'all';
   manualCount?: number;
   excludedCount?: number;
+  test?: boolean;
   labels: { branches: { id: string; name: string }[]; categories: Label[]; tags: Label[]; excludeCategories: Label[]; excludeTags: Label[] };
 };
 
@@ -132,7 +133,7 @@ export function AudienceChips({ audience, compact = false }: { audience: Campaig
     <div className="flex flex-wrap items-center gap-1">
       <span className="text-[11px] font-bold text-labbaik-text-muted">{compact && branches.length > 2 ? `${branches.length} فروع` : branches.join('، ')}</span>
       {audience.mode === 'all' && <span className="text-[11px] text-labbaik-text-muted">· كل العملاء</span>}
-      {audience.mode === 'manual' && <span className="text-[11px] text-labbaik-text-muted">· اختيار يدوي ({num(audience.manualCount || 0)})</span>}
+      {audience.mode === 'manual' && <span className="text-[11px] text-labbaik-text-muted">· {audience.test ? 'أرقام تجربة' : 'اختيار يدوي'} ({num(audience.manualCount || 0)})</span>}
       {labels.categories.map((c) => chip(c, 'category'))}
       {labels.tags.length > 1 && <span className="text-[11px] text-labbaik-text-muted">{audience.tagMatch === 'all' ? 'كلها:' : 'أيٌّ من:'}</span>}
       {labels.tags.map((t) => chip(t, 'tag'))}

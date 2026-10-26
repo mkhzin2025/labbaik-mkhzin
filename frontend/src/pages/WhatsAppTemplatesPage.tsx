@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   Clock,
   FileText,
+  FlaskConical,
   History,
   Image as ImageIcon,
   Loader2,
@@ -54,6 +55,41 @@ import {
 type MetaConnection = { id: string; scope: 'organization' | 'store'; storeId?: string | null; defaultStoreId?: string | null; displayPhoneNumber?: string; phoneNumberId: string; status?: string };
 
 const TEMPLATE_PAGE_SIZE = 8;
+/** Matches TEST_PHONES_LIMIT on the server. */
+const TEST_PHONES_LIMIT = 5000;
+
+/**
+ * The raw entries of the test-numbers box: one per line or comma. A chunk with spaces stays one number
+ * ("+966 50 123 4567") unless its digits are too many for one, then each space starts a new number.
+ */
+const testNumbers = (text: string) => text.split(/[\n,،;\t]+/).flatMap((chunk) => {
+  const value = chunk.trim();
+  return value.replace(/[^0-9٠-٩]/g, '').length > 15 ? value.split(/\s+/) : [value];
+}).filter(Boolean);
+
+/** Same rules as the server's parseTestPhones (05…, +966…, Arabic digits), so the count shown is what gets sent. */
+const normalizeTestPhone = (value: string) => {
+  let digits = value.replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d))).replace(/[^0-9]/g, '');
+  if (digits.startsWith('00')) digits = digits.slice(2);
+  if (digits.startsWith('9660')) digits = `966${digits.slice(4)}`;
+  if (digits.length === 10 && digits.startsWith('05')) return `966${digits.slice(1)}`;
+  if (digits.length === 9 && digits.startsWith('5')) return `966${digits}`;
+  return digits;
+};
+
+function testPhonesSummary(text: string): AudienceSummary & { invalid: number } {
+  const entries = testNumbers(text);
+  const seen = new Set<string>();
+  let invalid = 0;
+  let duplicates = 0;
+  for (const entry of entries) {
+    const phone = normalizeTestPhone(entry);
+    if (phone.length < 10 || phone.length > 15) invalid += 1;
+    else if (seen.has(phone)) duplicates += 1;
+    else seen.add(phone);
+  }
+  return { records: entries.length, optedOut: 0, duplicates, invalid, recipients: seen.size, byBranch: [], overLimit: entries.length > TEST_PHONES_LIMIT, limit: TEST_PHONES_LIMIT };
+}
 
 const errorMessage = (error: unknown, fallback: string) => {
   const data = (error as { response?: { data?: { details?: string; message?: string | string[] } } })?.response?.data;
@@ -86,6 +122,9 @@ export default function WhatsAppTemplatesPage() {
   const [summary, setSummary] = useState<AudienceSummary | null>(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [campaignName, setCampaignName] = useState('');
+  // Test send: pasted numbers replace the audience; the server does not save them as customers.
+  const [testMode, setTestMode] = useState(false);
+  const [testText, setTestText] = useState('');
   const [mode, setMode] = useState<'single' | 'list'>('list');
   const [to, setTo] = useState('');
   const [loading, setLoading] = useState(true);
@@ -179,7 +218,10 @@ export default function WhatsAppTemplatesPage() {
 
   // Server-side count with the exact rules the send uses (opt-outs, duplicate numbers across branches).
   const payload = useMemo(() => audiencePayload(audience, targetStoreIds), [audience, targetStoreIds]);
-  const ready = mode === 'list' && targetStoreIds.length > 0 && audienceReady(audience);
+  const ready = mode === 'list' && !testMode && targetStoreIds.length > 0 && audienceReady(audience);
+  const testSummary = useMemo(() => (testMode ? testPhonesSummary(testText) : null), [testMode, testText]);
+  // Everything downstream (counts, confirm dialog, send button) reads one summary, whichever source it came from.
+  const activeSummary = testMode ? testSummary : summary;
   useEffect(() => {
     if (!ready) { setSummary(null); return; }
     const id = ++summaryRequest.current;
@@ -233,7 +275,9 @@ export default function WhatsAppTemplatesPage() {
   const missing = analysis && values ? missingValues(analysis, values) : [];
   const scheduledIso = timing === 'later' && scheduleAt ? new Date(scheduleAt).toISOString() : undefined;
   const scheduleError = timing === 'later' ? scheduleProblem(scheduledIso) : '';
-  const audienceText = describeAudience(audience, targetStoreIds, branches, options);
+  const audienceText = testMode
+    ? `أرقام تجربة (${(testSummary?.recipients || 0).toLocaleString('en')}) · لا تُحفظ كعملاء ولا تظهر في المحادثات.`
+    : describeAudience(audience, targetStoreIds, branches, options);
 
   const requestSend = () => {
     if (!selected || !connection || !analysis || !values) return;
@@ -244,8 +288,8 @@ export default function WhatsAppTemplatesPage() {
       void send();
       return;
     }
-    if (!summary?.recipients) { showToast('لا يوجد مستلمون في الجمهور الحالي.', 'error'); return; }
-    if (summary.overLimit) { showToast(`الحد الأقصى ${summary.limit.toLocaleString('en')} عميل في الحملة الواحدة. ضيّق الجمهور.`, 'error'); return; }
+    if (!activeSummary?.recipients) { showToast(testMode ? 'أدخل رقمًا صالحًا واحدًا على الأقل.' : 'لا يوجد مستلمون في الجمهور الحالي.', 'error'); return; }
+    if (activeSummary.overLimit) { showToast(`الحد الأقصى ${activeSummary.limit.toLocaleString('en')} رقم في الحملة الواحدة.`, 'error'); return; }
     if (scheduleError) { showToast(scheduleError, 'error'); return; }
     setConfirming(true);
   };
@@ -263,7 +307,7 @@ export default function WhatsAppTemplatesPage() {
         showToast('تم إرسال القالب.', 'success');
       } else {
         const { data } = await api.post(`/integrations/meta/whatsapp/templates/${selected.id}/send-bulk`, {
-          audience: payload,
+          ...(testMode ? { testPhones: testNumbers(testText), storeId: targetStoreIds[0] } : { audience: payload }),
           name: campaignName.trim() || undefined,
           nameFallback: values.nameFallback.trim() || undefined,
           scheduledAt: scheduledIso,
@@ -300,7 +344,7 @@ export default function WhatsAppTemplatesPage() {
   }
 
   const canSend = Boolean(selected) && isApproved(selected) && !sending && !missing.length
-    && (mode === 'list' ? Boolean(summary?.recipients) && !summary?.overLimit && !summaryLoading : Boolean(to.trim()));
+    && (mode === 'list' ? Boolean(activeSummary?.recipients) && !activeSummary?.overLimit && (testMode || !summaryLoading) : Boolean(to.trim()));
 
   return (
     <div className="space-y-4 pb-10" dir="rtl">
@@ -411,8 +455,28 @@ export default function WhatsAppTemplatesPage() {
 
             {/* 3. Audience */}
             {mode === 'list' && (
-              <Section step={3} title="الجمهور" aside={summaryLoading ? <Loader2 size={15} className="animate-spin text-labbaik-blue" /> : summary ? <span className="text-xs font-bold text-labbaik-blue dark:text-purple-300 tabular-nums">{summary.recipients.toLocaleString('en')} رقم</span> : undefined}>
-                <AudienceBuilder storeIds={targetStoreIds} branches={branches} value={audience} onChange={setAudience} options={options} optionsLoading={optionsLoading} />
+              <Section step={3} title="الجمهور" aside={!testMode && summaryLoading ? <Loader2 size={15} className="animate-spin text-labbaik-blue" /> : activeSummary ? <span className="text-xs font-bold text-labbaik-blue dark:text-purple-300 tabular-nums">{activeSummary.recipients.toLocaleString('en')} رقم</span> : undefined}>
+                <div className="mb-3 grid grid-cols-2 gap-1 rounded-lg border border-labbaik-border bg-labbaik-page p-1 sm:w-80" role="radiogroup" aria-label="مصدر الأرقام">
+                  {([[false, 'من العملاء', <Users size={14} key="i" />], [true, 'أرقام تجربة', <FlaskConical size={14} key="i" />]] as const).map(([key, label, icon]) => (
+                    <button type="button" key={label} role="radio" aria-checked={testMode === key} onClick={() => setTestMode(key)}
+                      className={`flex items-center justify-center gap-1.5 h-8 rounded-md text-xs font-bold transition-colors cursor-pointer ${testMode === key ? 'bg-labbaik-surface text-labbaik-blue dark:text-purple-200 shadow-sm' : 'text-labbaik-text-muted hover:text-neutral-900 dark:hover:text-white'}`}>
+                      {icon}{label}
+                    </button>
+                  ))}
+                </div>
+                {testMode ? (
+                  <div className="space-y-1.5">
+                    <label htmlFor="test-phones" className="text-xs font-bold text-labbaik-text-muted">اكتب الأرقام أو الصقها (رقم في كل سطر، أو مفصولة بفاصلة أو مسافة)</label>
+                    <textarea id="test-phones" dir="ltr" rows={6} value={testText} onChange={(e) => setTestText(e.target.value)} placeholder={'0501234567\n966551234567'}
+                      className="w-full rounded-lg border border-labbaik-border bg-labbaik-page px-3 py-2 text-sm text-left tabular-nums text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-labbaik-blue/30 focus:border-labbaik-blue placeholder:text-labbaik-text-muted" />
+                    <p className="text-[11px] text-labbaik-text-muted">
+                      {testSummary && testSummary.records > 0 && <><span className="tabular-nums font-bold text-neutral-800 dark:text-neutral-100">{testSummary.recipients.toLocaleString('en')}</span> رقم صالح{testSummary.duplicates > 0 && <> · <span className="tabular-nums">{testSummary.duplicates}</span> مكرر</>}{testSummary.invalid > 0 && <> · <span className="tabular-nums">{testSummary.invalid}</span> غير صالح</>} · </>}
+                      للتجربة فقط: لا تُحفظ الأرقام كعملاء ولا تظهر في المحادثات، لكن الرسائل حقيقية وتُحتسب على حساب Meta.
+                    </p>
+                  </div>
+                ) : (
+                  <AudienceBuilder storeIds={targetStoreIds} branches={branches} value={audience} onChange={setAudience} options={options} optionsLoading={optionsLoading} />
+                )}
               </Section>
             )}
           </div>
@@ -477,7 +541,7 @@ export default function WhatsAppTemplatesPage() {
                     <Field label="اسم الحملة (اختياري)" htmlFor="campaign-name">
                       <input id="campaign-name" value={campaignName} onChange={(e) => setCampaignName(e.target.value)} maxLength={120} placeholder={`${selected.name} · ${new Date().toISOString().slice(0, 10)}`} className={inputClass} />
                     </Field>
-                    <AudienceStats summary={summary} loading={summaryLoading} ready={ready} description={audienceText} />
+                    <AudienceStats summary={activeSummary} loading={!testMode && summaryLoading} ready={testMode ? Boolean(testSummary?.records) : ready} description={audienceText} />
                     <TimingAndSpeed
                       timing={timing}
                       onTiming={setTiming}
@@ -485,7 +549,7 @@ export default function WhatsAppTemplatesPage() {
                       onScheduleAt={setScheduleAt}
                       speed={speed}
                       onSpeed={setSpeed}
-                      recipients={summary?.recipients || 0}
+                      recipients={activeSummary?.recipients || 0}
                       error={scheduleAt ? scheduleError : ''}
                     />
                   </div>
@@ -497,7 +561,7 @@ export default function WhatsAppTemplatesPage() {
                   className="w-full inline-flex items-center justify-center gap-2 h-11 rounded-lg bg-labbaik-blue text-labbaik-on-accent text-sm font-black hover:bg-[#553174] disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer">
                   {sending ? <Loader2 className="animate-spin" size={17} /> : <Send size={17} className="-scale-x-100" />}
                   {mode === 'list'
-                    ? `${timing === 'later' ? 'مراجعة وجدولة' : 'مراجعة وإرسال'} إلى ${(summary?.recipients || 0).toLocaleString('en')} رقم`
+                    ? `${timing === 'later' ? 'مراجعة وجدولة' : 'مراجعة وإرسال'} إلى ${(activeSummary?.recipients || 0).toLocaleString('en')} رقم`
                     : 'إرسال القالب'}
                 </button>
               </div>
@@ -506,12 +570,12 @@ export default function WhatsAppTemplatesPage() {
         </div>
       )}
 
-      {confirming && selected && summary && (
+      {confirming && selected && activeSummary && (
         <ConfirmSend
           templateName={selected.name}
           campaignName={campaignName.trim() || `${selected.name} · ${new Date().toISOString().slice(0, 10)}`}
           summary={audienceText}
-          stats={summary}
+          stats={activeSummary}
           scheduledAt={scheduledIso}
           speed={speed}
           onCancel={() => setConfirming(false)}

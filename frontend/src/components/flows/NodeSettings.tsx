@@ -1,7 +1,8 @@
 import { useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { AlertTriangle, ArrowDown, ArrowUp, FileText, Link2, Loader2, Music, Plus, Trash2, Upload, Video, X } from 'lucide-react';
+import { AlertTriangle, ArrowDown, ArrowUp, FileText, Link2, Loader2, Music, Plus, Smile, Trash2, Upload, Video, X } from 'lucide-react';
 import api from '../../api/client';
+import { EMOJIS } from '../conversations/emojis';
 import { useToast } from '../Toast';
 import { useAuthedObjectUrl } from '../whatsapp/media';
 import {
@@ -30,6 +31,7 @@ const VARIABLES = [{ token: '{{name}}', label: 'اسم العميل' }, { token:
 
 function MessageText({ value, onChange, max, placeholder, rows = 4 }: { value: string; onChange: (value: string) => void; max: number; placeholder?: string; rows?: number }) {
   const ref = useRef<HTMLTextAreaElement>(null);
+  const [emojiOpen, setEmojiOpen] = useState(false);
   const insert = (token: string) => {
     const el = ref.current;
     const start = el?.selectionStart ?? value.length;
@@ -47,7 +49,21 @@ function MessageText({ value, onChange, max, placeholder, rows = 4 }: { value: s
             {variable.label}
           </button>
         ))}
+        <button type="button" onClick={() => setEmojiOpen((open) => !open)} aria-expanded={emojiOpen} aria-label="إيموجي" title="إيموجي"
+          className={`h-7 inline-flex items-center gap-1 rounded-md border px-2 text-xs font-bold cursor-pointer ${emojiOpen ? 'border-labbaik-blue text-labbaik-blue' : 'border-labbaik-border text-labbaik-text hover:border-labbaik-blue/40 hover:text-labbaik-blue'}`}>
+          <Smile size={14} /> إيموجي
+        </button>
       </div>
+      {emojiOpen && (
+        <div className="grid grid-cols-8 gap-0.5 rounded-lg border border-labbaik-border bg-labbaik-surface p-1.5" role="grid" aria-label="إيموجي">
+          {EMOJIS.map((emoji) => (
+            <button type="button" key={emoji} onClick={() => insert(emoji)} aria-label={`إدراج ${emoji}`}
+              className="h-8 grid place-items-center rounded-md text-lg hover:bg-labbaik-page cursor-pointer">
+              {emoji}
+            </button>
+          ))}
+        </div>
+      )}
     </Field>
   );
 }
