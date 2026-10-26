@@ -20,6 +20,10 @@ import { CustomerTag } from './customer-tag.entity';
 // findByIdentifier matches phoneNumber OR whatsappId; without this the whatsappId side scans the whole store.
 // Named so the copy created by hand on production (CREATE INDEX CONCURRENTLY) is kept by synchronize.
 @Index('IDX_customers_whatsapp_store', ['whatsappId', 'storeId'])
+// Expression index on the digits-only phone that inbound routing and phone lookups match on
+// (REGEXP_REPLACE(COALESCE("phoneNumber", "whatsappId", ''), '[^0-9]', '', 'g')). TypeORM cannot declare
+// expression indexes, so it is created by hand (CREATE INDEX CONCURRENTLY) and synchronize leaves it alone.
+@Index('IDX_customers_phone_digits', { synchronize: false })
 export class Customer {
   @PrimaryGeneratedColumn('uuid')
   id: string;
