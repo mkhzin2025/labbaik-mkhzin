@@ -1,8 +1,11 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { ArrayMaxSize, ArrayMinSize, IsArray, IsEnum, IsNotEmpty, IsOptional, IsString, IsUUID, Matches, MaxLength, ValidateIf, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, ArrayMinSize, IsArray, IsDateString, IsEnum, IsIn, IsNotEmpty, IsOptional, IsString, IsUUID, Matches, MaxLength, ValidateIf, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import { MetaConnectionMode, MetaConnectionScope, MetaInboundRouting, MetaWebhookMode } from '../entities/meta-whatsapp-connection.entity';
 import { CustomerAudienceDto } from '../../customers/dto/customer.dto';
+
+/** Allowed campaign send rates in messages/second; 80 is Meta's default throughput per number. */
+export const CAMPAIGN_SPEEDS = [5, 20, 40, 80];
 
 export class SubscribeWebhookDto {
   @ApiPropertyOptional({ enum: MetaWebhookMode, default: MetaWebhookMode.GLOBAL })
@@ -204,6 +207,16 @@ export class SendWhatsAppTemplateBulkDto {
   @IsString()
   @MaxLength(60)
   nameFallback?: string;
+
+  @ApiPropertyOptional({ description: 'ISO time to start the campaign; omit to send right away.' })
+  @IsOptional()
+  @IsDateString()
+  scheduledAt?: string;
+
+  @ApiPropertyOptional({ enum: CAMPAIGN_SPEEDS, default: 20, description: 'Messages per second.' })
+  @IsOptional()
+  @IsIn(CAMPAIGN_SPEEDS)
+  messagesPerSecond?: number;
 
   @ApiPropertyOptional({ description: 'Unified OTP code for AUTHENTICATION templates' })
   @IsOptional()

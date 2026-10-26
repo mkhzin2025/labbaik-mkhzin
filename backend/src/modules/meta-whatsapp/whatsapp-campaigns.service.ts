@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException, OnApplicationBootstrap } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException, OnApplicationBootstrap, OnModuleDestroy } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { normalizePhoneNumber } from '../../common/utils/phone.util';
@@ -13,14 +13,17 @@ import { CampaignRecipientStatus, WhatsAppCampaignRecipient } from './entities/w
 import { MetaWhatsAppService } from './meta-whatsapp.service';
 import { MetaTemplatePayloadBuilder } from './services/meta-template-payload.builder';
 
-/** Parallel sends per campaign; well under Meta's default 80 messages/second. */
-const SEND_CONCURRENCY = 8;
+/** Upper bound on parallel sends per campaign; the chosen messages/second paces them. */
+const MAX_SEND_CONCURRENCY = 40;
 const CLAIM_BATCH = 40;
+const DEFAULT_SPEED = 20;
+/** How often due scheduled campaigns are picked up. */
+const SCHEDULE_POLL_MS = 30_000;
+const MAX_SCHEDULE_DAYS = 30;
 /** A campaign stops once this many sends in a row fail (empty wallet, revoked token, paused template...). */
 const MAX_CONSECUTIVE_FAILURES = 25;
 /** An inbound message within this window of a campaign message counts as a reply to it. */
 const REPLY_WINDOW_HOURS = 72;
-const INSERT_CHUNK = 1000;
 
 export type CampaignStats = {
   total: number;
@@ -76,9 +79,10 @@ const toStats = (row: any = {}): CampaignStats => ({
  * replies are recorded per recipient for the campaign details and reports.
  */
 @Injectable()
-export class WhatsAppCampaignsService implements OnApplicationBootstrap {
+export class WhatsAppCampaignsService implements OnApplicationBootstrap, OnModuleDestroy {
   private readonly logger = new Logger(WhatsAppCampaignsService.name);
   private readonly running = new Set<string>();
+  private scheduleTimer?: NodeJS.Timeout;
 
   constructor(
     @InjectRepository(WhatsAppCampaign) private readonly campaignRepository: Repository<WhatsAppCampaign>,
@@ -92,6 +96,24 @@ export class WhatsAppCampaignsService implements OnApplicationBootstrap {
   /** Resumes campaigns interrupted by a restart. Messages that were mid-send are failed rather than risk a double send. */
   onApplicationBootstrap() {
     setTimeout(() => void this.resumeInterrupted(), 5000);
+    this.scheduleTimer = setInterval(() => void this.startDue(), SCHEDULE_POLL_MS);
+  }
+
+  onModuleDestroy() {
+    if (this.scheduleTimer) clearInterval(this.scheduleTimer);
+  }
+
+  /** Queues scheduled campaigns whose time has come. The UPDATE claims each one, so only one instance starts it. */
+  private async startDue() {
+    try {
+      const [rows] = await this.campaignRepository.query(
+        `UPDATE whatsapp_campaigns SET status = 'queued', "updatedAt" = now()
+          WHERE status = 'scheduled' AND "scheduledAt" <= now() RETURNING id`,
+      );
+      for (const { id } of rows || []) void this.run(id);
+    } catch (error: any) {
+      this.logger.warn(`Could not start scheduled WhatsApp campaigns: ${error.message}`);
+    }
   }
 
   private async resumeInterrupted() {
@@ -124,14 +146,15 @@ export class WhatsAppCampaignsService implements OnApplicationBootstrap {
     const audience: CustomerAudienceDto | null = dto.audience
       ?? (dto.customerIds?.length ? Object.assign(new CustomerAudienceDto(), { mode: 'manual' as const, customerIds: dto.customerIds }) : null);
     if (!audience) throw new BadRequestException('حدّد جمهور الحملة.');
+    const scheduledAt = this.resolveSchedule(dto.scheduledAt);
     const storeIds = await this.resolveStoreIds(userId, organization.id, connection, dto, audience);
 
-    const rows = await this.customersService.findAudienceRows(organization.id, audienceToFilters(audience, storeIds));
-    if (rows.length > AUDIENCE_LIMIT) {
+    const filters = audienceToFilters(audience, storeIds);
+    const plan = await this.customersService.summarizeAudience(organization.id, filters);
+    if (plan.overLimit) {
       throw new BadRequestException(`الجمهور أكبر من الحد المسموح للحملة الواحدة (${AUDIENCE_LIMIT.toLocaleString('en')}). ضيّقه بفئة أو تاق أو فرع.`);
     }
-    const plan = await this.customersService.planAudience(organization.id, rows);
-    if (!plan.recipients.length) throw new BadRequestException('لا يوجد مستلمون في هذا الجمهور بعد استبعاد الرافضين للتسويق والمكررين.');
+    if (!plan.recipients) throw new BadRequestException('لا يوجد مستلمون في هذا الجمهور بعد استبعاد الرافضين للتسويق والمكررين.');
 
     const parameters: WhatsAppCampaignParameters = {
       body: dto.bodyParameters || [],
@@ -147,59 +170,69 @@ export class WhatsAppCampaignsService implements OnApplicationBootstrap {
     const labels = await this.audienceLabels(organization.id, storeIds, audience);
     const [creator] = await this.campaignRepository.query('SELECT "fullName" FROM users WHERE id = $1', [userId]);
     const createdAt = new Date();
-    const campaign = await this.campaignRepository.save(this.campaignRepository.create({
-      organizationId: organization.id,
-      connectionId: connection.id,
-      templateId: template.id,
-      templateName: template.name,
-      templateLanguage: template.language,
-      templateCategory: template.category,
-      name: dto.name?.trim() || `${template.name} · ${createdAt.toISOString().slice(0, 10)}`,
-      status: WhatsAppCampaignStatus.QUEUED,
-      createdByUserId: userId,
-      createdByName: creator?.fullName || null,
-      storeIds,
-      audience: {
-        mode: audience.mode,
+    // The campaign and its recipients are saved together, so a failed insert never leaves an empty campaign behind.
+    const campaign = await this.campaignRepository.manager.transaction(async (manager) => {
+      const saved = await manager.save(this.campaignRepository.create({
+        organizationId: organization.id,
+        connectionId: connection.id,
+        templateId: template.id,
+        templateName: template.name,
+        templateLanguage: template.language,
+        templateCategory: template.category,
+        name: dto.name?.trim() || `${template.name} · ${createdAt.toISOString().slice(0, 10)}`,
+        status: scheduledAt ? WhatsAppCampaignStatus.SCHEDULED : WhatsAppCampaignStatus.QUEUED,
+        scheduledAt,
+        messagesPerSecond: dto.messagesPerSecond || DEFAULT_SPEED,
+        createdByUserId: userId,
+        createdByName: creator?.fullName || null,
         storeIds,
-        categoryIds: audience.categoryIds,
-        tagIds: audience.tagIds,
-        tagMatch: audience.tagMatch,
-        excludeCategoryIds: audience.excludeCategoryIds,
-        excludeTagIds: audience.excludeTagIds,
-        manualCount: audience.mode === 'manual' ? audience.customerIds?.length || 0 : undefined,
-        excludedCount: audience.mode !== 'manual' ? audience.excludeCustomerIds?.length || 0 : undefined,
-        labels,
-      },
-      parameters,
-      previewText: preview.renderedPreview,
-      sourceRecords: plan.records,
-      duplicatesRemoved: plan.duplicates,
-      optedOutSkipped: plan.optedOut,
-      totalRecipients: plan.recipients.length,
-    }));
+        audience: {
+          mode: audience.mode,
+          storeIds,
+          categoryIds: audience.categoryIds,
+          tagIds: audience.tagIds,
+          tagMatch: audience.tagMatch,
+          excludeCategoryIds: audience.excludeCategoryIds,
+          excludeTagIds: audience.excludeTagIds,
+          manualCount: audience.mode === 'manual' ? audience.customerIds?.length || 0 : undefined,
+          excludedCount: audience.mode !== 'manual' ? audience.excludeCustomerIds?.length || 0 : undefined,
+          labels,
+        },
+        parameters,
+        previewText: preview.renderedPreview,
+        sourceRecords: plan.records,
+        duplicatesRemoved: plan.duplicates,
+        optedOutSkipped: plan.optedOut,
+        totalRecipients: plan.recipients,
+      }));
+      const total = await this.customersService.insertAudienceRecipients(manager, saved.id, organization.id, filters);
+      if (!total) throw new BadRequestException('لا يوجد مستلمون في هذا الجمهور بعد استبعاد الرافضين للتسويق والمكررين.');
+      // Customers may change between the count above and the insert; the saved recipients are what counts.
+      if (total !== saved.totalRecipients) {
+        saved.totalRecipients = total;
+        await manager.update(WhatsAppCampaign, saved.id, { totalRecipients: total });
+      }
+      return saved;
+    });
 
-    const recipients = plan.recipients.map((item) => ({
-      campaignId: campaign.id,
-      organizationId: organization.id,
-      customerId: item.customer.id,
-      storeId: item.customer.storeId,
-      storeName: item.customer.storeName,
-      phone: item.phone,
-      customerName: this.customersService.isPlaceholderName(item.customer.fullName, item.phone) ? null : item.customer.fullName,
-      status: CampaignRecipientStatus.PENDING,
-    }));
-    for (let index = 0; index < recipients.length; index += INSERT_CHUNK) {
-      await this.recipientRepository.insert(recipients.slice(index, index + INSERT_CHUNK));
+    if (!scheduledAt) void this.run(campaign.id);
+    return { ...this.toPublic(campaign), stats: toStats({ total: campaign.totalRecipients, pending: campaign.totalRecipients }) };
+  }
+
+  /** A future start time, or null to send now. Times already reached (or within a minute) send right away. */
+  private resolveSchedule(value?: string) {
+    if (!value) return null;
+    const at = new Date(value);
+    if (Number.isNaN(at.getTime())) throw new BadRequestException('وقت الجدولة غير صالح.');
+    if (at.getTime() - Date.now() > MAX_SCHEDULE_DAYS * 24 * 3600 * 1000) {
+      throw new BadRequestException(`يمكن جدولة الحملة حتى ${MAX_SCHEDULE_DAYS} يومًا كحد أقصى.`);
     }
-
-    void this.run(campaign.id);
-    return { ...this.toPublic(campaign), stats: toStats({ total: recipients.length, pending: recipients.length }) };
+    return at.getTime() - Date.now() > 60_000 ? at : null;
   }
 
   async cancelForUser(userId: string, organizationId: string | undefined, id: string) {
     const campaign = await this.findAccessible(userId, organizationId, id);
-    if (![WhatsAppCampaignStatus.QUEUED, WhatsAppCampaignStatus.SENDING].includes(campaign.status)) {
+    if (![WhatsAppCampaignStatus.SCHEDULED, WhatsAppCampaignStatus.QUEUED, WhatsAppCampaignStatus.SENDING].includes(campaign.status)) {
       throw new BadRequestException('الحملة ليست قيد الإرسال.');
     }
     await this.campaignRepository.update(id, { status: WhatsAppCampaignStatus.CANCELLED, completedAt: new Date() });
@@ -213,7 +246,7 @@ export class WhatsAppCampaignsService implements OnApplicationBootstrap {
   /** Re-queues numbers whose send failed on our side (Meta never accepted them) and restarts the campaign. */
   async retryFailedForUser(userId: string, organizationId: string | undefined, id: string) {
     const campaign = await this.findAccessible(userId, organizationId, id);
-    if ([WhatsAppCampaignStatus.QUEUED, WhatsAppCampaignStatus.SENDING].includes(campaign.status)) {
+    if ([WhatsAppCampaignStatus.SCHEDULED, WhatsAppCampaignStatus.QUEUED, WhatsAppCampaignStatus.SENDING].includes(campaign.status)) {
       throw new BadRequestException('انتظر حتى ينتهي الإرسال الحالي.');
     }
     const [, retried] = await this.recipientRepository.query(
@@ -242,6 +275,17 @@ export class WhatsAppCampaignsService implements OnApplicationBootstrap {
 
       const dto = { ...this.campaignDto(campaign.parameters), nameFallback: campaign.parameters.nameFallback || undefined };
       const stores = new Map<string, Store>();
+      const speed = campaign.messagesPerSecond || DEFAULT_SPEED;
+      const concurrency = Math.min(MAX_SEND_CONCURRENCY, speed);
+      // Each send takes the next free slot on a shared clock, so the campaign never exceeds its messages/second.
+      const interval = 1000 / speed;
+      let nextSlot = Date.now();
+      const pace = async () => {
+        const slot = Math.max(nextSlot, Date.now());
+        nextSlot = slot + interval;
+        const wait = slot - Date.now();
+        if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+      };
       let consecutiveFailures = 0;
       let lastError = '';
 
@@ -254,8 +298,9 @@ export class WhatsAppCampaignsService implements OnApplicationBootstrap {
         const customers = await this.customersService.findAudienceRowsByIds(batch.map((item) => item.customerId).filter(Boolean) as string[]);
 
         const queue = [...batch];
-        await Promise.all(Array.from({ length: Math.min(SEND_CONCURRENCY, queue.length) }, async () => {
+        await Promise.all(Array.from({ length: Math.min(concurrency, queue.length) }, async () => {
           for (let recipient = queue.shift(); recipient; recipient = queue.shift()) {
+            await pace();
             try {
               const store = stores.get(recipient.storeId)
                 || await this.organizationsService.assertStoreBelongsToOrganization(campaign.organizationId, recipient.storeId);
@@ -665,6 +710,8 @@ export class WhatsAppCampaignsService implements OnApplicationBootstrap {
       optedOutSkipped: campaign.optedOutSkipped,
       totalRecipients: campaign.totalRecipients,
       lastError: campaign.lastError,
+      scheduledAt: campaign.scheduledAt,
+      messagesPerSecond: campaign.messagesPerSecond,
       createdAt: campaign.createdAt,
       startedAt: campaign.startedAt,
       completedAt: campaign.completedAt,

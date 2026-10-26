@@ -57,3 +57,8 @@ CREATE TABLE IF NOT EXISTS whatsapp_campaign_recipients (
 CREATE INDEX IF NOT EXISTS idx_campaign_recipients_campaign_status ON whatsapp_campaign_recipients ("campaignId", status);
 CREATE INDEX IF NOT EXISTS idx_campaign_recipients_message ON whatsapp_campaign_recipients ("whatsappMessageId");
 CREATE INDEX IF NOT EXISTS idx_campaign_recipients_reply_lookup ON whatsapp_campaign_recipients ("organizationId", phone, "sentAt");
+
+-- Scheduling and send speed
+ALTER TABLE whatsapp_campaigns ADD COLUMN IF NOT EXISTS "scheduledAt" timestamptz NULL;
+ALTER TABLE whatsapp_campaigns ADD COLUMN IF NOT EXISTS "messagesPerSecond" int NOT NULL DEFAULT 20;
+CREATE INDEX IF NOT EXISTS "IDX_whatsapp_campaigns_scheduled" ON whatsapp_campaigns ("scheduledAt") WHERE status = 'scheduled';

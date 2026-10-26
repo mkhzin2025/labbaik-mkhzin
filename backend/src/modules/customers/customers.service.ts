@@ -4,7 +4,7 @@ import { SourceStatisticsReport, SourceStatisticsRow, StatisticsSource, writeSou
 import { AGE_TAG_PREFIX, COMPETITION_CATEGORY, COMPETITION_ONLINE_CATEGORY } from './competition-sync.plan';
 import { BadRequestException, Injectable, Logger, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Brackets, In, Repository, SelectQueryBuilder } from 'typeorm';
+import { Brackets, EntityManager, In, Repository, SelectQueryBuilder } from 'typeorm';
 import { Customer } from './entities/customer.entity';
 import {
   CreateCustomerCategoryDto,
@@ -71,8 +71,8 @@ export function audienceToFilters(
   return filters;
 }
 
-/** Largest audience a single campaign may target. */
-export const AUDIENCE_LIMIT = 50000;
+/** Largest audience a single campaign may target. Audiences are planned and saved inside the database, so this is a sanity cap, not a memory limit. */
+export const AUDIENCE_LIMIT = 1_000_000;
 /** The legacy unpaged `GET /customers` returns at most this many rows. */
 const UNPAGED_LIST_LIMIT = 2000;
 
@@ -772,22 +772,64 @@ export class CustomersService implements OnModuleInit {
     return customers;
   }
 
-  /** Every WhatsApp-reachable customer matching the filters, as lean rows (no relations). */
-  async findAudienceRows(organizationId: string, filters: CustomerFilters): Promise<AudienceRow[]> {
-    const rows = await this.filteredQuery({ organizationId }, { ...filters, whatsappOnly: true })
+  /**
+   * A campaign audience as SQL CTEs ending in `recipients`: opted-out records are dropped, each number is
+   * sent once (its most recently updated record wins), and numbers opted out in any branch are skipped.
+   * It all runs in the database, so audiences of hundreds of thousands never load into memory.
+   */
+  private audienceCte(organizationId: string, filters: CustomerFilters) {
+    const [matched, params] = this.filteredQuery({ organizationId }, { ...filters, whatsappOnly: true })
       .select('customer.id', 'id')
       .addSelect('customer.storeId', 'storeId')
       .addSelect('store.name', 'storeName')
       .addSelect('customer.fullName', 'fullName')
-      .addSelect('customer.phoneNumber', 'phoneNumber')
-      .addSelect('customer.whatsappId', 'whatsappId')
-      .addSelect('customer.email', 'email')
       .addSelect('customer.marketingOptOut', 'marketingOptOut')
       .addSelect('customer.updatedAt', 'updatedAt')
-      .orderBy('customer.id', 'ASC')
-      .limit(AUDIENCE_LIMIT + 1)
-      .getRawMany();
-    return rows.map((row) => ({ ...row, marketingOptOut: row.marketingOptOut === true || row.marketingOptOut === 't' }));
+      .addSelect("REGEXP_REPLACE(COALESCE(customer.phoneNumber, customer.whatsappId, ''), '[^0-9]', '', 'g')", 'digits')
+      .getQueryAndParameters();
+    const org = `$${params.length + 1}`;
+    // `phone` repeats normalizePhoneNumber(): drop a 00 prefix, then 9660 → 966, then local 05…/5… → 966….
+    const sql = `
+      matched AS (${matched}),
+      normalized AS (
+        SELECT m.*, CASE
+            WHEN length(p.d) = 10 AND p.d LIKE '05%' THEN '966' || substr(p.d, 2)
+            WHEN length(p.d) = 9 AND p.d LIKE '5%' THEN '966' || p.d
+            ELSE p.d END AS phone
+          FROM matched m
+          CROSS JOIN LATERAL (SELECT CASE WHEN s.d LIKE '9660%' THEN '966' || substr(s.d, 5) ELSE s.d END AS d
+            FROM (SELECT CASE WHEN m.digits LIKE '00%' THEN substr(m.digits, 3) ELSE m.digits END AS d) s) p),
+      marketable AS (SELECT * FROM normalized WHERE NOT "marketingOptOut"),
+      unique_numbers AS (SELECT DISTINCT ON (phone) * FROM marketable WHERE phone <> '' ORDER BY phone, "updatedAt" DESC),
+      opted_out AS (
+        SELECT DISTINCT REGEXP_REPLACE(COALESCE(c."phoneNumber", c."whatsappId", ''), '[^0-9]', '', 'g') AS phone
+          FROM customers c JOIN stores s ON s.id = c."storeId"
+         WHERE s."organizationId" = ${org} AND c."marketingOptOut" = true),
+      recipients AS (SELECT u.* FROM unique_numbers u WHERE NOT EXISTS (SELECT 1 FROM opted_out o WHERE o.phone = u.phone))`;
+    return { sql, params: [...params, organizationId] };
+  }
+
+  /**
+   * Saves the audience as pending recipients of a campaign in one INSERT … SELECT and returns how many were saved.
+   * Names we generated ourselves (see isPlaceholderName) are stored as null.
+   */
+  async insertAudienceRecipients(manager: EntityManager, campaignId: string, organizationId: string, filters: CustomerFilters) {
+    const { sql, params } = this.audienceCte(organizationId, filters);
+    const campaign = `$${params.length + 1}`;
+    await manager.query(
+      `WITH ${sql}
+       INSERT INTO whatsapp_campaign_recipients ("campaignId", "organizationId", "customerId", "storeId", "storeName", phone, "customerName", status)
+       SELECT ${campaign}, $${params.length}, r.id, r."storeId", r."storeName", r.phone,
+              CASE WHEN TRIM(COALESCE(r."fullName", '')) = ''
+                     OR TRIM(r."fullName") ~ '^(WhatsApp|العميل|عميل)\\s'
+                     OR (length(REGEXP_REPLACE(r."fullName", '[^0-9]', '', 'g')) > 5 AND REGEXP_REPLACE(r."fullName", '[^0-9]', '', 'g') = r.phone)
+                   THEN NULL ELSE r."fullName" END,
+              'pending'
+         FROM recipients r`,
+      [...params, campaignId],
+    );
+    const [{ total }] = await manager.query('SELECT COUNT(*)::int AS total FROM whatsapp_campaign_recipients WHERE "campaignId" = $1', [campaignId]);
+    return Number(total);
   }
 
   /** Lean rows for personalizing a batch of campaign messages, keyed by customer id. */
@@ -804,44 +846,30 @@ export class CustomersService implements OnModuleInit {
     return map;
   }
 
-  /**
-   * Turns audience rows into the numbers that will actually receive a campaign: opted-out records
-   * are dropped, duplicate numbers are sent once, and numbers opted out in any branch are skipped.
-   */
-  async planAudience(organizationId: string, rows: AudienceRow[]) {
-    const marketable = rows.filter((row) => !row.marketingOptOut);
-    const deduped = this.deduplicateWhatsAppCustomers(marketable as unknown as Customer[]);
-    const optedOutPhones = await this.findMarketingOptedOutPhones(organizationId, deduped.unique.map((item) => item.phone));
-    const recipients = deduped.unique
-      .filter((item) => !optedOutPhones.has(item.phone))
-      .map((item) => ({ ...item, customer: item.customer as unknown as AudienceRow }));
-    return {
-      records: rows.length,
-      optedOut: rows.length - marketable.length + optedOutPhones.size,
-      duplicates: deduped.duplicateRecords,
-      recipients,
-    };
-  }
-
-  /** Counts for the campaign composer, computed with the same rules the send uses. */
+  /** Counts for the campaign composer and the campaign record, computed with the same rules the send uses. */
   async summarizeAudience(organizationId: string, filters: CustomerFilters) {
     const records = await this.filteredQuery({ organizationId }, { ...filters, whatsappOnly: true }).getCount();
     if (records > AUDIENCE_LIMIT) {
       return { records, optedOut: 0, duplicates: 0, recipients: 0, byBranch: [], overLimit: true, limit: AUDIENCE_LIMIT };
     }
-    const plan = await this.planAudience(organizationId, await this.findAudienceRows(organizationId, filters));
-    const byBranch = new Map<string, { storeId: string; storeName: string; recipients: number }>();
-    for (const item of plan.recipients) {
-      const entry = byBranch.get(item.customer.storeId) || { storeId: item.customer.storeId, storeName: item.customer.storeName || '', recipients: 0 };
-      entry.recipients += 1;
-      byBranch.set(item.customer.storeId, entry);
-    }
+    const { sql, params } = this.audienceCte(organizationId, filters);
+    const [row] = await this.customerRepository.query(
+      `WITH ${sql},
+       branch AS (SELECT "storeId", MAX("storeName") AS "storeName", COUNT(*)::int AS recipients FROM recipients GROUP BY "storeId")
+       SELECT (SELECT COUNT(*) FROM matched)::int AS records,
+              (SELECT COUNT(*) FROM marketable)::int AS marketable,
+              (SELECT COUNT(*) FROM unique_numbers)::int AS "uniqueNumbers",
+              (SELECT COUNT(*) FROM recipients)::int AS recipients,
+              (SELECT COALESCE(json_agg(branch ORDER BY recipients DESC), '[]'::json) FROM branch) AS "byBranch"`,
+      params,
+    );
+    const [total, marketable, unique, recipients] = [row.records, row.marketable, row.uniqueNumbers, row.recipients].map(Number);
     return {
-      records: plan.records,
-      optedOut: plan.optedOut,
-      duplicates: plan.duplicates,
-      recipients: plan.recipients.length,
-      byBranch: [...byBranch.values()].sort((a, b) => b.recipients - a.recipients),
+      records: total,
+      optedOut: total - marketable + (unique - recipients),
+      duplicates: marketable - unique,
+      recipients,
+      byBranch: (row.byBranch || []).map((item: any) => ({ storeId: item.storeId, storeName: item.storeName || '', recipients: Number(item.recipients) })),
       overLimit: false,
       limit: AUDIENCE_LIMIT,
     };
@@ -1182,19 +1210,6 @@ export class CustomersService implements OnModuleInit {
     );
   }
 
-  /** Normalized numbers among `phones` that opted out of marketing anywhere in the organization. */
-  async findMarketingOptedOutPhones(organizationId: string, phones: string[]) {
-    const normalized = [...new Set(phones.map((phone) => this.normalizePhone(phone)).filter(Boolean))];
-    if (!normalized.length) return new Set<string>();
-    const rows: { phone: string }[] = await this.customerRepository.query(
-      `SELECT DISTINCT REGEXP_REPLACE(COALESCE(c."phoneNumber", c."whatsappId", ''), '[^0-9]', '', 'g') AS phone
-         FROM customers c JOIN stores s ON s.id = c."storeId"
-        WHERE s."organizationId" = $1 AND c."marketingOptOut" = true
-          AND REGEXP_REPLACE(COALESCE(c."phoneNumber", c."whatsappId", ''), '[^0-9]', '', 'g') = ANY($2::text[])`,
-      [organizationId, normalized],
-    );
-    return new Set(rows.map((row) => row.phone));
-  }
 
   /**
    * Moves a customer to another branch of the same organization. When that branch already holds a
@@ -1411,29 +1426,6 @@ export class CustomersService implements OnModuleInit {
     const customers = await query.getMany();
     if (customers.length !== uniqueIds.length) throw new BadRequestException('One or more selected customers are outside the selected organization/branches');
     return customers;
-  }
-
-  deduplicateWhatsAppCustomers(customers: Customer[]) {
-    const groups = new Map<string, Customer[]>();
-    for (const customer of customers) {
-      const phone = this.normalizePhone(customer.phoneNumber || customer.whatsappId || '');
-      if (!phone) continue;
-      const list = groups.get(phone) || [];
-      list.push(customer);
-      groups.set(phone, list);
-    }
-    const unique = [...groups.entries()].map(([phone, rows]) => ({
-      phone,
-      customer: [...rows].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())[0],
-      duplicateCustomerIds: rows.slice(1).map((item) => item.id),
-      storeIds: [...new Set(rows.map((item) => item.storeId))],
-    }));
-    return {
-      unique,
-      sourceRecords: customers.length,
-      uniqueRecipients: unique.length,
-      duplicateRecords: Math.max(0, customers.length - unique.length),
-    };
   }
 
   private async resolveCategories(organizationId: string, storeId: string, ids: string[]) {

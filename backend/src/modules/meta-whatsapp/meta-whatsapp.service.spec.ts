@@ -93,7 +93,7 @@ describe('MetaWhatsAppService - Webhook Subscription Logic', () => {
     };
 
     conversationsService = { addMessage: jest.fn() };
-    customersService = { findOrCreate: jest.fn(), deduplicateWhatsAppCustomers: jest.fn() };
+    customersService = { findOrCreate: jest.fn() };
     eventsGateway = { server: { to: jest.fn().mockReturnValue({ emit: jest.fn() }) } };
     billingService = { chargeMetaUsageForStore: jest.fn(), refundMetaUsage: jest.fn(), getTemplateUsageType: jest.fn() };
     templatePayloadBuilder = { validateAndBuild: jest.fn() };

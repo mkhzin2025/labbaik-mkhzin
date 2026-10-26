@@ -1,6 +1,7 @@
 import { Column, CreateDateColumn, Entity, Index, PrimaryGeneratedColumn, UpdateDateColumn } from 'typeorm';
 
 export enum WhatsAppCampaignStatus {
+  SCHEDULED = 'scheduled',
   QUEUED = 'queued',
   SENDING = 'sending',
   COMPLETED = 'completed',
@@ -106,6 +107,14 @@ export class WhatsAppCampaign {
 
   @Column({ type: 'text', nullable: true })
   lastError: string | null;
+
+  /** When a scheduled campaign is due to start; null for campaigns sent right away. */
+  @Column({ type: 'timestamptz', nullable: true })
+  scheduledAt: Date | null;
+
+  /** Send rate cap chosen for the campaign. */
+  @Column({ type: 'int', default: 20 })
+  messagesPerSecond: number;
 
   @Column({ type: 'timestamptz', nullable: true })
   startedAt: Date | null;

@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { AlertTriangle, Ban, CheckCircle2, Clock, Loader2, MinusCircle, Table2 } from 'lucide-react';
+import { AlertTriangle, Ban, CalendarClock, CheckCircle2, Clock, Loader2, MinusCircle, Table2 } from 'lucide-react';
 import { num, pct } from './campaignFormat';
 import type { HeaderMedia } from './templateUtils';
 
@@ -27,7 +27,7 @@ export type CampaignAudience = {
   labels: { branches: { id: string; name: string }[]; categories: Label[]; tags: Label[]; excludeCategories: Label[]; excludeTags: Label[] };
 };
 
-export type CampaignStatus = 'queued' | 'sending' | 'completed' | 'cancelled' | 'failed';
+export type CampaignStatus = 'scheduled' | 'queued' | 'sending' | 'completed' | 'cancelled' | 'failed';
 
 export type Campaign = {
   id: string;
@@ -46,6 +46,8 @@ export type Campaign = {
   optedOutSkipped: number;
   totalRecipients: number;
   lastError: string | null;
+  scheduledAt: string | null;
+  messagesPerSecond: number;
   createdAt: string;
   startedAt: string | null;
   completedAt: string | null;
@@ -62,6 +64,7 @@ export type CampaignDetails = Campaign & {
 };
 
 const STATUS: Record<CampaignStatus, { label: string; icon: ReactNode; cls: string }> = {
+  scheduled: { label: 'مجدولة', icon: <CalendarClock size={12} />, cls: 'bg-labbaik-blue/10 text-labbaik-blue dark:text-purple-300' },
   queued: { label: 'بانتظار الإرسال', icon: <Clock size={12} />, cls: 'bg-labbaik-page text-labbaik-text-muted' },
   sending: { label: 'جارٍ الإرسال', icon: <Loader2 size={12} className="animate-spin" />, cls: 'bg-sky-500/15 text-sky-800 dark:text-sky-200' },
   completed: { label: 'اكتملت', icon: <CheckCircle2 size={12} />, cls: 'bg-emerald-500/15 text-emerald-800 dark:text-emerald-300' },

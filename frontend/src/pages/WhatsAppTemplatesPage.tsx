@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import {
   AlertTriangle,
   Building2,
+  CalendarClock,
   Check,
   CheckCircle2,
   Clock,
@@ -91,6 +92,9 @@ export default function WhatsAppTemplatesPage() {
   const [syncing, setSyncing] = useState(false);
   const [sending, setSending] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [timing, setTiming] = useState<'now' | 'later'>('now');
+  const [scheduleAt, setScheduleAt] = useState('');
+  const [speed, setSpeed] = useState(DEFAULT_SPEED);
   const summaryRequest = useRef(0);
   const optionsRequest = useRef(0);
 
@@ -227,6 +231,8 @@ export default function WhatsAppTemplatesPage() {
   const categories = useMemo(() => [...new Set(templates.map((t) => String(t.category || '').toUpperCase()).filter(Boolean))], [templates]);
 
   const missing = analysis && values ? missingValues(analysis, values) : [];
+  const scheduledIso = timing === 'later' && scheduleAt ? new Date(scheduleAt).toISOString() : undefined;
+  const scheduleError = timing === 'later' ? scheduleProblem(scheduledIso) : '';
   const audienceText = describeAudience(audience, targetStoreIds, branches, options);
 
   const requestSend = () => {
@@ -240,6 +246,7 @@ export default function WhatsAppTemplatesPage() {
     }
     if (!summary?.recipients) { showToast('لا يوجد مستلمون في الجمهور الحالي.', 'error'); return; }
     if (summary.overLimit) { showToast(`الحد الأقصى ${summary.limit.toLocaleString('en')} عميل في الحملة الواحدة. ضيّق الجمهور.`, 'error'); return; }
+    if (scheduleError) { showToast(scheduleError, 'error'); return; }
     setConfirming(true);
   };
 
@@ -259,9 +266,13 @@ export default function WhatsAppTemplatesPage() {
           audience: payload,
           name: campaignName.trim() || undefined,
           nameFallback: values.nameFallback.trim() || undefined,
+          scheduledAt: scheduledIso,
+          messagesPerSecond: speed,
           ...base,
         });
-        showToast(`بدأ إرسال الحملة إلى ${data.totalRecipients.toLocaleString('en')} رقم.`, 'success');
+        showToast(data.status === 'scheduled'
+          ? `جُدولت الحملة إلى ${data.totalRecipients.toLocaleString('en')} رقم في ${formatSchedule(data.scheduledAt)}.`
+          : `بدأ إرسال الحملة إلى ${data.totalRecipients.toLocaleString('en')} رقم.`, 'success');
         navigate(`/dashboard/whatsapp-campaigns/${data.id}`);
       }
     } catch (error) {
@@ -467,6 +478,16 @@ export default function WhatsAppTemplatesPage() {
                       <input id="campaign-name" value={campaignName} onChange={(e) => setCampaignName(e.target.value)} maxLength={120} placeholder={`${selected.name} · ${new Date().toISOString().slice(0, 10)}`} className={inputClass} />
                     </Field>
                     <AudienceStats summary={summary} loading={summaryLoading} ready={ready} description={audienceText} />
+                    <TimingAndSpeed
+                      timing={timing}
+                      onTiming={setTiming}
+                      scheduleAt={scheduleAt}
+                      onScheduleAt={setScheduleAt}
+                      speed={speed}
+                      onSpeed={setSpeed}
+                      recipients={summary?.recipients || 0}
+                      error={scheduleAt ? scheduleError : ''}
+                    />
                   </div>
                 )}
 
@@ -475,7 +496,9 @@ export default function WhatsAppTemplatesPage() {
                 <button type="button" onClick={requestSend} disabled={!canSend}
                   className="w-full inline-flex items-center justify-center gap-2 h-11 rounded-lg bg-labbaik-blue text-labbaik-on-accent text-sm font-black hover:bg-[#553174] disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer">
                   {sending ? <Loader2 className="animate-spin" size={17} /> : <Send size={17} className="-scale-x-100" />}
-                  {mode === 'list' ? `مراجعة وإرسال إلى ${(summary?.recipients || 0).toLocaleString('en')} رقم` : 'إرسال القالب'}
+                  {mode === 'list'
+                    ? `${timing === 'later' ? 'مراجعة وجدولة' : 'مراجعة وإرسال'} إلى ${(summary?.recipients || 0).toLocaleString('en')} رقم`
+                    : 'إرسال القالب'}
                 </button>
               </div>
             )}
@@ -489,6 +512,8 @@ export default function WhatsAppTemplatesPage() {
           campaignName={campaignName.trim() || `${selected.name} · ${new Date().toISOString().slice(0, 10)}`}
           summary={audienceText}
           stats={summary}
+          scheduledAt={scheduledIso}
+          speed={speed}
           onCancel={() => setConfirming(false)}
           onConfirm={() => void send()}
         />
@@ -597,7 +622,85 @@ function Stat({ label, value, highlight = false }: { label: string; value?: numb
   );
 }
 
-function ConfirmSend({ templateName, campaignName, summary, stats, onCancel, onConfirm }: { templateName: string; campaignName: string; summary: string; stats: AudienceSummary; onCancel: () => void; onConfirm: () => void }) {
+function TimingAndSpeed({ timing, onTiming, scheduleAt, onScheduleAt, speed, onSpeed, recipients, error }: {
+  timing: 'now' | 'later'; onTiming: (value: 'now' | 'later') => void;
+  scheduleAt: string; onScheduleAt: (value: string) => void;
+  speed: number; onSpeed: (value: number) => void;
+  recipients: number; error: string;
+}) {
+  return (
+    <div className="rounded-lg border border-labbaik-border p-3 space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs font-bold text-labbaik-text-muted">التوقيت</span>
+        <div className="flex rounded-lg border border-labbaik-border bg-labbaik-page p-0.5" role="radiogroup" aria-label="توقيت الإرسال">
+          {([['now', 'أرسل الآن'], ['later', 'جدولة لاحقًا']] as const).map(([key, label]) => (
+            <button type="button" key={key} role="radio" aria-checked={timing === key}
+              onClick={() => { onTiming(key); if (key === 'later' && !scheduleAt) onScheduleAt(scheduleBound(3600_000)); }}
+              className={`h-8 px-3 rounded-md text-xs font-bold transition-colors cursor-pointer ${timing === key ? 'bg-labbaik-surface text-labbaik-blue dark:text-purple-200 shadow-sm' : 'text-labbaik-text-muted hover:text-neutral-900 dark:hover:text-white'}`}>
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+      {timing === 'later' && (
+        <div className="space-y-1">
+          <input type="datetime-local" dir="ltr" value={scheduleAt} onChange={(e) => onScheduleAt(e.target.value)} aria-label="وقت الجدولة"
+            min={scheduleBound(0)} max={scheduleBound(MAX_SCHEDULE_DAYS * 86_400_000)}
+            className={`${inputClass} text-left tabular-nums`} />
+          {error && <p className="text-xs font-bold text-red-700 dark:text-red-300">{error}</p>}
+        </div>
+      )}
+      <div className="space-y-1.5">
+        <span className="text-xs font-bold text-labbaik-text-muted">سرعة الإرسال</span>
+        <div className="grid grid-cols-4 gap-1.5" role="radiogroup" aria-label="سرعة الإرسال">
+          {SPEEDS.map((value) => (
+            <button type="button" key={value} role="radio" aria-checked={speed === value} onClick={() => onSpeed(value)}
+              className={`h-9 rounded-lg border text-xs font-bold tabular-nums transition-colors cursor-pointer ${speed === value ? 'border-labbaik-blue bg-labbaik-blue/8 text-labbaik-blue dark:text-purple-200' : 'border-labbaik-border text-neutral-800 dark:text-neutral-100 hover:border-labbaik-blue/40'}`}>
+              {value}/ث
+            </button>
+          ))}
+        </div>
+        <p className="text-[11px] leading-relaxed text-labbaik-text-muted">
+          رسائل في الثانية. الأبطأ يوزّع ردود العملاء على فريقك، والأسرع ينهي الحملة أسرع.
+          {recipients > 0 && <> المدة المتوقعة: <b className="tabular-nums">{formatDuration(recipients / speed)}</b>.</>}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+const DEFAULT_SPEED = 20;
+/** Must match CAMPAIGN_SPEEDS on the server. */
+const SPEEDS = [5, 20, 40, 80];
+const MAX_SCHEDULE_DAYS = 30;
+
+/** Now plus `offsetMs`, as the value of a datetime-local input (local time, minute precision). */
+function scheduleBound(offsetMs: number) {
+  const date = new Date(Date.now() + offsetMs);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+/** Why a schedule time can't be used (the server applies the same limits), or '' when it's fine. */
+function scheduleProblem(iso?: string) {
+  if (!iso) return 'اختر وقت الجدولة.';
+  const at = new Date(iso).getTime();
+  if (at < Date.now() + 60_000) return 'وقت الجدولة يجب أن يكون في المستقبل.';
+  if (at > Date.now() + MAX_SCHEDULE_DAYS * 86_400_000) return `يمكن الجدولة حتى ${MAX_SCHEDULE_DAYS} يومًا كحد أقصى.`;
+  return '';
+}
+
+function formatDuration(seconds: number) {
+  if (seconds < 60) return 'أقل من دقيقة';
+  const minutes = Math.ceil(seconds / 60);
+  if (minutes < 60) return `${minutes} دقيقة`;
+  const hours = Math.floor(minutes / 60);
+  return minutes % 60 ? `${hours} ساعة و${minutes % 60} دقيقة` : `${hours} ساعة`;
+}
+
+const formatSchedule = (iso?: string | null) => (iso ? new Date(iso).toLocaleString('ar-SA-u-ca-gregory-nu-latn', { dateStyle: 'medium', timeStyle: 'short' }) : '');
+
+function ConfirmSend({ templateName, campaignName, summary, stats, scheduledAt, speed, onCancel, onConfirm }: { templateName: string; campaignName: string; summary: string; stats: AudienceSummary; scheduledAt?: string; speed: number; onCancel: () => void; onConfirm: () => void }) {
   useEffect(() => {
     const esc = (event: KeyboardEvent) => { if (event.key === 'Escape') onCancel(); };
     document.addEventListener('keydown', esc);
@@ -619,15 +722,19 @@ function ConfirmSend({ templateName, campaignName, summary, stats, onCancel, onC
         <dl className="mt-3 space-y-1 text-xs">
           <div className="flex gap-2"><dt className="text-labbaik-text-muted shrink-0">الحملة:</dt><dd className="font-bold text-neutral-900 dark:text-white">{campaignName}</dd></div>
           <div className="flex gap-2"><dt className="text-labbaik-text-muted shrink-0">الجمهور:</dt><dd className="text-neutral-800 dark:text-neutral-100">{summary}</dd></div>
+          <div className="flex gap-2"><dt className="text-labbaik-text-muted shrink-0">التوقيت:</dt><dd className="font-bold text-neutral-900 dark:text-white">{scheduledAt ? formatSchedule(scheduledAt) : 'الآن'}</dd></div>
+          <div className="flex gap-2"><dt className="text-labbaik-text-muted shrink-0">السرعة:</dt><dd className="text-neutral-800 dark:text-neutral-100"><span className="tabular-nums">{speed}</span> رسالة/ث · نحو {formatDuration(stats.recipients / speed)}</dd></div>
         </dl>
-        <p className="mt-3 text-xs text-labbaik-text-muted">يجري الإرسال في الخلفية، وستنتقل لصفحة الحملة لمتابعة الوصول والقراءة والردود.</p>
+        <p className="mt-3 text-xs text-labbaik-text-muted">
+          {scheduledAt ? 'تبدأ الحملة تلقائيًا في الموعد، ويمكنك إلغاؤها من صفحتها قبل ذلك.' : 'يجري الإرسال في الخلفية، وستنتقل لصفحة الحملة لمتابعة الوصول والقراءة والردود.'}
+        </p>
         <p className="mt-3 flex items-start gap-1.5 rounded-lg bg-amber-500/15 px-3 py-2 text-xs font-bold text-amber-800 dark:text-amber-300">
           <AlertTriangle size={14} className="mt-0.5 shrink-0" /> تُحتسب الرسائل على حساب Meta. يمكنك إيقاف الحملة أثناء الإرسال.
         </p>
         <div className="mt-5 flex items-center justify-end gap-2">
           <button type="button" onClick={onCancel} className="h-10 px-4 rounded-lg text-sm font-bold text-labbaik-text-muted hover:text-neutral-900 dark:hover:text-white cursor-pointer">إلغاء</button>
           <button type="button" onClick={onConfirm} autoFocus className="inline-flex items-center gap-2 h-10 px-5 rounded-lg bg-labbaik-blue text-labbaik-on-accent text-sm font-black hover:bg-[#553174] cursor-pointer">
-            <Send size={16} className="-scale-x-100" /> إرسال الآن
+            {scheduledAt ? <><CalendarClock size={16} /> جدولة الإرسال</> : <><Send size={16} className="-scale-x-100" /> إرسال الآن</>}
           </button>
         </div>
       </div>

@@ -58,6 +58,7 @@ export default function CampaignsList({ templateId, onClearTemplate }: { templat
         </div>
         <select value={status} onChange={(e) => setStatus(e.target.value)} aria-label="حالة الحملة" className="h-9 rounded-lg border border-labbaik-border bg-labbaik-page px-3 text-sm font-bold text-neutral-800 dark:text-neutral-100 cursor-pointer">
           <option value="">كل الحالات</option>
+          <option value="scheduled">مجدولة</option>
           <option value="sending">جارٍ الإرسال</option>
           <option value="completed">اكتملت</option>
           <option value="failed">توقفت</option>

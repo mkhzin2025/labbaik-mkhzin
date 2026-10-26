@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { AlertTriangle, ArrowRight, Ban, Loader2, MousePointerClick, RotateCcw, Search } from 'lucide-react';
+import { AlertTriangle, ArrowRight, Ban, CalendarClock, Loader2, MousePointerClick, RotateCcw, Search } from 'lucide-react';
 import { Link, useParams } from 'react-router-dom';
 import api from '../api/client';
 import { useToast } from '../components/Toast';
@@ -145,10 +145,11 @@ export default function WhatsAppCampaignPage() {
             <p className="mt-1 text-sm text-labbaik-text-muted">
               القالب <b dir="ltr" className="text-neutral-800 dark:text-neutral-100">{campaign.templateName}</b> · {dateTime(campaign.createdAt)}
               {campaign.createdByName && <> · بواسطة {campaign.createdByName}</>}
+              {' · '}<span className="tabular-nums">{num(campaign.messagesPerSecond)}</span> رسالة/ث
             </p>
           </div>
           <div className="flex items-center gap-2">
-            {isActive(campaign.status) && (
+            {(isActive(campaign.status) || campaign.status === 'scheduled') && (
               <button type="button" onClick={() => void act('cancel')} disabled={acting !== null} className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border border-red-500/40 text-sm font-bold text-red-700 dark:text-red-300 hover:bg-red-500/10 disabled:opacity-50 cursor-pointer">
                 {acting === 'cancel' ? <Loader2 size={15} className="animate-spin" /> : <Ban size={15} />} إيقاف الحملة
               </button>
@@ -178,6 +179,13 @@ export default function WhatsAppCampaignPage() {
           </div>
           <p className="mt-2 text-xs text-labbaik-text-muted">يمكنك مغادرة الصفحة؛ الإرسال مستمر على الخادم.</p>
         </div>
+      )}
+
+      {campaign.status === 'scheduled' && campaign.scheduledAt && (
+        <p className="flex items-start gap-1.5 rounded-xl border border-labbaik-blue/30 bg-labbaik-blue/8 px-4 py-3 text-sm font-bold text-labbaik-blue dark:text-purple-200">
+          <CalendarClock size={16} className="mt-0.5 shrink-0" />
+          يبدأ الإرسال تلقائيًا في {dateTime(campaign.scheduledAt)} إلى {num(stats.total)} رقم. يمكنك إلغاؤها قبل ذلك.
+        </p>
       )}
 
       {campaign.lastError && (
