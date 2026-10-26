@@ -47,9 +47,17 @@ function extensionForMime(mimeType: string) {
   return ({ 'image/jpeg': '.jpg', 'image/png': '.png', 'video/mp4': '.mp4', 'video/3gpp': '.3gp', 'application/pdf': '.pdf' } as Record<string, string>)[mimeType] || '';
 }
 
+/** How long webhook/campaign hot paths reuse a connection, branch list or lastWebhookAt write. */
+const HOT_CACHE_MS = 30_000;
+
 @Injectable()
 export class MetaWhatsAppService implements OnModuleInit {
   private readonly logger = new Logger(MetaWhatsAppService.name);
+  // Meta sends tens of status webhooks a second during a campaign; these lookups would otherwise
+  // re-read the same connection and branch list (and rewrite lastWebhookAt) on every one of them.
+  private readonly hotConnections = new Map<string, { at: number; value: Promise<MetaWhatsAppConnection> }>();
+  private readonly hotStoreIds = new Map<string, { at: number; value: Promise<string[]> }>();
+  private readonly webhookTouchedAt = new Map<string, number>();
 
   constructor(
     @InjectRepository(MetaWhatsAppConnection) private readonly connectionRepository: Repository<MetaWhatsAppConnection>,
@@ -493,7 +501,7 @@ export class MetaWhatsAppService implements OnModuleInit {
     // false for test sends: no customer record, no inbox conversation.
     record = true,
   ) {
-    const secretConnection = await this.getConnectionWithSecrets(connection.id);
+    const secretConnection = await this.cachedConnection(connection.id);
     const accessToken = this.credentialEncryption.decryptSecret(secretConnection.accessToken)!;
     const buildResult = this.templatePayloadBuilder.validateAndBuild(template, dto);
     const components = buildResult.components;
@@ -602,7 +610,17 @@ export class MetaWhatsAppService implements OnModuleInit {
 
 
   async getWebhookConnection(connectionId: string) {
-    return this.getConnectionWithSecrets(connectionId);
+    return this.cachedConnection(connectionId);
+  }
+
+  /** getConnectionWithSecrets for hot paths (webhooks, campaign sends); at most HOT_CACHE_MS stale. */
+  private cachedConnection(id: string) {
+    const hit = this.hotConnections.get(id);
+    if (hit && Date.now() - hit.at < HOT_CACHE_MS) return hit.value;
+    const value = this.getConnectionWithSecrets(id);
+    this.hotConnections.set(id, { at: Date.now(), value });
+    value.catch(() => this.hotConnections.delete(id));
+    return value;
   }
 
   async verifyWebhook(connectionId: string, mode: string, token: string, challenge: string) {
@@ -623,6 +641,9 @@ export class MetaWhatsAppService implements OnModuleInit {
   }
 
   async touchWebhook(connectionId: string) {
+    const last = this.webhookTouchedAt.get(connectionId) || 0;
+    if (Date.now() - last < HOT_CACHE_MS) return;
+    this.webhookTouchedAt.set(connectionId, Date.now());
     await this.connectionRepository.update({ id: connectionId }, { lastWebhookAt: new Date(), lastError: null });
   }
 
@@ -643,8 +664,12 @@ export class MetaWhatsAppService implements OnModuleInit {
 
   async getOrganizationStoreIds(connection: MetaWhatsAppConnection) {
     if (connection.scope === MetaConnectionScope.STORE) return connection.storeId ? [connection.storeId] : [];
-    const stores = await this.organizationsService.listStoresByOrganization(connection.organizationId);
-    return stores.map((store) => store.id);
+    const hit = this.hotStoreIds.get(connection.organizationId);
+    if (hit && Date.now() - hit.at < HOT_CACHE_MS) return hit.value;
+    const value = this.organizationsService.listStoresByOrganization(connection.organizationId).then((stores) => stores.map((store) => store.id));
+    this.hotStoreIds.set(connection.organizationId, { at: Date.now(), value });
+    value.catch(() => this.hotStoreIds.delete(connection.organizationId));
+    return value;
   }
 
   async findChannelForConnection(connection: MetaWhatsAppConnection, storeId?: string) {
