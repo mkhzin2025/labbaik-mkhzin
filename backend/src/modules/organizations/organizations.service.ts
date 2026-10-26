@@ -137,11 +137,10 @@ export class OrganizationsService {
     if (storeId) store = stores.find((row) => row.id === storeId);
     else {
       // The user's own store first, as it was before members existed; invited members get their first branch.
-      const owned = await this.storeRepository.findOne({
-        where: { owner: { id: userId }, organizationId: organization.id },
-        select: ['id'],
-        order: { createdAt: 'ASC' },
-      });
+      const [owned] = await this.storeRepository.query(
+        'SELECT id FROM stores WHERE "ownerId" = $1 AND "organizationId" = $2 ORDER BY "createdAt" ASC LIMIT 1',
+        [userId, organization.id],
+      );
       store = stores.find((row) => row.id === owned?.id) || stores[0];
     }
 
