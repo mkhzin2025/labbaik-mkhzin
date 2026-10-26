@@ -1,6 +1,7 @@
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
 import CustomerAvatar from '../components/CustomerAvatar';
+import VoiceNotePlayer from '../components/VoiceNotePlayer';
 import api from '../api/client';
 import { getApiBaseUrl } from '../api/baseUrl';
 import CustomerProfile, { type CustomerTransferResult } from '../components/CustomerProfile';
@@ -323,7 +324,7 @@ function ConversationListSkeleton() {
   );
 }
 
-function SecureAttachment({ attachment }: { attachment: Attachment }) {
+function SecureAttachment({ attachment, mine = false }: { attachment: Attachment; mine?: boolean }) {
   const [objectUrl, setObjectUrl] = useState<string>('');
   const typeIcon = attachment.type === 'image' || attachment.type === 'sticker'
     ? <ImageIcon size={18} />
@@ -368,7 +369,7 @@ function SecureAttachment({ attachment }: { attachment: Attachment }) {
   }
 
   if (attachment.type === 'audio') {
-    return <audio controls src={objectUrl} className="mt-2 w-full" />;
+    return <VoiceNotePlayer src={objectUrl} mine={mine} />;
   }
 
   return (
@@ -380,6 +381,11 @@ function SecureAttachment({ attachment }: { attachment: Attachment }) {
   );
 }
 
+// Voice notes arrive with text "[audio]"; the player already says what it is.
+function isAttachmentPlaceholder(msg: Message) {
+  return (msg.attachments || []).some((a) => a.type === 'audio' && msg.text === `[${a.type}]`);
+}
+
 function MessageExtras({ msg }: { msg: Message }) {
   const attachments = msg.attachments || [];
   const location = msg.metadata?.location;
@@ -388,7 +394,7 @@ function MessageExtras({ msg }: { msg: Message }) {
   return (
     <div className="space-y-2">
       {attachments.map((attachment, index) => (
-        <SecureAttachment key={`${attachment.id || attachment.filename}-${index}`} attachment={attachment} />
+        <SecureAttachment key={`${attachment.id || attachment.filename}-${index}`} attachment={attachment} mine={msg.from === 'me'} />
       ))}
       {location && (
         <div className="mt-2 rounded-xl border border-current/15 bg-current/5 px-3 py-2.5 text-xs font-bold">
@@ -1317,10 +1323,12 @@ export default function ConversationsPage() {
                 ) : (
                 <div key={msg._id || `live-${msg.timestamp}-${idx}`} className={`flex ${msg.from === 'me' ? 'justify-end' : 'justify-start'}`}>
                   <div className={`max-w-[85%] lg:max-w-[65%] px-3.5 py-2.5 rounded-2xl ${msg.from === 'me' ? 'bg-labbaik-blue text-labbaik-on-accent rounded-tl-sm' : 'bg-labbaik-surface text-neutral-900 dark:text-white rounded-tr-sm'}`}>
-                    <div className="flex justify-between items-start gap-3">
-                      <p className="text-sm leading-relaxed whitespace-pre-wrap break-words">{msg.text}</p>
-                      {msg.from !== 'me' && getSentimentIcon(msg.sentiment)}
-                    </div>
+                    {!isAttachmentPlaceholder(msg) && (
+                      <div className="flex justify-between items-start gap-3">
+                        <p className="text-sm leading-relaxed whitespace-pre-wrap break-words">{msg.text}</p>
+                        {msg.from !== 'me' && getSentimentIcon(msg.sentiment)}
+                      </div>
+                    )}
                     <MessageExtras msg={msg} />
                     <div className={`flex items-center gap-2 mt-1 ${msg.from === 'me' ? 'justify-end text-white/80' : 'justify-start text-labbaik-text-muted'}`}>
                       <span className="text-[11px] font-bold tabular-nums">{safeFormatDate(msg.timestamp || Date.now(), 'HH:mm')}</span>
