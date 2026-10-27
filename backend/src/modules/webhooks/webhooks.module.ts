@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { WebhooksService } from './webhooks.service';
 import { WebhooksController } from './webhooks.controller';
+import { CampaignFlowRetryController } from './campaign-flow-retry.controller';
 import { EventsModule } from '../events/events.module';
 import { ConversationsModule } from '../conversations/conversations.module';
 import { ChannelsModule } from '../channels/channels.module';
@@ -14,6 +15,6 @@ import { BillingModule } from '../billing/billing.module';
 @Module({
   imports: [ConfigModule, EventsModule, ConversationsModule, ChannelsModule, CustomersModule, FlowsModule, AiModule, MetaWhatsAppModule, BillingModule],
   providers: [WebhooksService],
-  controllers: [WebhooksController],
+  controllers: [WebhooksController, CampaignFlowRetryController],
 })
 export class WebhooksModule {}

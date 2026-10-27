@@ -645,6 +645,48 @@ export class ConversationsService implements OnModuleInit {
     };
   }
 
+  /**
+   * WhatsApp threads of these numbers whose flow replies Meta refused for unpaid billing (131042) since `since`,
+   * split into those the customer can still receive (they wrote after `since`, so the free-reply window is open)
+   * and those whose window has passed. A node sent again successfully later is not listed twice.
+   */
+  async findPaymentFailedFlowReplies(phones: string[], storeIds: string[], since: number) {
+    const eligible: { conversationId: string; customerPhone: string; storeId: string; customerName?: string; metaConnectionId?: string; nodes: { flowId: string; nodeId: string }[] }[] = [];
+    let expired = 0;
+    const at = (value: unknown) => (typeof value === 'number' ? value : new Date(value as any).getTime()) || 0;
+    for (let i = 0; i < phones.length; i += 1000) {
+      const docs = await this.conversationModel.find(
+        {
+          customerPhone: { $in: phones.slice(i, i + 1000) },
+          storeId: { $in: storeIds },
+          platform: 'whatsapp',
+          messages: { $elemMatch: { 'metadata.source': 'flow', 'metadata.statusErrors.code': 131042 } },
+        },
+        { customerPhone: 1, storeId: 1, customerName: 1, metaConnectionId: 1, messages: { $slice: -40 } },
+      ).lean().exec();
+      for (const doc of docs) {
+        const messages: any[] = doc.messages || [];
+        const lastInbound = Math.max(0, ...messages.filter((m) => ConversationsService.isCustomerMessage(m)).map((m) => at(m.timestamp)));
+        const failed = messages.filter((m) => m.metadata?.source === 'flow' && at(m.timestamp) >= since
+          && (m.metadata?.statusErrors || []).some((e: any) => e?.code === 131042));
+        if (!failed.length) continue;
+        if (lastInbound < since) { expired += 1; continue; }
+        const nodes = new Map<string, { flowId: string; nodeId: string }>();
+        for (const message of failed) {
+          const { flowId, nodeId } = message.metadata;
+          const resentLater = messages.some((m) => m.from === 'me' && at(m.timestamp) > at(message.timestamp)
+            && m.metadata?.flowId === flowId && m.metadata?.nodeId === nodeId && m.metadata?.status !== 'failed');
+          if (flowId && nodeId && !resentLater) nodes.set(`${flowId}:${nodeId}`, { flowId, nodeId });
+        }
+        if (nodes.size) eligible.push({
+          conversationId: String(doc._id), customerPhone: doc.customerPhone, storeId: doc.storeId,
+          customerName: doc.customerName, metaConnectionId: doc.metaConnectionId, nodes: [...nodes.values()],
+        });
+      }
+    }
+    return { eligible, expired };
+  }
+
   /** Why automatic replies are paused for this customer right now, or null when they are not. */
   async getAutoReplyPause(customerPhone: string, storeId: string, platform: string): Promise<string | null> {
     customerPhone = this.normalizeCustomerPhone(customerPhone, platform);

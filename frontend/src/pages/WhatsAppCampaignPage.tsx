@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { AlertTriangle, ArrowRight, Ban, CalendarClock, CreditCard, Loader2, MousePointerClick, RotateCcw, Search } from 'lucide-react';
+import { AlertTriangle, ArrowRight, Ban, CalendarClock, CreditCard, Loader2, MousePointerClick, RotateCcw, Search, Workflow } from 'lucide-react';
 import { Link, useParams } from 'react-router-dom';
 import api from '../api/client';
 import { useToast } from '../components/Toast';
@@ -46,7 +46,7 @@ export default function WhatsAppCampaignPage() {
   const [campaign, setCampaign] = useState<CampaignDetails | null>(null);
   const [template, setTemplate] = useState<Template | null>(null);
   const [failed, setFailed] = useState(false);
-  const [acting, setActing] = useState<'cancel' | 'retry' | 'payment' | null>(null);
+  const [acting, setActing] = useState<'cancel' | 'retry' | 'payment' | 'flows' | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -83,6 +83,34 @@ export default function WhatsAppCampaignPage() {
   }, [templateId, connectionId]);
 
   const mediaUrl = useAuthedObjectUrl(mediaFilePath(campaign?.parameters.headerMedia));
+
+  // Flow replies (e.g. the offers file after a button tap) that Meta refused while billing was unpaid.
+  // Only customers who wrote in the last 20 hours can still get a free-form reply, so the server checks first.
+  const retryFlows = async () => {
+    setActing('flows');
+    try {
+      const base = `/integrations/meta/whatsapp/campaigns/${id}/flow-retry`;
+      const { data: preview } = await api.get<{ customers: number; messages: number; expired: number; running: boolean }>(base);
+      if (preview.running) { showToast('إعادة إرسال ردود التدفق جارية بالفعل.', 'info'); return; }
+      if (!preview.customers) {
+        showToast(preview.expired ? `لا يوجد عملاء داخل نافذة 20 ساعة؛ ${num(preview.expired)} عميل انتهت نافذتهم ولا يصلهم إلا قالب.` : 'لا توجد ردود تدفق فاشلة بسبب الدفع.', 'info');
+        return;
+      }
+      const ok = window.confirm(`تأكد أولًا أن مستحقات واتساب في Meta مسدّدة.
+
+سيُعاد إرسال ${num(preview.messages)} رد تدفق إلى ${num(preview.customers)} عميل راسلونا خلال آخر 20 ساعة.${preview.expired ? `
+(${num(preview.expired)} عميل خارج النافذة لن يُرسل لهم.)` : ''}
+
+متابعة؟`);
+      if (!ok) return;
+      const { data } = await api.post<{ started: number }>(base);
+      showToast(`بدأت إعادة إرسال ردود التدفق إلى ${num(data.started)} عميل في الخلفية.`, 'success');
+    } catch (error) {
+      showToast(errorMessage(error, 'تعذر إعادة إرسال ردود التدفق.'), 'error');
+    } finally {
+      setActing(null);
+    }
+  };
 
   const act = async (kind: 'cancel' | 'retry' | 'payment') => {
     if (kind === 'payment' && !window.confirm(`تأكد أولًا أن مستحقات واتساب في Meta مسدّدة، وإلا ستفشل الرسائل مرة أخرى.
@@ -167,6 +195,12 @@ export default function WhatsAppCampaignPage() {
               <button type="button" onClick={() => void act('payment')} disabled={acting !== null} title="رسائل رفضتها Meta لأن حساب واتساب عليه مستحقات غير مسدّدة"
                 className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border border-amber-500/50 text-sm font-bold text-amber-800 dark:text-amber-300 hover:bg-amber-500/10 disabled:opacity-50 cursor-pointer">
                 {acting === 'payment' ? <Loader2 size={15} className="animate-spin" /> : <CreditCard size={15} />} إعادة إرسال فاشلة الدفع (<span className="tabular-nums">{num(campaign.paymentFailed)}</span>)
+              </button>
+            )}
+            {campaign.paymentFailed > 0 && stats.replied > 0 && (
+              <button type="button" onClick={() => void retryFlows()} disabled={acting !== null} title="ردود التدفقات التي رفضتها Meta بسبب الدفع، لعملاء راسلونا خلال آخر 20 ساعة"
+                className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border border-amber-500/50 text-sm font-bold text-amber-800 dark:text-amber-300 hover:bg-amber-500/10 disabled:opacity-50 cursor-pointer">
+                {acting === 'flows' ? <Loader2 size={15} className="animate-spin" /> : <Workflow size={15} />} إعادة ردود التدفق الفاشلة
               </button>
             )}
             {campaign.templateId && (

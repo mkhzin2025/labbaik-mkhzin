@@ -770,6 +770,16 @@ export class WhatsAppCampaignsService implements OnApplicationBootstrap, OnModul
     return { organization, storeIds: stores.map((store) => store.id) };
   }
 
+  /** Numbers that answered this campaign (their replies are what triggered flows), for re-sending failed flow replies. */
+  async repliedRecipientsForUser(userId: string, organizationId: string | undefined, id: string) {
+    const campaign = await this.findAccessible(userId, organizationId, id);
+    const rows: { phone: string }[] = await this.recipientRepository.query(
+      'SELECT DISTINCT phone FROM whatsapp_campaign_recipients WHERE "campaignId" = $1 AND "repliedAt" IS NOT NULL',
+      [id],
+    );
+    return { campaign, phones: rows.map((row) => row.phone) };
+  }
+
   private async findAccessible(userId: string, organizationId: string | undefined, id: string) {
     const { organization, storeIds } = await this.accessibleStores(userId, organizationId);
     const campaign = await this.campaignRepository.findOne({ where: { id, organizationId: organization.id } });

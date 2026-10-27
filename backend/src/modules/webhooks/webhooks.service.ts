@@ -1,4 +1,4 @@
-import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHmac, timingSafeEqual } from 'crypto';
 import { EventsGateway } from '../events/events.gateway';
@@ -36,9 +36,17 @@ type FlowMessagePart = {
   attachments: Record<string, any>[];
 };
 
+/** Failed flow replies are re-sent only to customers who wrote within this many hours (WhatsApp allows 24). */
+const FLOW_RETRY_WINDOW_HOURS = 20;
+/** Re-sends run in the background at about FLOW_RETRY_WORKERS / FLOW_RETRY_PACE_MS customers a second. */
+const FLOW_RETRY_WORKERS = 4;
+const FLOW_RETRY_PACE_MS = 400;
+
 @Injectable()
 export class WebhooksService {
   private readonly logger = new Logger(WebhooksService.name);
+  /** Campaigns whose failed flow replies are being re-sent right now. */
+  private readonly flowRetries = new Set<string>();
 
   constructor(
     private readonly eventsGateway: EventsGateway,
@@ -452,6 +460,56 @@ export class WebhooksService {
     const latest = Number(messages[messages.length - 1]?.timestamp) || Date.now();
     const previous = Number(messages[messages.length - 2]?.timestamp) || 0;
     return latest - previous > NEW_CONVERSATION_GAP_MS;
+  }
+
+  /**
+   * Flow replies to a campaign's responders that Meta refused while the WhatsApp account had unpaid billing.
+   * Only customers who wrote within FLOW_RETRY_WINDOW_HOURS are offered: past 24h a free-form reply is no longer
+   * allowed, and the margin keeps a re-send from landing just after the window closes.
+   */
+  async previewCampaignFlowRetry(userId: string, organizationId: string | undefined, campaignId: string) {
+    const { campaign, phones } = await this.campaignsService.repliedRecipientsForUser(userId, organizationId, campaignId);
+    const since = Date.now() - FLOW_RETRY_WINDOW_HOURS * 3600 * 1000;
+    const { eligible, expired } = await this.conversationsService.findPaymentFailedFlowReplies(phones, campaign.storeIds, since);
+    return { campaign, eligible, expired, running: this.flowRetries.has(campaignId) };
+  }
+
+  async startCampaignFlowRetry(userId: string, organizationId: string | undefined, campaignId: string) {
+    if (this.flowRetries.has(campaignId)) throw new BadRequestException('إعادة الإرسال جارية بالفعل لهذه الحملة.');
+    const { campaign, eligible, expired } = await this.previewCampaignFlowRetry(userId, organizationId, campaignId);
+    if (!eligible.length) throw new BadRequestException('لا توجد ردود تدفق فاشلة بسبب الدفع ضمن آخر 20 ساعة.');
+    this.flowRetries.add(campaignId);
+    void this.resendFlowReplies(campaign.organizationId, eligible).finally(() => this.flowRetries.delete(campaignId));
+    return { started: eligible.length, messages: eligible.reduce((sum, item) => sum + item.nodes.length, 0), expired };
+  }
+
+  private async resendFlowReplies(organizationId: string, targets: Awaited<ReturnType<ConversationsService['findPaymentFailedFlowReplies']>>['eligible']) {
+    const queue = [...targets];
+    let sent = 0;
+    let failed = 0;
+    const worker = async () => {
+      for (let target = queue.shift(); target; target = queue.shift()) {
+        try {
+          const channels = await this.channelsService.findAllByStore(target.storeId, { maskCredentials: false });
+          const channel = channels.find((c) => c.type === 'whatsapp' && (!target.metaConnectionId || c.credentials?.metaConnectionId === target.metaConnectionId))
+            || channels.find((c) => c.type === 'whatsapp');
+          if (!channel) throw new Error('no WhatsApp channel');
+          const conversation = { _id: target.conversationId, customerName: target.customerName, metaConnectionId: target.metaConnectionId };
+          for (const { flowId, nodeId } of target.nodes) {
+            const flow = await this.flowsService.findLive(flowId, target.storeId, organizationId);
+            const node = flow?.nodes?.find((item: any) => item.id === nodeId);
+            if (flow && node) await this.sendFlowNode(node, flow, target.customerPhone, target.storeId, 'whatsapp', conversation, channel);
+          }
+          sent += 1;
+        } catch (error: any) {
+          failed += 1;
+          this.logger.warn(`Flow retry failed for ${target.customerPhone}: ${error.message}`);
+        }
+        await new Promise((resolve) => setTimeout(resolve, FLOW_RETRY_PACE_MS));
+      }
+    };
+    await Promise.all(Array.from({ length: FLOW_RETRY_WORKERS }, worker));
+    this.logger.log(`Flow retry finished: ${sent} customers re-sent, ${failed} failed`);
   }
 
   private async runFlowStep(step: FlowStep, flow: Flow, from: string, storeId: string, platform: string, conversation: any) {
