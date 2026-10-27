@@ -24,6 +24,11 @@ const SCHEDULE_POLL_MS = 30_000;
 const MAX_SCHEDULE_DAYS = 30;
 /** A campaign stops once this many sends in a row fail (empty wallet, revoked token, paused template...). */
 const MAX_CONSECUTIVE_FAILURES = 25;
+/**
+ * Meta-side failures caused by the business's own billing (unpaid WhatsApp invoices, a failing card; code 131042).
+ * Meta accepted these messages, so the plain retry skips them; once billing is fixed they can be sent again.
+ */
+const PAYMENT_FAILURE_SQL = `r.status = 'failed' AND (r.error ILIKE '%unsettled payment%' OR r.error ILIKE '%payment method%' OR r.error ILIKE '%131042%')`;
 /** An inbound message within this window of a campaign message counts as a reply to it. */
 const REPLY_WINDOW_HOURS = 72;
 
@@ -277,6 +282,27 @@ export class WhatsAppCampaignsService implements OnApplicationBootstrap, OnModul
     );
     if (!retried) throw new BadRequestException('لا توجد أرقام قابلة لإعادة المحاولة.');
     await this.campaignRepository.update(id, { status: WhatsAppCampaignStatus.QUEUED, lastError: null, completedAt: null });
+    void this.run(id);
+    return this.getForUser(userId, organizationId, id);
+  }
+
+  /**
+   * Re-queues numbers Meta rejected over the business's billing (see PAYMENT_FAILURE_SQL), for use once the
+   * WhatsApp account is paid up. Works while the campaign is still sending: the running loop picks them up.
+   */
+  async retryPaymentFailedForUser(userId: string, organizationId: string | undefined, id: string) {
+    const campaign = await this.findAccessible(userId, organizationId, id);
+    if (campaign.status === WhatsAppCampaignStatus.SCHEDULED) throw new BadRequestException('الحملة لم تبدأ بعد.');
+    const [, retried] = await this.recipientRepository.query(
+      `UPDATE whatsapp_campaign_recipients r
+          SET status = 'pending', error = NULL, "failedAt" = NULL, "whatsappMessageId" = NULL, "sentAt" = NULL, "deliveredAt" = NULL
+        WHERE r."campaignId" = $1 AND ${PAYMENT_FAILURE_SQL}`,
+      [id],
+    );
+    if (!retried) throw new BadRequestException('لا توجد رسائل فشلت بسبب الدفع.');
+    if (campaign.status !== WhatsAppCampaignStatus.SENDING && campaign.status !== WhatsAppCampaignStatus.QUEUED) {
+      await this.campaignRepository.update(id, { status: WhatsAppCampaignStatus.QUEUED, lastError: null, completedAt: null });
+    }
     void this.run(id);
     return this.getForUser(userId, organizationId, id);
   }
@@ -573,7 +599,7 @@ export class WhatsAppCampaignsService implements OnApplicationBootstrap, OnModul
 
   async getForUser(userId: string, organizationId: string | undefined, id: string) {
     const campaign = await this.findAccessible(userId, organizationId, id);
-    const [stats, byBranch, buttons, errors, timeline] = await Promise.all([
+    const [stats, byBranch, buttons, errors, timeline, [payment]] = await Promise.all([
       this.statsFor([id]).then((map) => map.get(id) || toStats()),
       this.recipientRepository.query(
         `SELECT r."storeId", MAX(r."storeName") AS "storeName", ${STATS_SELECT}
@@ -604,6 +630,10 @@ export class WhatsAppCampaignsService implements OnApplicationBootstrap, OnModul
          GROUP BY kind, bucket ORDER BY bucket`,
         [id, campaign.startedAt || campaign.createdAt],
       ),
+      this.recipientRepository.query(
+        `SELECT COUNT(*)::int AS count FROM whatsapp_campaign_recipients r WHERE r."campaignId" = $1 AND ${PAYMENT_FAILURE_SQL}`,
+        [id],
+      ),
     ]);
     return {
       ...this.toPublic(campaign),
@@ -613,6 +643,7 @@ export class WhatsAppCampaignsService implements OnApplicationBootstrap, OnModul
       byBranch: byBranch.map((row: any) => ({ storeId: row.storeId, storeName: row.storeName, stats: toStats(row) })),
       buttons: buttons.map((row: any) => ({ text: row.text, count: Number(row.count) })),
       errors: errors.map((row: any) => ({ error: row.error, count: Number(row.count) })),
+      paymentFailed: Number(payment?.count || 0),
       timeline: timeline.map((row: any) => ({ kind: row.kind, bucket: new Date(row.bucket).toISOString(), count: Number(row.count) })),
     };
   }

@@ -61,6 +61,8 @@ export type CampaignDetails = Campaign & {
   byBranch: { storeId: string; storeName: string | null; stats: CampaignStats }[];
   buttons: { text: string; count: number }[];
   errors: { error: string; count: number }[];
+  /** Numbers Meta rejected over unpaid WhatsApp billing; can be re-sent once the account is paid up. */
+  paymentFailed: number;
   timeline: { kind: 'sent' | 'read' | 'replied'; bucket: string; count: number }[];
 };
 

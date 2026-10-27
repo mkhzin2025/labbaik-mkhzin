@@ -70,4 +70,9 @@ export class WhatsAppCampaignsController {
   retryFailed(@Request() req: any, @Param('id', ParseUUIDPipe) id: string) {
     return this.campaigns.retryFailedForUser(req.user.id, req.user.organizationId, id);
   }
+
+  @Post(':id/retry-payment-failed')
+  retryPaymentFailed(@Request() req: any, @Param('id', ParseUUIDPipe) id: string) {
+    return this.campaigns.retryPaymentFailedForUser(req.user.id, req.user.organizationId, id);
+  }
 }

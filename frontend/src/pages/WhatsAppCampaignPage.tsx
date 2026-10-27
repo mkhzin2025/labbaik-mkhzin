@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { AlertTriangle, ArrowRight, Ban, CalendarClock, Loader2, MousePointerClick, RotateCcw, Search } from 'lucide-react';
+import { AlertTriangle, ArrowRight, Ban, CalendarClock, CreditCard, Loader2, MousePointerClick, RotateCcw, Search } from 'lucide-react';
 import { Link, useParams } from 'react-router-dom';
 import api from '../api/client';
 import { useToast } from '../components/Toast';
@@ -46,7 +46,7 @@ export default function WhatsAppCampaignPage() {
   const [campaign, setCampaign] = useState<CampaignDetails | null>(null);
   const [template, setTemplate] = useState<Template | null>(null);
   const [failed, setFailed] = useState(false);
-  const [acting, setActing] = useState<'cancel' | 'retry' | null>(null);
+  const [acting, setActing] = useState<'cancel' | 'retry' | 'payment' | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -84,12 +84,16 @@ export default function WhatsAppCampaignPage() {
 
   const mediaUrl = useAuthedObjectUrl(mediaFilePath(campaign?.parameters.headerMedia));
 
-  const act = async (kind: 'cancel' | 'retry') => {
+  const act = async (kind: 'cancel' | 'retry' | 'payment') => {
+    if (kind === 'payment' && !window.confirm(`تأكد أولًا أن مستحقات واتساب في Meta مسدّدة، وإلا ستفشل الرسائل مرة أخرى.
+
+إعادة إرسال ${num(campaign?.paymentFailed || 0)} رسالة فشلت بسبب الدفع؟`)) return;
     setActing(kind);
     try {
-      const { data } = await api.post(`/integrations/meta/whatsapp/campaigns/${id}/${kind === 'cancel' ? 'cancel' : 'retry-failed'}`);
+      const path = kind === 'cancel' ? 'cancel' : kind === 'payment' ? 'retry-payment-failed' : 'retry-failed';
+      const { data } = await api.post(`/integrations/meta/whatsapp/campaigns/${id}/${path}`);
       setCampaign(data);
-      showToast(kind === 'cancel' ? 'أُوقفت الحملة.' : 'أُعيدت الأرقام الفاشلة للإرسال.', 'success');
+      showToast(kind === 'cancel' ? 'أُوقفت الحملة.' : kind === 'payment' ? 'أُعيدت رسائل الدفع الفاشلة للإرسال.' : 'أُعيدت الأرقام الفاشلة للإرسال.', 'success');
     } catch (error) {
       showToast(errorMessage(error, 'تعذر تنفيذ العملية.'), 'error');
     } finally {
@@ -148,7 +152,7 @@ export default function WhatsAppCampaignPage() {
               {' · '}<span className="tabular-nums">{num(campaign.messagesPerSecond)}</span> رسالة/ث
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {(isActive(campaign.status) || campaign.status === 'scheduled') && (
               <button type="button" onClick={() => void act('cancel')} disabled={acting !== null} className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border border-red-500/40 text-sm font-bold text-red-700 dark:text-red-300 hover:bg-red-500/10 disabled:opacity-50 cursor-pointer">
                 {acting === 'cancel' ? <Loader2 size={15} className="animate-spin" /> : <Ban size={15} />} إيقاف الحملة
@@ -157,6 +161,12 @@ export default function WhatsAppCampaignPage() {
             {retryable && (
               <button type="button" onClick={() => void act('retry')} disabled={acting !== null} className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border border-labbaik-border text-sm font-bold text-neutral-800 dark:text-neutral-100 hover:border-labbaik-blue/40 hover:text-labbaik-blue disabled:opacity-50 cursor-pointer">
                 {acting === 'retry' ? <Loader2 size={15} className="animate-spin" /> : <RotateCcw size={15} />} إعادة إرسال غير المُرسلة
+              </button>
+            )}
+            {campaign.paymentFailed > 0 && campaign.status !== 'scheduled' && (
+              <button type="button" onClick={() => void act('payment')} disabled={acting !== null} title="رسائل رفضتها Meta لأن حساب واتساب عليه مستحقات غير مسدّدة"
+                className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border border-amber-500/50 text-sm font-bold text-amber-800 dark:text-amber-300 hover:bg-amber-500/10 disabled:opacity-50 cursor-pointer">
+                {acting === 'payment' ? <Loader2 size={15} className="animate-spin" /> : <CreditCard size={15} />} إعادة إرسال فاشلة الدفع (<span className="tabular-nums">{num(campaign.paymentFailed)}</span>)
               </button>
             )}
             {campaign.templateId && (
@@ -289,7 +299,7 @@ export default function WhatsAppCampaignPage() {
                 {campaign.errors.map((e) => (
                   <li key={e.error} className="flex items-start gap-2 text-xs">
                     <b className="tabular-nums text-red-700 dark:text-red-300 shrink-0">{num(e.count)}</b>
-                    <span className="text-neutral-700 dark:text-neutral-200 wrap-break-word" dir="auto">{e.error || 'غير معروف'}</span>
+                    <span className="min-w-0 text-neutral-700 dark:text-neutral-200 wrap-anywhere" dir="auto">{e.error || 'غير معروف'}</span>
                   </li>
                 ))}
               </ul>

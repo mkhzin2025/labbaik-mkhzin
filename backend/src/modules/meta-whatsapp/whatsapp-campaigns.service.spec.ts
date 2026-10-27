@@ -103,3 +103,36 @@ describe('parseTestPhones', () => {
     });
   });
 });
+
+describe('WhatsAppCampaignsService.retryPaymentFailedForUser', () => {
+  function setup(status: WhatsAppCampaignStatus, retried = 3) {
+    const recipientRepository: any = { query: jest.fn(async () => [[], retried]) };
+    const campaignRepository: any = { update: jest.fn(async () => undefined) };
+    const service = new WhatsAppCampaignsService(campaignRepository, recipientRepository, {} as any, {} as any, {} as any, {} as any);
+    jest.spyOn(service as any, 'findAccessible').mockResolvedValue({ id: 'c1', status });
+    jest.spyOn(service as any, 'getForUser').mockResolvedValue({ id: 'c1' });
+    const run = jest.spyOn(service as any, 'run').mockResolvedValue(undefined);
+    return { service, recipientRepository, campaignRepository, run };
+  }
+
+  it('re-queues only billing failures and restarts a finished campaign', async () => {
+    const { service, recipientRepository, campaignRepository, run } = setup(WhatsAppCampaignStatus.COMPLETED);
+    await service.retryPaymentFailedForUser('u1', 'o1', 'c1');
+    const sql = recipientRepository.query.mock.calls[0][0];
+    expect(sql).toContain("'%unsettled payment%'");
+    expect(sql).toContain('"whatsappMessageId" = NULL');
+    expect(campaignRepository.update).toHaveBeenCalledWith('c1', expect.objectContaining({ status: WhatsAppCampaignStatus.QUEUED }));
+    expect(run).toHaveBeenCalledWith('c1');
+  });
+
+  it('leaves a sending campaign running instead of flipping it to queued', async () => {
+    const { service, campaignRepository } = setup(WhatsAppCampaignStatus.SENDING);
+    await service.retryPaymentFailedForUser('u1', 'o1', 'c1');
+    expect(campaignRepository.update).not.toHaveBeenCalled();
+  });
+
+  it('says so when there is nothing to retry', async () => {
+    const { service } = setup(WhatsAppCampaignStatus.COMPLETED, 0);
+    await expect(service.retryPaymentFailedForUser('u1', 'o1', 'c1')).rejects.toThrow('لا توجد رسائل فشلت بسبب الدفع.');
+  });
+});
