@@ -35,7 +35,8 @@ import {
   ChevronDown,
   Loader2,
   Building2,
-  FolderOpen
+  FolderOpen,
+  RotateCcw
 } from 'lucide-react';
 import { 
   FaWhatsapp, 
@@ -917,6 +918,23 @@ export default function ConversationsPage() {
     }
   };
 
+  const [resendingId, setResendingId] = useState<string | null>(null);
+  // A failed agent message can be resent until a later message of ours carries the same text.
+  const canResend = (idx: number) => {
+    const failedText = messages[idx].metadata?.failedText;
+    return !!failedText && !messages.slice(idx + 1).some((m) => m.from === 'me' && m.text === failedText);
+  };
+  const resendFailed = async (msg: Message, key: string) => {
+    setResendingId(key);
+    try {
+      await sendText(msg.metadata!.failedText);
+    } catch {
+      // sendText already showed the error toast.
+    } finally {
+      setResendingId(null);
+    }
+  };
+
   const getPlatformIcon = (platform: string) => {
     switch (platform) {
       case 'whatsapp': return <FaWhatsapp size={14} className="text-green-500" />;
@@ -1316,6 +1334,21 @@ export default function ConversationsPage() {
                         <div className="space-y-0.5 text-right">
                           <p className="text-xs font-black">تنبيه إرسال واتساب</p>
                           <p className="text-xs font-medium leading-6">{msg.text}</p>
+                          {canResend(idx) && (() => {
+                            const key = msg._id || `live-${msg.timestamp}-${idx}`;
+                            const busy = resendingId === key;
+                            return (
+                              <button
+                                type="button"
+                                disabled={!!resendingId}
+                                onClick={() => void resendFailed(msg, key)}
+                                className="mt-1.5 inline-flex items-center gap-1.5 h-7 px-3 rounded-full border border-red-500/40 text-xs font-bold hover:bg-red-100 dark:hover:bg-red-500/20 disabled:opacity-60 cursor-pointer disabled:cursor-not-allowed"
+                              >
+                                {busy ? <Loader2 size={13} className="animate-spin" /> : <RotateCcw size={13} />}
+                                إعادة الإرسال
+                              </button>
+                            );
+                          })()}
                         </div>
                       </div>
                     </div>

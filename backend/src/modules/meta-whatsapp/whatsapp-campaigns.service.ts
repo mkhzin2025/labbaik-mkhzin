@@ -29,8 +29,6 @@ const MAX_CONSECUTIVE_FAILURES = 25;
  * Meta accepted these messages, so the plain retry skips them; once billing is fixed they can be sent again.
  */
 const PAYMENT_FAILURE_SQL = `r.status = 'failed' AND (r.error ILIKE '%unsettled payment%' OR r.error ILIKE '%payment method%' OR r.error ILIKE '%131042%')`;
-/** An inbound message within this window of a campaign message counts as a reply to it. */
-const REPLY_WINDOW_HOURS = 72;
 
 export type CampaignStats = {
   total: number;
@@ -538,34 +536,38 @@ export class WhatsAppCampaignsService implements OnApplicationBootstrap, OnModul
 
   /**
    * Marks the campaign message a customer answered. A quoted reply or button tap names the message exactly;
-   * otherwise the latest campaign message to that number in the reply window is used.
+   * otherwise any message counts toward the latest campaign message that reached that number, however late.
    */
   async recordReply(organizationId: string | null | undefined, from: string, reply: { contextId?: string; type: string; text?: string; timestamp?: number }) {
     const phone = normalizePhoneNumber(from);
     if (!organizationId || !phone) return;
+    const at = new Date(reply.timestamp || Date.now());
     let target: WhatsAppCampaignRecipient | null = null;
     if (reply.contextId) target = await this.recipientRepository.findOne({ where: { organizationId, whatsappMessageId: reply.contextId } });
     if (!target) {
       target = await this.recipientRepository.createQueryBuilder('r')
         .where('r.organizationId = :organizationId', { organizationId })
         .andWhere('r.phone = :phone', { phone })
-        .andWhere('r.sentAt >= :since', { since: new Date(Date.now() - REPLY_WINDOW_HOURS * 3600 * 1000) })
+        .andWhere('r.sentAt <= :at', { at })
         .andWhere("r.status <> 'failed'")
         .orderBy('r.sentAt', 'DESC')
         .getOne();
     }
     if (!target) return;
-    const isButton = reply.type === 'button' || reply.type === 'interactive_button';
+    await this.markReplied(target, at, reply.type, reply.text);
+  }
+
+  async markReplied(target: Pick<WhatsAppCampaignRecipient, 'id' | 'repliedAt' | 'replyType'>, at: Date, type: string, text?: string) {
+    const isButton = type === 'button' || type === 'interactive_button';
     // Keep the first reply, but a later button tap still counts as a click.
     if (target.repliedAt && !(isButton && target.replyType !== 'button')) return;
-    const at = new Date(reply.timestamp || Date.now());
     await this.recipientRepository.query(
       `UPDATE whatsapp_campaign_recipients
           SET "repliedAt" = COALESCE("repliedAt", $2), "replyType" = $3, "replyText" = $4,
               "readAt" = COALESCE("readAt", $2), "deliveredAt" = COALESCE("deliveredAt", $2),
               status = CASE WHEN status = 'failed' THEN status ELSE 'read' END
         WHERE id = $1`,
-      [target.id, at, isButton ? 'button' : reply.type, String(reply.text || '').slice(0, 500) || null],
+      [target.id, at, isButton ? 'button' : type, String(text || '').slice(0, 500) || null],
     );
   }
 
@@ -778,6 +780,23 @@ export class WhatsAppCampaignsService implements OnApplicationBootstrap, OnModul
       [id],
     );
     return { campaign, phones: rows.map((row) => row.phone) };
+  }
+
+  /**
+   * Reached recipients with no reply on record, each with when the next campaign reached the same number:
+   * a message is only this campaign's reply if it came before that.
+   */
+  async unrepliedRecipientsForUser(userId: string, organizationId: string | undefined, id: string) {
+    const campaign = await this.findAccessible(userId, organizationId, id);
+    const rows: { id: string; phone: string; sentAt: Date; nextSentAt: Date | null }[] = await this.recipientRepository.query(
+      `SELECT r.id, r.phone, r."sentAt",
+              (SELECT MIN(o."sentAt") FROM whatsapp_campaign_recipients o
+                WHERE o."organizationId" = r."organizationId" AND o.phone = r.phone AND o."sentAt" > r."sentAt") AS "nextSentAt"
+         FROM whatsapp_campaign_recipients r
+        WHERE r."campaignId" = $1 AND r."repliedAt" IS NULL AND r.status <> 'failed' AND r."sentAt" IS NOT NULL`,
+      [id],
+    );
+    return { campaign, rows };
   }
 
   private async findAccessible(userId: string, organizationId: string | undefined, id: string) {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { AlertTriangle, ArrowRight, Ban, CalendarClock, CreditCard, Loader2, MousePointerClick, RotateCcw, Search, Workflow } from 'lucide-react';
+import { AlertTriangle, ArrowRight, Ban, CalendarClock, CreditCard, Loader2, MessageSquareReply, MousePointerClick, RotateCcw, Search, Workflow } from 'lucide-react';
 import { Link, useParams } from 'react-router-dom';
 import api from '../api/client';
 import { useToast } from '../components/Toast';
@@ -46,7 +46,7 @@ export default function WhatsAppCampaignPage() {
   const [campaign, setCampaign] = useState<CampaignDetails | null>(null);
   const [template, setTemplate] = useState<Template | null>(null);
   const [failed, setFailed] = useState(false);
-  const [acting, setActing] = useState<'cancel' | 'retry' | 'payment' | 'flows' | null>(null);
+  const [acting, setActing] = useState<'cancel' | 'retry' | 'payment' | 'flows' | 'replies' | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -107,6 +107,19 @@ export default function WhatsAppCampaignPage() {
       showToast(`بدأت إعادة إرسال ردود التدفق إلى ${num(data.started)} عميل في الخلفية.`, 'success');
     } catch (error) {
       showToast(errorMessage(error, 'تعذر إعادة إرسال ردود التدفق.'), 'error');
+    } finally {
+      setActing(null);
+    }
+  };
+
+  // Replies that arrived after the old 72-hour tracking window; new replies are counted with no time limit.
+  const recountReplies = async () => {
+    setActing('replies');
+    try {
+      const { data } = await api.post<{ checking: number }>(`/integrations/meta/whatsapp/campaigns/${id}/recount-replies`);
+      showToast(`جارٍ فحص محادثات ${num(data.checking)} عميل؛ ستتحدث الأرقام خلال دقائق.`, 'success');
+    } catch (error) {
+      showToast(errorMessage(error, 'تعذر احتساب الردود.'), 'error');
     } finally {
       setActing(null);
     }
@@ -201,6 +214,12 @@ export default function WhatsAppCampaignPage() {
               <button type="button" onClick={() => void retryFlows()} disabled={acting !== null} title="ردود التدفقات التي رفضتها Meta بسبب الدفع، لعملاء راسلونا خلال آخر 20 ساعة"
                 className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border border-amber-500/50 text-sm font-bold text-amber-800 dark:text-amber-300 hover:bg-amber-500/10 disabled:opacity-50 cursor-pointer">
                 {acting === 'flows' ? <Loader2 size={15} className="animate-spin" /> : <Workflow size={15} />} إعادة ردود التدفق الفاشلة
+              </button>
+            )}
+            {!isActive(campaign.status) && campaign.status !== 'scheduled' && stats.accepted > 0 && (
+              <button type="button" onClick={() => void recountReplies()} disabled={acting !== null} title="يحتسب كل رسائل العملاء بعد الحملة كردود، ومنها ما وصل بعد 72 ساعة"
+                className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border border-labbaik-border text-sm font-bold text-neutral-800 dark:text-neutral-100 hover:border-labbaik-blue/40 hover:text-labbaik-blue disabled:opacity-50 cursor-pointer">
+                {acting === 'replies' ? <Loader2 size={15} className="animate-spin" /> : <MessageSquareReply size={15} />} احتساب كل الردود
               </button>
             )}
             {campaign.templateId && (

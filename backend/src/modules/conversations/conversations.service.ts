@@ -687,6 +687,27 @@ export class ConversationsService implements OnModuleInit {
     return { eligible, expired };
   }
 
+  /** Each number's WhatsApp messages to these branches since `since`, oldest first (only the recent tail of each thread). */
+  async findCustomerMessagesSince(phones: string[], storeIds: string[], since: number) {
+    const byPhone = new Map<string, { at: number; type: string; text?: string }[]>();
+    const at = (value: unknown) => (typeof value === 'number' ? value : new Date(value as any).getTime()) || 0;
+    for (let i = 0; i < phones.length; i += 1000) {
+      const docs = await this.conversationModel.find(
+        { customerPhone: { $in: phones.slice(i, i + 1000) }, storeId: { $in: storeIds }, platform: 'whatsapp', lastMessageAt: { $gte: new Date(since) } },
+        { customerPhone: 1, messages: { $slice: -300 } },
+      ).lean().exec();
+      for (const doc of docs) {
+        const list = byPhone.get(doc.customerPhone) || [];
+        for (const m of doc.messages || []) {
+          if (ConversationsService.isCustomerMessage(m) && at(m.timestamp) >= since) list.push({ at: at(m.timestamp), type: m.type, text: m.text });
+        }
+        byPhone.set(doc.customerPhone, list);
+      }
+    }
+    for (const list of byPhone.values()) list.sort((a, b) => a.at - b.at);
+    return byPhone;
+  }
+
   /** Why automatic replies are paused for this customer right now, or null when they are not. */
   async getAutoReplyPause(customerPhone: string, storeId: string, platform: string): Promise<string | null> {
     customerPhone = this.normalizeCustomerPhone(customerPhone, platform);
@@ -739,7 +760,7 @@ export class ConversationsService implements OnModuleInit {
       } catch (error) {
         if (walletCharge) await this.billingService.refundMetaUsage(walletCharge.id, 'Manual WhatsApp send failed');
         const errorText = this.getSendErrorText(error);
-        await this.addSystemError(conversation.customerPhone, storeId, conversation.platform, errorText, error);
+        await this.addSystemError(conversation.customerPhone, storeId, conversation.platform, errorText, error, text);
         throw new InternalServerErrorException(errorText);
       }
     } else if (conversation.platform === 'instagram') {
@@ -768,7 +789,7 @@ export class ConversationsService implements OnModuleInit {
     return { status: 'sent', message: messageData };
   }
 
-  async addSystemError(customerPhone: string, storeId: string, platform: string, text: string, error?: any) {
+  async addSystemError(customerPhone: string, storeId: string, platform: string, text: string, error?: any, failedText?: string) {
     const messageData = {
       from: 'system',
       text,
@@ -776,6 +797,8 @@ export class ConversationsService implements OnModuleInit {
       timestamp: Date.now(),
       metadata: {
         error: error?.response?.data?.error || { message: error?.message || text },
+        // The agent's text that failed to send, so the inbox can offer a resend.
+        ...(failedText ? { failedText } : {}),
       },
     };
 

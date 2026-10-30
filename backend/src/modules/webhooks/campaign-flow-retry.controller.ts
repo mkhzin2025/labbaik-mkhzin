@@ -26,4 +26,9 @@ export class CampaignFlowRetryController {
   start(@Request() req: any, @Param('id', ParseUUIDPipe) id: string) {
     return this.webhooks.startCampaignFlowRetry(req.user.id, req.user.organizationId, id);
   }
+
+  @Post(':id/recount-replies')
+  recountReplies(@Request() req: any, @Param('id', ParseUUIDPipe) id: string) {
+    return this.webhooks.startCampaignReplyRecount(req.user.id, req.user.organizationId, id);
+  }
 }

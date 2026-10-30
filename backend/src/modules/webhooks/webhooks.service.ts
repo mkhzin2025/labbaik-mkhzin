@@ -47,6 +47,7 @@ export class WebhooksService {
   private readonly logger = new Logger(WebhooksService.name);
   /** Campaigns whose failed flow replies are being re-sent right now. */
   private readonly flowRetries = new Set<string>();
+  private readonly replyRecounts = new Set<string>();
 
   constructor(
     private readonly eventsGateway: EventsGateway,
@@ -481,6 +482,41 @@ export class WebhooksService {
     this.flowRetries.add(campaignId);
     void this.resendFlowReplies(campaign.organizationId, eligible).finally(() => this.flowRetries.delete(campaignId));
     return { started: eligible.length, messages: eligible.reduce((sum, item) => sum + item.nodes.length, 0), expired };
+  }
+
+  /**
+   * Counts customer messages the live tracking missed (it used to stop after 72h) as replies to this campaign:
+   * the first message after the campaign reached the number and before the next campaign did.
+   */
+  async startCampaignReplyRecount(userId: string, organizationId: string | undefined, campaignId: string) {
+    if (this.replyRecounts.has(campaignId)) throw new BadRequestException('احتساب الردود جارٍ بالفعل لهذه الحملة.');
+    this.replyRecounts.add(campaignId);
+    try {
+      const { campaign, rows } = await this.campaignsService.unrepliedRecipientsForUser(userId, organizationId, campaignId);
+      void this.recountReplies(campaign.storeIds, rows)
+        .catch((error) => this.logger.error(`Reply recount failed for campaign ${campaignId}: ${error.message}`))
+        .finally(() => this.replyRecounts.delete(campaignId));
+      return { checking: rows.length };
+    } catch (error) {
+      this.replyRecounts.delete(campaignId);
+      throw error;
+    }
+  }
+
+  private async recountReplies(storeIds: string[], rows: { id: string; phone: string; sentAt: Date; nextSentAt: Date | null }[]) {
+    if (!rows.length) return;
+    const since = rows.reduce((min, row) => Math.min(min, new Date(row.sentAt).getTime()), Infinity);
+    const messages = await this.conversationsService.findCustomerMessagesSince([...new Set(rows.map((row) => row.phone))], storeIds, since);
+    let counted = 0;
+    for (const row of rows) {
+      const from = new Date(row.sentAt).getTime();
+      const until = row.nextSentAt ? new Date(row.nextSentAt).getTime() : Infinity;
+      const reply = messages.get(row.phone)?.find((m) => m.at >= from && m.at < until);
+      if (!reply) continue;
+      await this.campaignsService.markReplied({ id: row.id, repliedAt: null, replyType: null }, new Date(reply.at), reply.type, reply.text);
+      counted += 1;
+    }
+    this.logger.log(`Reply recount: ${counted} of ${rows.length} recipients now counted as replied`);
   }
 
   private async resendFlowReplies(organizationId: string, targets: Awaited<ReturnType<ConversationsService['findPaymentFailedFlowReplies']>>['eligible']) {
