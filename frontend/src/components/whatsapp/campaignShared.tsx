@@ -105,7 +105,7 @@ export function Funnel({ stats }: { stats: CampaignStats }) {
     { label: 'قبلها واتساب', value: stats.accepted, note: pct(stats.accepted, stats.total) },
     { label: 'وصلت', value: stats.delivered, note: `${pct(stats.delivered, stats.accepted)} من المقبولة` },
     { label: 'قُرئت', value: stats.read, note: `${pct(stats.read, stats.delivered)} من الواصلة` },
-    { label: 'تفاعلوا بالرد', value: stats.replied, note: `${pct(stats.replied, stats.delivered)} من الواصلة` },
+    { label: 'تفاعلوا بالرد', value: stats.replied, note: `${pct(stats.replied, stats.read)} من القارئين` },
   ];
   return (
     <ul className="space-y-2" aria-label="مراحل وصول الحملة">

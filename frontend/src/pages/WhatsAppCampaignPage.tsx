@@ -272,7 +272,7 @@ export default function WhatsAppCampaignPage() {
         <Tile label="المستهدفون" value={num(stats.total)} note={`${num(campaign.sourceRecords)} سجل قبل التنقية`} />
         <Tile label="نسبة الوصول" value={pct(stats.delivered, stats.accepted)} note={`${num(stats.delivered)} وصلت`} />
         <Tile label="نسبة القراءة" value={pct(stats.read, stats.delivered)} note={`${num(stats.read)} قرأوا`} />
-        <Tile label="نسبة التفاعل" value={pct(stats.replied, stats.delivered)} note={`${num(stats.replied)} ردّوا · ${num(stats.clicked)} ضغطوا زرًا`} />
+        <Tile label="نسبة التفاعل" value={pct(stats.replied, stats.read)} note={`من القارئين · ${num(stats.replied)} ردّوا · ${num(stats.clicked)} ضغطوا زرًا`} />
         <Tile label="فشل" value={num(stats.failed)} note={stats.skipped ? `${num(stats.skipped)} لم تُرسل` : pct(stats.failed, stats.total)} tone={stats.failed ? 'warn' : undefined} />
       </div>
 
@@ -302,7 +302,7 @@ export default function WhatsAppCampaignPage() {
                         <td className="tabular-nums">{num(b.stats.total)}</td>
                         <td className="tabular-nums">{pct(b.stats.delivered, b.stats.accepted)}</td>
                         <td className="tabular-nums">{pct(b.stats.read, b.stats.delivered)}</td>
-                        <td className="tabular-nums">{pct(b.stats.replied, b.stats.delivered)} <span className="text-xs text-labbaik-text-muted">({num(b.stats.replied)})</span></td>
+                        <td className="tabular-nums">{pct(b.stats.replied, b.stats.read)} <span className="text-xs text-labbaik-text-muted">({num(b.stats.replied)})</span></td>
                         <td className="tabular-nums">{num(b.stats.failed)}</td>
                       </tr>
                     ))}

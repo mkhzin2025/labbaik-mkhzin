@@ -88,7 +88,7 @@ export default function CampaignsList({ templateId, onClearTemplate }: { templat
                 <th className="text-right font-bold px-2">المستلمون</th>
                 <th className="text-right font-bold px-2">وصلت</th>
                 <th className="text-right font-bold px-2">قُرئت</th>
-                <th className="text-right font-bold px-2">ردّوا</th>
+                <th className="text-right font-bold px-2" title="نسبة من قرأوا الرسالة ثم ردّوا">ردّوا <span className="font-medium">(من القارئين)</span></th>
                 <th className="text-right font-bold px-2">الحالة</th>
                 <th className="w-8" />
               </tr>
@@ -106,7 +106,7 @@ export default function CampaignsList({ templateId, onClearTemplate }: { templat
                     <td className="px-2 py-3 align-top tabular-nums font-bold text-neutral-900 dark:text-white">{num(c.stats.total)}</td>
                     <td className="px-2 py-3 align-top tabular-nums">{pct(c.stats.delivered, c.stats.accepted)}</td>
                     <td className="px-2 py-3 align-top tabular-nums">{pct(c.stats.read, c.stats.delivered)}</td>
-                    <td className="px-2 py-3 align-top tabular-nums">{pct(c.stats.replied, c.stats.delivered)}</td>
+                    <td className="px-2 py-3 align-top tabular-nums">{pct(c.stats.replied, c.stats.read)}</td>
                     <td className="px-2 py-3 align-top">
                       <CampaignStatusBadge status={c.status} />
                       {isActive(c.status) && (
