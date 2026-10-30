@@ -115,9 +115,22 @@ export default function WhatsAppCampaignPage() {
   // Replies that arrived after the old 72-hour tracking window; new replies are counted with no time limit.
   const recountReplies = async () => {
     setActing('replies');
+    const path = `/integrations/meta/whatsapp/campaigns/${id}/recount-replies`;
     try {
-      const { data } = await api.post<{ checking: number }>(`/integrations/meta/whatsapp/campaigns/${id}/recount-replies`);
-      showToast(`جارٍ فحص محادثات ${num(data.checking)} عميل؛ ستتحدث الأرقام خلال دقائق.`, 'success');
+      const { data } = await api.post<{ checking: number }>(path);
+      showToast(`جارٍ فحص محادثات ${num(data.checking)} عميل…`, 'info');
+      type Status = { running: boolean; result: { checked: number; counted: number; error?: string } | null };
+      let status: Status;
+      do {
+        await new Promise((resolve) => setTimeout(resolve, 4000));
+        status = (await api.get<Status>(path)).data;
+      } while (status.running);
+      const result = status.result;
+      if (result?.error) showToast(`تعذر احتساب الردود: ${result.error}`, 'error');
+      else if (result) {
+        showToast(result.counted ? `احتُسب ${num(result.counted)} رد جديد من ${num(result.checked)} عميل.` : `لا توجد ردود جديدة؛ كل من راسلنا بعد الحملة محسوب مسبقًا.`, result.counted ? 'success' : 'info');
+        await load();
+      }
     } catch (error) {
       showToast(errorMessage(error, 'تعذر احتساب الردود.'), 'error');
     } finally {

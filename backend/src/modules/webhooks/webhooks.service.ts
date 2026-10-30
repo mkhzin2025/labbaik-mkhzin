@@ -48,6 +48,8 @@ export class WebhooksService {
   /** Campaigns whose failed flow replies are being re-sent right now. */
   private readonly flowRetries = new Set<string>();
   private readonly replyRecounts = new Set<string>();
+  /** Outcome of each campaign's last reply recount, until the server restarts. */
+  private readonly replyRecountResults = new Map<string, { checked: number; counted: number; error?: string }>();
 
   constructor(
     private readonly eventsGateway: EventsGateway,
@@ -492,9 +494,14 @@ export class WebhooksService {
     if (this.replyRecounts.has(campaignId)) throw new BadRequestException('احتساب الردود جارٍ بالفعل لهذه الحملة.');
     this.replyRecounts.add(campaignId);
     try {
-      const { campaign, rows } = await this.campaignsService.unrepliedRecipientsForUser(userId, organizationId, campaignId);
-      void this.recountReplies(campaign.storeIds, rows)
-        .catch((error) => this.logger.error(`Reply recount failed for campaign ${campaignId}: ${error.message}`))
+      const { rows, organizationStoreIds } = await this.campaignsService.unrepliedRecipientsForUser(userId, organizationId, campaignId);
+      this.replyRecountResults.delete(campaignId);
+      void this.recountReplies(organizationStoreIds, rows)
+        .then((counted) => this.replyRecountResults.set(campaignId, { checked: rows.length, counted }))
+        .catch((error) => {
+          this.logger.error(`Reply recount failed for campaign ${campaignId}: ${error.message}`);
+          this.replyRecountResults.set(campaignId, { checked: rows.length, counted: 0, error: error.message });
+        })
         .finally(() => this.replyRecounts.delete(campaignId));
       return { checking: rows.length };
     } catch (error) {
@@ -503,8 +510,13 @@ export class WebhooksService {
     }
   }
 
+  async campaignReplyRecountStatus(userId: string, organizationId: string | undefined, campaignId: string) {
+    await this.campaignsService.findAccessibleForUser(userId, organizationId, campaignId);
+    return { running: this.replyRecounts.has(campaignId), result: this.replyRecountResults.get(campaignId) || null };
+  }
+
   private async recountReplies(storeIds: string[], rows: { id: string; phone: string; sentAt: Date; nextSentAt: Date | null }[]) {
-    if (!rows.length) return;
+    if (!rows.length) return 0;
     const since = rows.reduce((min, row) => Math.min(min, new Date(row.sentAt).getTime()), Infinity);
     const messages = await this.conversationsService.findCustomerMessagesSince([...new Set(rows.map((row) => row.phone))], storeIds, since);
     let counted = 0;
@@ -517,6 +529,7 @@ export class WebhooksService {
       counted += 1;
     }
     this.logger.log(`Reply recount: ${counted} of ${rows.length} recipients now counted as replied`);
+    return counted;
   }
 
   private async resendFlowReplies(organizationId: string, targets: Awaited<ReturnType<ConversationsService['findPaymentFailedFlowReplies']>>['eligible']) {

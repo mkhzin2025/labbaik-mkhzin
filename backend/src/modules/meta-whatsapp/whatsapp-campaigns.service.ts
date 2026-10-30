@@ -796,7 +796,13 @@ export class WhatsAppCampaignsService implements OnApplicationBootstrap, OnModul
         WHERE r."campaignId" = $1 AND r."repliedAt" IS NULL AND r.status <> 'failed' AND r."sentAt" IS NOT NULL`,
       [id],
     );
-    return { campaign, rows };
+    // Replies land in the branch that owns the sending number's channel, which may not be one the campaign targeted.
+    const stores: { id: string }[] = await this.recipientRepository.query('SELECT id FROM stores WHERE "organizationId" = $1', [campaign.organizationId]);
+    return { campaign, rows, organizationStoreIds: stores.map((store) => store.id) };
+  }
+
+  async findAccessibleForUser(userId: string, organizationId: string | undefined, id: string) {
+    return this.findAccessible(userId, organizationId, id);
   }
 
   private async findAccessible(userId: string, organizationId: string | undefined, id: string) {
