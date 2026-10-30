@@ -575,13 +575,15 @@ export class WhatsAppCampaignsService implements OnApplicationBootstrap, OnModul
   // Read side
   // ---------------------------------------------------------------------------
 
-  async listForUser(userId: string, organizationId: string | undefined, query: { page: number; limit: number; templateId?: string; status?: string; search?: string }) {
+  async listForUser(userId: string, organizationId: string | undefined, query: { page: number; limit: number; templateId?: string; status?: string; search?: string; from?: Date; to?: Date }) {
     const { organization, storeIds } = await this.accessibleStores(userId, organizationId);
     const builder = this.campaignRepository.createQueryBuilder('campaign')
       .where('campaign.organizationId = :organizationId', { organizationId: organization.id })
       .andWhere('EXISTS (SELECT 1 FROM jsonb_array_elements_text(campaign."storeIds") s WHERE s = ANY(CAST(:storeIds AS text[])))', { storeIds });
     if (query.templateId) builder.andWhere('campaign.templateId = :templateId', { templateId: query.templateId });
     if (query.status) builder.andWhere('campaign.status = :status', { status: query.status });
+    if (query.from) builder.andWhere('campaign.createdAt >= :from', { from: query.from });
+    if (query.to) builder.andWhere('campaign.createdAt < :to', { to: query.to });
     if (query.search?.trim()) {
       builder.andWhere('(campaign.name ILIKE :search OR campaign.templateName ILIKE :search)', { search: `%${query.search.trim()}%` });
     }

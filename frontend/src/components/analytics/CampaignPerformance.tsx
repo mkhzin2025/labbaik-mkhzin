@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronLeft, Loader2, Megaphone } from 'lucide-react';
+import { ChevronLeft, FileDown, Loader2, Megaphone } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import api from '../../api/client';
 import { ActivityChart, CampaignStatusBadge, type ActivityPoint, type CampaignStats, type CampaignStatus } from '../whatsapp/campaignShared';
 import { dateTime, num, pct } from '../whatsapp/campaignFormat';
 import { CATEGORY_LABELS } from '../whatsapp/templateUtils';
+import CampaignReportDialog from './CampaignReportDialog';
 
 type TemplateRow = {
   key: string; templateId: string | null; templateName: string; templateLanguage: string; templateCategory: string | null;
@@ -27,6 +28,7 @@ export default function CampaignPerformance({ days, storeId }: { days: number; s
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
   const [selectedKey, setSelectedKey] = useState('');
+  const [exporting, setExporting] = useState(false);
 
   const request = useRef(0);
 
@@ -69,9 +71,16 @@ export default function CampaignPerformance({ days, storeId }: { days: number; s
   }, [report, selectedKey]);
 
   const header = (
-    <div className="mb-3">
-      <h2 className="font-black text-neutral-900 dark:text-white">أداء حملات واتساب</h2>
-      <p className="text-xs text-labbaik-text-muted">لكل قالب: كم وصل، وكم قُرئ، وكم تفاعل الجمهور معه، للحملات المرسلة في آخر {days} يوم.</p>
+    <div className="mb-3 flex items-start justify-between gap-3">
+      <div>
+        <h2 className="font-black text-neutral-900 dark:text-white">أداء حملات واتساب</h2>
+        <p className="text-xs text-labbaik-text-muted">لكل قالب: كم وصل، وكم قُرئ، وكم تفاعل الجمهور معه، للحملات المرسلة في آخر {days} يوم.</p>
+      </div>
+      <button type="button" onClick={() => setExporting(true)}
+        className="inline-flex shrink-0 items-center gap-1.5 h-9 px-3 rounded-lg border border-labbaik-border text-sm font-bold text-neutral-800 dark:text-neutral-100 hover:border-labbaik-blue/40 hover:text-labbaik-blue cursor-pointer">
+        <FileDown size={15} /> تصدير PDF
+      </button>
+      {exporting && <CampaignReportDialog days={days} onClose={() => setExporting(false)} />}
     </div>
   );
 

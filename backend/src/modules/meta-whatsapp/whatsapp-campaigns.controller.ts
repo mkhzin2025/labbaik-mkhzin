@@ -28,8 +28,11 @@ export class WhatsAppCampaignsController {
     @Query('templateId') templateId?: string,
     @Query('status') status?: string,
     @Query('search') search?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
   ) {
-    return this.campaigns.listForUser(req.user.id, req.user.organizationId, { ...pageOf(page, limit, 50), templateId, status, search });
+    const date = (value?: string) => (value && !Number.isNaN(Date.parse(value)) ? new Date(value) : undefined);
+    return this.campaigns.listForUser(req.user.id, req.user.organizationId, { ...pageOf(page, limit, 50), templateId, status, search, from: date(from), to: date(to) });
   }
 
   /** Per-template campaign performance for the reports page. */
