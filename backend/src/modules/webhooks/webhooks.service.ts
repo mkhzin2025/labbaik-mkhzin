@@ -297,6 +297,19 @@ export class WebhooksService {
     await this.customersService.updateProfileName(customer, profileName, normalized.from);
     const customerName = this.customersService.isPlaceholderName(customer.fullName, normalized.from) ? profileName : customer.fullName;
 
+    // A tap on the rating message sent at closing: record it and stop. It is not a new request, so it does not
+    // reopen the conversation, run flows or the AI, or count as a campaign reply.
+    const rating = ConversationsService.ratingFromReply(normalized.metadata?.reply?.id);
+    if (rating) {
+      const ratingMessage = {
+        from: normalized.from, text: normalized.text, type: normalized.type, timestamp: normalized.timestamp,
+        attachments: normalized.attachments, metadata: { ...normalized.metadata, rating }, customerId: customer.id, customerName,
+      };
+      await this.conversationsService.recordRating(normalized.from, storeId, rating, ratingMessage);
+      this.eventsGateway.server.to(`store_${storeId}`).emit('new_message', { ...ratingMessage, platform: 'whatsapp', storeId });
+      return;
+    }
+
     const analysisText = normalized.text || `[${normalized.type}]`;
     const [sentiment, tags] = await Promise.all([
       this.aiService.analyzeSentiment(analysisText),

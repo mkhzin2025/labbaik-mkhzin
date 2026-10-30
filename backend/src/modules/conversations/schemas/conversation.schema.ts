@@ -4,6 +4,9 @@ import { Document, Types } from 'mongoose';
 export const CONVERSATION_STATUSES = ['open', 'pending', 'snoozed', 'closed'] as const;
 export type ConversationStatus = (typeof CONVERSATION_STATUSES)[number];
 
+export const CONVERSATION_RATINGS = ['positive', 'neutral', 'negative'] as const;
+export type ConversationRating = (typeof CONVERSATION_RATINGS)[number];
+
 @Schema({ timestamps: true })
 export class Message extends Document {
   @Prop({ required: true })
@@ -81,6 +84,16 @@ export class Conversation extends Document {
   @Prop({ default: 'neutral' })
   lastSentiment: string;
 
+  // The customer's answer to the rating message sent when the team closes the conversation.
+  @Prop({ type: String, enum: [...CONVERSATION_RATINGS, null], default: null })
+  rating: ConversationRating | null;
+
+  @Prop({ type: Date, default: null })
+  ratedAt: Date | null;
+
+  @Prop({ type: Date, default: null })
+  ratingRequestedAt: Date | null;
+
   @Prop({ type: [String], default: [] })
   tags: string[];
 
@@ -114,3 +127,5 @@ ConversationSchema.index({ customerPhone: 1, storeId: 1, platform: 1, lastMessag
 // Webhook dedupe and delivery-status updates (sent/delivered/read) match by message id.
 ConversationSchema.index({ 'messages.metadata.whatsappMessageId': 1 }, { sparse: true });
 ConversationSchema.index({ storeId: 1, status: 1, lastMessageAt: -1, _id: -1 });
+// Inbox filter by the customer's rating.
+ConversationSchema.index({ storeId: 1, rating: 1, lastMessageAt: -1 });

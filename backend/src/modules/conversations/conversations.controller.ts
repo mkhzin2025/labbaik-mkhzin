@@ -10,8 +10,8 @@ import { OrganizationsService } from '../organizations/organizations.service';
 import { CustomersService } from '../customers/customers.service';
 import { IsIn, IsInt, IsISO8601, IsOptional, IsString, IsUUID, Max, MaxLength, Min } from 'class-validator';
 import { Type } from 'class-transformer';
-import { CONVERSATION_STATUSES } from './schemas/conversation.schema';
-import type { ConversationStatus } from './schemas/conversation.schema';
+import { CONVERSATION_RATINGS, CONVERSATION_STATUSES } from './schemas/conversation.schema';
+import type { ConversationRating, ConversationStatus } from './schemas/conversation.schema';
 import type { InboxFilters, InboxTab, InboxView } from './conversations.service';
 import { Access } from '../organizations/access';
 
@@ -36,6 +36,9 @@ export class InboxFilterQueryDto {
 
   @IsOptional() @IsString() @MaxLength(100)
   search?: string;
+
+  @IsOptional() @IsIn(CONVERSATION_RATINGS as unknown as string[])
+  rating?: ConversationRating;
 }
 
 export class InboxPageQueryDto extends InboxFilterQueryDto {
@@ -183,7 +186,7 @@ export class ConversationsController {
   }
 
   private toFilters(query: InboxFilterQueryDto): InboxFilters {
-    return { view: query.view, tab: query.tab, platform: query.platform, tag: query.tag, search: query.search };
+    return { view: query.view, tab: query.tab, platform: query.platform, tag: query.tag, search: query.search, rating: query.rating };
   }
 
   // scope=organization covers every branch the user can access, narrowed to `storeId` when given.

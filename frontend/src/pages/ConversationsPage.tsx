@@ -91,8 +91,17 @@ interface Conversation {
   unreadCount?: number;
   aiEnabled?: boolean;
   lastSentiment?: string;
+  // The customer's answer to the rating message sent when the conversation was closed.
+  rating?: Rating | null;
   tags?: string[];
 }
+
+type Rating = 'positive' | 'neutral' | 'negative';
+const RATINGS: { id: Rating; label: string; emoji: string; cls: string }[] = [
+  { id: 'positive', label: 'راضٍ', emoji: '👍', cls: 'bg-emerald-500/15 text-emerald-800 dark:text-emerald-300' },
+  { id: 'neutral', label: 'عادي', emoji: '😐', cls: 'bg-labbaik-page text-neutral-700 dark:text-neutral-200' },
+  { id: 'negative', label: 'غير راضٍ', emoji: '👎', cls: 'bg-red-500/15 text-red-800 dark:text-red-300' },
+];
 
 interface CustomerLabel { id: string; name: string; color: string }
 
@@ -432,6 +441,7 @@ export default function ConversationsPage() {
     return () => window.clearInterval(timer);
   }, []);
   const [selectedPlatform, setSelectedPlatform] = useState<string | null>(null);
+  const [selectedRating, setSelectedRating] = useState<Rating | null>(null);
   const [selectedStoreId, setSelectedStoreId] = useState<string>('all');
   const [stores, setStores] = useState<Array<{ id: string; name: string }>>([]);
   
@@ -480,9 +490,10 @@ export default function ConversationsPage() {
     tab: listTab,
     platform: selectedPlatform || undefined,
     tag: selectedTag || undefined,
+    rating: selectedRating || undefined,
     storeId: selectedStoreId === 'all' ? undefined : selectedStoreId,
     search: debouncedSearch || undefined,
-  }), [statusView, listTab, selectedPlatform, selectedTag, selectedStoreId, debouncedSearch]);
+  }), [statusView, listTab, selectedPlatform, selectedTag, selectedRating, selectedStoreId, debouncedSearch]);
   const listParamsRef = useRef(listParams);
   listParamsRef.current = listParams;
   
@@ -798,8 +809,9 @@ export default function ConversationsPage() {
 
     const isTarget = (c: Conversation | null) => Boolean(c) && c!.customerPhone === targetPhone && (!targetStoreId || c!.storeId === targetStoreId);
     const isCurrentlyOpen = isTarget(selectedChatRef.current);
-    // Mirrors the server: a customer message reopens a snoozed/closed conversation.
-    const reopen = !isOwnOrSystem ? { status: 'open', snoozedUntil: null } : {};
+    // Mirrors the server: a customer message reopens a snoozed/closed conversation, except a tap on the closing rating message.
+    const ratingTap = (payload.metadata?.rating || null) as Rating | null;
+    const reopen = !isOwnOrSystem && !ratingTap ? { status: 'open', snoozedUntil: null } : {};
 
     // Only rows already loaded are patched; a conversation outside the loaded pages comes back
     // through a first-page refetch, so it shows up only if it matches the current filters.
@@ -818,8 +830,9 @@ export default function ConversationsPage() {
           customerName: current.customerName || payload.customerName,
           tags: Array.from(new Set([...(current.tags || []), ...(payload.tags || [])])),
           messages: [newMessage],
-          awaitingReply: isCustomerMessage(newMessage),
-          unreadCount: (!isOwnOrSystem && !isCurrentlyOpen) ? (current.unreadCount || 0) + 1 : (current.unreadCount || 0),
+          awaitingReply: !ratingTap && isCustomerMessage(newMessage),
+          unreadCount: (!isOwnOrSystem && !ratingTap && !isCurrentlyOpen) ? (current.unreadCount || 0) + 1 : (current.unreadCount || 0),
+          ...(ratingTap ? { rating: ratingTap, lastSentiment: ratingTap } : {}),
           ...reopen,
         };
         return [updatedConv, ...prev.slice(0, idx), ...prev.slice(idx + 1)];
@@ -988,6 +1001,7 @@ export default function ConversationsPage() {
     viewOf(c) === statusView
     && (!selectedTag || Boolean(c.tags?.includes(selectedTag)))
     && (!selectedPlatform || c.platform === selectedPlatform)
+    && (!selectedRating || c.rating === selectedRating)
     && (selectedStoreId === 'all' || c.storeId === selectedStoreId)
     && (listTab !== 'unread' || Number(c.unreadCount) > 0)
     && (listTab !== 'needs_reply' || needsReply(c)));
@@ -997,7 +1011,7 @@ export default function ConversationsPage() {
 
   const allTags = Array.from(new Set([...defaultTags, ...customTags]));
 
-  const hasActiveFilters = Boolean(selectedTag || selectedPlatform || selectedStoreId !== 'all');
+  const hasActiveFilters = Boolean(selectedTag || selectedPlatform || selectedRating || selectedStoreId !== 'all');
   const aiOn = selectedChat?.aiEnabled !== false;
   const filterOption = (active: boolean) =>
     `w-full flex items-center justify-between gap-2 h-9 px-3 rounded-lg text-sm font-bold transition-colors cursor-pointer ${active ? 'bg-labbaik-blue text-labbaik-on-accent' : 'text-neutral-700 dark:text-neutral-200 hover:bg-labbaik-blue/10'}`;
@@ -1030,7 +1044,7 @@ export default function ConversationsPage() {
                   <div className="px-4 py-3 border-b border-labbaik-border flex justify-between items-center">
                     <span className="text-sm font-black text-neutral-800 dark:text-neutral-100">تصفية النتائج</span>
                     {hasActiveFilters && (
-                      <button type="button" onClick={() => { setSelectedTag(null); setSelectedPlatform(null); setSelectedStoreId('all'); setShowFilterDropdown(false); }} className="text-xs font-black text-labbaik-blue dark:text-purple-300 hover:underline cursor-pointer">مسح الكل</button>
+                      <button type="button" onClick={() => { setSelectedTag(null); setSelectedPlatform(null); setSelectedRating(null); setSelectedStoreId('all'); setShowFilterDropdown(false); }} className="text-xs font-black text-labbaik-blue dark:text-purple-300 hover:underline cursor-pointer">مسح الكل</button>
                     )}
                   </div>
                   <div className="max-h-[400px] overflow-y-auto custom-scrollbar p-3 space-y-4">
@@ -1041,6 +1055,17 @@ export default function ConversationsPage() {
                           <button type="button" key={p.id} onClick={() => setSelectedPlatform(selectedPlatform === p.id ? null : p.id)} aria-pressed={selectedPlatform === p.id} className={filterOption(selectedPlatform === p.id)}>
                             <span className="flex items-center gap-2">{p.icon} {p.name}</span>
                             {selectedPlatform === p.id && <Check size={14} />}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <span className={filterHeading}><Smile size={13} /> تقييم العميل</span>
+                      <div className="space-y-0.5">
+                        {RATINGS.map(r => (
+                          <button type="button" key={r.id} onClick={() => setSelectedRating(selectedRating === r.id ? null : r.id)} aria-pressed={selectedRating === r.id} className={filterOption(selectedRating === r.id)}>
+                            <span className="flex items-center gap-2"><span aria-hidden>{r.emoji}</span> {r.label}</span>
+                            {selectedRating === r.id && <Check size={14} />}
                           </button>
                         ))}
                       </div>
@@ -1185,7 +1210,12 @@ export default function ConversationsPage() {
                           {formatWait(lastMsg?.timestamp || conv.lastMessageAt, now)}
                         </span>
                       )}
-                      {conv.lastSentiment === 'negative' && <span title="عميل منزعج" className="text-red-600 dark:text-red-400"><Frown size={14} /></span>}
+                      {(() => {
+                        const r = RATINGS.find((item) => item.id === conv.rating);
+                        return r
+                          ? <span title={`تقييم العميل: ${r.label}`} className={`inline-flex items-center h-5 px-1.5 rounded-md text-[11px] font-black ${r.cls}`}>{r.emoji} {r.label}</span>
+                          : conv.lastSentiment === 'negative' && <span title="عميل منزعج" className="text-red-600 dark:text-red-400"><Frown size={14} /></span>;
+                      })()}
                       {conv.aiEnabled === false && <span title="الرد الآلي متوقف" className="text-amber-600 dark:text-amber-400"><Bot size={14} /></span>}
                       {unread && <span className="min-w-5 h-5 px-1.5 rounded-full bg-labbaik-blue text-labbaik-on-accent text-[11px] font-black flex items-center justify-center tabular-nums">{Number(conv.unreadCount) > 99 ? '99+' : conv.unreadCount}</span>}
                     </div>

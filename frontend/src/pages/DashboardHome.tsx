@@ -134,7 +134,9 @@ interface DashboardStats {
   avgHumanSpeed: number;
   aiSpeed: number;
   platformStats: { name: string; value: number }[];
-  sentimentStats: { name: string; value: number; color: string }[];
+  // Customers' answers to the rating message sent when a conversation is closed.
+  sentimentStats: { key: 'positive' | 'neutral' | 'negative'; name: string; value: number; color: string }[];
+  unratedConversations?: number;
   timelineData: { date: string; messages: number }[];
 }
 
@@ -391,8 +393,16 @@ export default function DashboardHome() {
               </ResponsiveContainer>
               {/* Center Summary */}
               <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                <span className="text-2xl font-bold text-neutral-900 dark:text-white">{toEnglishDigits(stats?.sentimentStats?.find(s => s.name === 'إيجابي')?.value || 0)}</span>
-                <span className="text-xs text-neutral-500 dark:text-neutral-400 font-medium uppercase mt-1">راضون جداً</span>
+                {(() => {
+                  const rated = (stats?.sentimentStats || []).reduce((sum, s) => sum + s.value, 0);
+                  const satisfied = stats?.sentimentStats?.find(s => s.key === 'positive')?.value || 0;
+                  return (
+                    <>
+                      <span className="text-2xl font-bold text-neutral-900 dark:text-white">{rated ? `${toEnglishDigits(Math.round((satisfied / rated) * 100))}%` : '—'}</span>
+                      <span className="text-xs text-neutral-500 dark:text-neutral-400 font-medium mt-1">{rated ? 'راضون' : 'لا تقييمات بعد'}</span>
+                    </>
+                  );
+                })()}
               </div>
             </div>
             <div className="space-y-3">
@@ -405,6 +415,9 @@ export default function DashboardHome() {
                   <span className="text-sm font-bold text-neutral-900 dark:text-white">{toEnglishDigits(s.value)} عميل</span>
                 </div>
               ))}
+              <p className="pt-1 text-xs text-neutral-500 dark:text-neutral-400">
+                من تقييم العملاء بعد إغلاق المحادثة{stats?.unratedConversations ? ` · ${toEnglishDigits(stats.unratedConversations)} محادثة بلا تقييم` : ''}
+              </p>
             </div>
           </CardBody>
         </Card>

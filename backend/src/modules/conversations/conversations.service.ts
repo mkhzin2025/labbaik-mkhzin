@@ -1,7 +1,7 @@
 import { Injectable, Logger, NotFoundException, InternalServerErrorException, OnModuleInit, BadRequestException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
-import { Conversation, ConversationStatus } from './schemas/conversation.schema';
+import { CONVERSATION_RATINGS, Conversation, ConversationRating, ConversationStatus } from './schemas/conversation.schema';
 import { MessagingService } from '../channels/messaging.service';
 import { ChannelsService } from '../channels/channels.service';
 import { CustomersService } from '../customers/customers.service';
@@ -18,7 +18,19 @@ export interface InboxFilters {
   platform?: string;
   tag?: string;
   search?: string;
+  rating?: ConversationRating;
 }
+
+/** Sent when the team closes a WhatsApp conversation; the reply button ids carry the rating. */
+const RATING_PROMPT = 'قيّم تجربتك معنا 🙏';
+const RATING_REPLY_PREFIX = 'rating:';
+const RATING_OPTIONS: { value: ConversationRating; label: string }[] = [
+  { value: 'positive', label: 'راضٍ 👍' },
+  { value: 'neutral', label: 'عادي 😐' },
+  { value: 'negative', label: 'غير راضٍ 👎' },
+];
+/** Free-form (non-template) messages reach a customer only within 24h of their last message; keep a margin. */
+const RATING_WINDOW_MS = 23.5 * 3600 * 1000;
 
 const INBOX_PAGE_DEFAULT = 30;
 const INBOX_PAGE_MAX = 100;
@@ -249,7 +261,12 @@ export class ConversationsService implements OnModuleInit {
       snoozedUntil: status === 'snoozed' ? snoozedUntil : null,
     };
     if (status === 'closed') update.unreadCount = 0;
-    const conversation = await this.conversationModel.findByIdAndUpdate(id, { $set: update }, { returnDocument: 'after' }).lean().exec();
+    const before = await this.conversationModel.findByIdAndUpdate(id, { $set: update }, { returnDocument: 'before', projection: { status: 1, platform: 1 } }).lean().exec();
+    if (!before) throw new NotFoundException('Conversation not found');
+    if (status === 'closed' && before.status !== 'closed' && before.platform === 'whatsapp') {
+      void this.sendRatingRequest(id).catch((error) => this.logger.warn(`Rating request for ${id} failed: ${error?.message}`));
+    }
+    const conversation = await this.conversationModel.findById(id, { storeId: 1, status: 1, snoozedUntil: 1 }).lean().exec();
     if (!conversation) throw new NotFoundException('Conversation not found');
     this.eventsGateway.server.to(`store_${conversation.storeId}`).emit('conversation_status', {
       conversationId: String(conversation._id),
@@ -394,6 +411,7 @@ export class ConversationsService implements OnModuleInit {
     const query: Record<string, any> = { storeId: storeIds.length === 1 ? storeIds[0] : { $in: storeIds } };
     if (filters.platform) query.platform = filters.platform;
     if (filters.tag) query.tags = filters.tag;
+    if (filters.rating) query.rating = filters.rating;
     if (filters.view === 'active') query.status = { $nin: ['snoozed', 'closed'] };
     else if (filters.view) query.status = filters.view;
     if (filters.tab === 'unread') query.unreadCount = { $gt: 0 };
@@ -587,6 +605,7 @@ export class ConversationsService implements OnModuleInit {
     let humanResponseCount = 0;
     const platformCount: any = { whatsapp: 0, instagram: 0, facebook: 0, google_maps: 0 };
     const sentiments: any = { positive: 0, neutral: 0, negative: 0 };
+    let unrated = 0;
 
     const last7Days: string[] = [];
     const timelineData: any = {};
@@ -618,8 +637,9 @@ export class ConversationsService implements OnModuleInit {
         if (timelineData.hasOwnProperty(mDate)) timelineData[mDate]++;
       }
       if (platformCount.hasOwnProperty(conv.platform)) platformCount[conv.platform]++;
-      const sent = conv.lastSentiment || 'neutral';
-      if (sentiments.hasOwnProperty(sent)) sentiments[sent]++;
+      // Satisfaction comes from the customers' own ratings, not from guessing at their messages.
+      if (conv.rating && sentiments.hasOwnProperty(conv.rating)) sentiments[conv.rating]++;
+      else unrated++;
     });
 
     const wordsPerMinute = 40;
@@ -637,10 +657,11 @@ export class ConversationsService implements OnModuleInit {
       aiSpeed: 0.05,
       platformStats: Object.entries(platformCount).map(([name, value]) => ({ name, value })),
       sentimentStats: [
-        { name: 'إيجابي', value: sentiments.positive, color: '#22c55e' },
-        { name: 'محايد', value: sentiments.neutral, color: '#94a3b8' },
-        { name: 'سلبي', value: sentiments.negative, color: '#ef4444' }
+        { key: 'positive', name: 'راضٍ', value: sentiments.positive, color: '#22c55e' },
+        { key: 'neutral', name: 'عادي', value: sentiments.neutral, color: '#94a3b8' },
+        { key: 'negative', name: 'غير راضٍ', value: sentiments.negative, color: '#ef4444' }
       ],
+      unratedConversations: unrated,
       timelineData: last7Days.map(date => ({ date: date.split('-').slice(1).join('/'), messages: timelineData[date] }))
     };
   }
@@ -738,6 +759,107 @@ export class ConversationsService implements OnModuleInit {
 
   async updateTags(conversationId: string, tags: string[]) {
     return this.conversationModel.findByIdAndUpdate(conversationId, { tags: Array.from(new Set(tags)) }, { returnDocument: 'after' });
+  }
+
+  /**
+   * Asks the customer to rate the conversation, as WhatsApp reply buttons, once the team closes it.
+   * Skipped when the 24h window for free-form messages has passed, or when the customer was already asked
+   * since they last wrote (a conversation closed, reopened by the team and closed again).
+   */
+  async sendRatingRequest(conversationId: string) {
+    const conversation = await this.conversationModel
+      .findById(conversationId, { storeId: 1, platform: 1, customerPhone: 1, metaConnectionId: 1, messages: { $slice: -50 } })
+      .lean().exec();
+    if (!conversation || conversation.platform !== 'whatsapp') return;
+    const lastCustomerAt = Math.max(0, ...(conversation.messages || [])
+      .filter((m: any) => ConversationsService.isCustomerMessage(m))
+      .map((m: any) => (typeof m.timestamp === 'number' ? m.timestamp : new Date(m.timestamp).getTime()) || 0));
+    if (!lastCustomerAt || Date.now() - lastCustomerAt > RATING_WINDOW_MS) return;
+
+    // Claimed atomically so closing twice in quick succession sends one request.
+    const claimed = await this.conversationModel.findOneAndUpdate(
+      { _id: conversationId, $or: [{ ratingRequestedAt: null }, { ratingRequestedAt: { $lt: new Date(lastCustomerAt) } }] },
+      { $set: { ratingRequestedAt: new Date() } },
+      // The previous value comes back, to restore it if the send fails.
+      { returnDocument: 'before', projection: { _id: 1, ratingRequestedAt: 1 } },
+    ).lean().exec();
+    if (!claimed) return;
+
+    const { storeId, customerPhone } = conversation;
+    const channels = await this.channelsService.findAllByStore(storeId, { maskCredentials: false });
+    const channel = channels.find((c) => c.type === 'whatsapp' && (!conversation.metaConnectionId || c.credentials?.metaConnectionId === conversation.metaConnectionId))
+      || channels.find((c) => c.type === 'whatsapp');
+    if (!channel) return;
+
+    const walletCharge = await this.billingService.chargeMetaUsageForStore(storeId, MetaUsageType.INTERACTIVE, {
+      referenceId: conversationId,
+      source: 'rating_request',
+    });
+    let providerResponse: any;
+    try {
+      providerResponse = await this.messagingService.sendWhatsAppPayload(channel.credentials!.phoneNumberId, channel.credentials!.accessToken, customerPhone, {
+        type: 'interactive',
+        interactive: {
+          type: 'button',
+          body: { text: RATING_PROMPT },
+          action: { buttons: RATING_OPTIONS.map((o) => ({ type: 'reply', reply: { id: `${RATING_REPLY_PREFIX}${o.value}`, title: o.label } })) },
+        },
+      });
+    } catch (error) {
+      if (walletCharge) await this.billingService.refundMetaUsage(walletCharge.id, 'Rating request send failed');
+      await this.conversationModel.updateOne({ _id: conversationId }, { $set: { ratingRequestedAt: claimed.ratingRequestedAt ?? null } });
+      await this.addSystemError(customerPhone, storeId, 'whatsapp', `لم تُرسل رسالة التقييم. ${this.getSendErrorText(error)}`, error);
+      return;
+    }
+
+    const whatsappMessageId = providerResponse?.messages?.[0]?.id || providerResponse?.message_id;
+    const messageData = {
+      from: 'me',
+      text: `${RATING_PROMPT}\n${RATING_OPTIONS.map((o) => `[${o.label}]`).join(' ')}`,
+      type: 'text',
+      isManual: false,
+      timestamp: Date.now(),
+      metadata: {
+        source: 'rating_request',
+        ...(whatsappMessageId ? { whatsappMessageId, status: 'accepted', walletTransactionId: walletCharge?.id || null, metaConnectionId: channel.credentials?.metaConnectionId || conversation.metaConnectionId || null } : {}),
+      },
+    };
+    await this.addMessage(customerPhone, storeId, 'whatsapp', messageData);
+    this.eventsGateway.server.to(`store_${storeId}`).emit('new_message', { ...messageData, customerPhone, platform: 'whatsapp', storeId });
+  }
+
+  /** The rating a tapped reply button stands for, or null when the tap was not on a rating message. */
+  static ratingFromReply(replyId?: string | null): ConversationRating | null {
+    if (!replyId?.startsWith(RATING_REPLY_PREFIX)) return null;
+    const value = replyId.slice(RATING_REPLY_PREFIX.length);
+    return (CONVERSATION_RATINGS as readonly string[]).includes(value) ? value as ConversationRating : null;
+  }
+
+  /**
+   * Stores the customer's rating tap. Unlike other customer messages it does not reopen the conversation
+   * or wait for a reply: the team closed it, and a rating is the customer's last word.
+   */
+  async recordRating(customerPhone: string, storeId: string, rating: ConversationRating, messageData: any) {
+    customerPhone = this.normalizeCustomerPhone(customerPhone, 'whatsapp');
+    const { customerName, ...message } = messageData;
+    const at = new Date(message.timestamp || Date.now());
+    const conversation = await this.conversationModel.findOneAndUpdate(
+      { customerPhone, storeId, platform: 'whatsapp' },
+      {
+        $push: { messages: message },
+        $set: {
+          lastMessage: message.text, lastMessageAt: new Date(), awaitingReply: false,
+          rating, ratedAt: at, lastSentiment: rating,
+          ...(customerName ? { customerName } : {}),
+          ...(message.customerId ? { customerId: message.customerId } : {}),
+        },
+      },
+      { returnDocument: 'after', sort: { lastMessageAt: -1 }, projection: { _id: 1, status: 1 } },
+    ).lean().exec();
+    if (conversation) {
+      this.eventsGateway.server.to(`store_${storeId}`).emit('conversation_rating', { conversationId: String(conversation._id), rating, ratedAt: at });
+    }
+    return conversation;
   }
 
   async sendMessage(conversationId: string, storeId: string, text: string) {
