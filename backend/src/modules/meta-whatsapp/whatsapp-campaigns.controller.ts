@@ -1,4 +1,6 @@
-import { Controller, Get, Param, ParseUUIDPipe, Post, Query, Request, UseGuards } from '@nestjs/common';
+import { BadRequestException, Controller, Get, Param, ParseUUIDPipe, Post, Query, Request, Res, UseGuards } from '@nestjs/common';
+import { isUUID } from 'class-validator';
+import type { Response } from 'express';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { WhatsAppCampaignsService } from './whatsapp-campaigns.service';
@@ -41,6 +43,24 @@ export class WhatsAppCampaignsController {
     const period = [7, 30, 90].includes(Number(days)) ? Number(days) : 30;
     const offset = Math.max(-840, Math.min(840, Number.parseInt(tz || '0', 10) || 0));
     return this.campaigns.reportForUser(req.user.id, req.user.organizationId, { days: period, storeId: storeId || undefined, tzOffsetMinutes: offset });
+  }
+
+  /** PDF report of the chosen campaigns; `from`/`to` (yyyy-mm-dd) only label the period on the report. */
+  @Get('report/pdf')
+  async reportPdf(
+    @Request() req: any,
+    @Res() response: Response,
+    @Query('ids') ids?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('tz') tz?: string,
+  ) {
+    const list = [...new Set((ids || '').split(',').map((id) => id.trim()).filter(Boolean))];
+    const day = /^\d{4}-\d{2}-\d{2}$/;
+    if (!list.length || list.length > 100 || list.some((id) => !isUUID(id))) throw new BadRequestException('اختر من 1 إلى 100 حملة.');
+    if (!from || !to || !day.test(from) || !day.test(to)) throw new BadRequestException('حدد فترة التقرير.');
+    const offset = Math.max(-840, Math.min(840, Number.parseInt(tz || '0', 10) || 0));
+    await this.campaigns.writeReportPdfForUser(req.user.id, req.user.organizationId, { ids: list, from, to, tzOffsetMinutes: offset }, response);
   }
 
   @Get(':id')

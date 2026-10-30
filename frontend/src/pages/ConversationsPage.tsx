@@ -1,4 +1,5 @@
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { io, Socket } from 'socket.io-client';
 import CustomerAvatar from '../components/CustomerAvatar';
 import VoiceNotePlayer from '../components/VoiceNotePlayer';
@@ -371,7 +372,7 @@ function SecureAttachment({ attachment, mine = false }: { attachment: Attachment
   }
 
   if (attachment.type === 'image' || attachment.type === 'sticker') {
-    return <img src={objectUrl} alt={attachment.caption || attachment.originalFilename || 'مرفق واتساب'} className="mt-2 max-h-80 rounded-xl object-contain" />;
+    return <ZoomableImage src={objectUrl} alt={attachment.caption || attachment.originalFilename || 'مرفق واتساب'} filename={attachment.originalFilename || attachment.filename} />;
   }
 
   if (attachment.type === 'video') {
@@ -391,9 +392,39 @@ function SecureAttachment({ attachment, mine = false }: { attachment: Attachment
   );
 }
 
-// Voice notes arrive with text "[audio]"; the player already says what it is.
+/** A chat image that opens full size over the page; Escape, the backdrop or the close button dismiss it. */
+function ZoomableImage({ src, alt, filename }: { src: string; alt: string; filename?: string }) {
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open]);
+
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)} aria-label="عرض الصورة بحجم أكبر" className="mt-2 block cursor-zoom-in">
+        <img src={src} alt={alt} className="max-h-80 rounded-xl object-contain" />
+      </button>
+      {open && createPortal(
+        <div role="dialog" aria-modal="true" aria-label={alt} onClick={() => setOpen(false)} className="fixed inset-0 z-[1000] grid place-items-center bg-black/85 p-4 cursor-zoom-out">
+          <img src={src} alt={alt} onClick={(e) => e.stopPropagation()} className="max-h-[92vh] max-w-[92vw] rounded-lg object-contain shadow-2xl cursor-default" />
+          <div className="absolute top-4 left-4 flex gap-2" onClick={(e) => e.stopPropagation()}>
+            <a href={src} download={filename || 'image'} aria-label="تنزيل الصورة" className="grid h-10 w-10 place-items-center rounded-full bg-white/15 text-white hover:bg-white/25"><Download size={18} /></a>
+            <button type="button" onClick={() => setOpen(false)} aria-label="إغلاق" className="grid h-10 w-10 place-items-center rounded-full bg-white/15 text-white hover:bg-white/25 cursor-pointer"><CloseIcon size={18} /></button>
+          </div>
+        </div>,
+        document.body,
+      )}
+    </>
+  );
+}
+
+// Media without a caption arrives with text like "[image]" or "[audio]"; the attachment already shows what it is.
 function isAttachmentPlaceholder(msg: Message) {
-  return (msg.attachments || []).some((a) => a.type === 'audio' && msg.text === `[${a.type}]`);
+  return (msg.attachments || []).some((a) => msg.text === `[${a.type}]`);
 }
 
 function MessageExtras({ msg }: { msg: Message }) {

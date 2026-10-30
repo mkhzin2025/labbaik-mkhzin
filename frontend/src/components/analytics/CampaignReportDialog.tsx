@@ -15,7 +15,7 @@ const dayStart = (day: string, next = false) => {
   return new Date(y, m - 1, d + (next ? 1 : 0)).toISOString();
 };
 
-/** Picks a date range and campaigns, then opens the printable report in a new tab. */
+/** Picks a date range and campaigns, then downloads their PDF report. */
 export default function CampaignReportDialog({ days, onClose }: { days: number; onClose: () => void }) {
   const today = localDay(new Date());
   const [from, setFrom] = useState(() => localDay(new Date(Date.now() - (days - 1) * 86_400_000)));
@@ -66,11 +66,37 @@ export default function CampaignReportDialog({ days, onClose }: { days: number; 
   });
   const pickedTotal = useMemo(() => (campaigns || []).filter((c) => picked.has(c.id)).reduce((sum, c) => sum + c.stats.total, 0), [campaigns, picked]);
 
-  const open = () => {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  const download = async () => {
     const ids = (campaigns || []).filter((c) => picked.has(c.id)).map((c) => c.id);
-    const params = new URLSearchParams({ ids: ids.join(','), from, to });
-    window.open(`/campaigns-report?${params}`, '_blank', 'noopener');
-    onClose();
+    setBusy(true);
+    setError('');
+    try {
+      const response = await api.get('/integrations/meta/whatsapp/campaigns/report/pdf', {
+        params: { ids: ids.join(','), from, to, tz: -new Date().getTimezoneOffset() },
+        responseType: 'blob',
+      });
+      const disposition = String(response.headers['content-disposition'] || '');
+      const filename = disposition.match(/filename="?([^";]+)"?/i)?.[1] || `campaigns-report-${from}_${to}.pdf`;
+      const url = URL.createObjectURL(response.data);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = filename;
+      anchor.click();
+      URL.revokeObjectURL(url);
+      onClose();
+    } catch (requestError) {
+      const data = (requestError as { response?: { data?: Blob } }).response?.data;
+      let message = 'تعذر إنشاء التقرير. حاول مرة أخرى.';
+      if (data instanceof Blob) {
+        try { message = (JSON.parse(await data.text()) as { message?: string }).message || message; } catch { /* not JSON */ }
+      }
+      setError(message);
+    } finally {
+      setBusy(false);
+    }
   };
 
   const invalidRange = !from || !to || from > to;
@@ -81,7 +107,7 @@ export default function CampaignReportDialog({ days, onClose }: { days: number; 
         <div className="flex items-start justify-between gap-3 p-5 pb-3">
           <div>
             <h2 id="report-dialog-title" className="text-lg font-black text-neutral-900 dark:text-white">تصدير تقرير الحملات (PDF)</h2>
-            <p className="text-xs text-labbaik-text-muted">صفحة ملخص لكل الحملات المختارة، ثم صفحة تفصيلية لكل حملة.</p>
+            <p className="text-xs text-labbaik-text-muted">ملخص ومقارنة للحملات المختارة، ثم صفحة تفصيلية لكل حملة.</p>
           </div>
           <button type="button" onClick={onClose} aria-label="إغلاق" className="h-8 w-8 grid place-items-center rounded-lg text-labbaik-text-muted hover:bg-labbaik-page cursor-pointer"><X size={18} /></button>
         </div>
@@ -137,12 +163,14 @@ export default function CampaignReportDialog({ days, onClose }: { days: number; 
         </div>
 
         <div className="flex items-center justify-between gap-3 p-5">
-          <p className="text-xs text-labbaik-text-muted tabular-nums">{picked.size ? `${num(pickedTotal)} مستلم في الحملات المختارة` : 'اختر حملة واحدة على الأقل.'}</p>
+          {error
+            ? <p role="alert" className="text-xs font-bold text-red-700 dark:text-red-300">{error}</p>
+            : <p className="text-xs text-labbaik-text-muted tabular-nums">{picked.size ? `${num(pickedTotal)} مستلم في الحملات المختارة` : 'اختر حملة واحدة على الأقل.'}</p>}
           <div className="flex gap-2">
             <button type="button" onClick={onClose} className="h-10 px-4 rounded-lg border border-labbaik-border text-sm font-bold text-neutral-800 dark:text-neutral-100 hover:bg-labbaik-page cursor-pointer">إلغاء</button>
-            <button type="button" onClick={open} disabled={!picked.size || invalidRange}
+            <button type="button" onClick={() => void download()} disabled={!picked.size || invalidRange || busy}
               className="inline-flex items-center gap-1.5 h-10 px-4 rounded-lg bg-labbaik-blue text-sm font-bold text-white hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer">
-              <FileDown size={16} /> إنشاء التقرير
+              {busy ? <Loader2 size={16} className="animate-spin" /> : <FileDown size={16} />} {busy ? 'جارٍ إنشاء الملف…' : 'تنزيل التقرير'}
             </button>
           </div>
         </div>

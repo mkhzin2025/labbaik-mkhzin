@@ -266,22 +266,6 @@ textarea {
   --viz-muted: #a9a3b5;
 }
 
-/* Printable campaigns report (saved as PDF from the browser): A4, colours kept, each sheet on a new page. */
-.report-root {
-  -webkit-print-color-adjust: exact;
-  print-color-adjust: exact;
-}
-@media print {
-  @page {
-    size: A4;
-    margin: 12mm 10mm 14mm;
-    @bottom-center { content: counter(page) " / " counter(pages); font-size: 9pt; color: #8a8494; }
-  }
-  html, body { background: #fff !important; }
-  .no-print { display: none !important; }
-  .report-root .sheet + .sheet { break-before: page; }
-}
-
 /* Side drawers anchored to the left edge: slide in from the left, slide back out to the left. */
 @keyframes drawer-left-in { from { transform: translateX(-100%); } to { transform: translateX(0); } }
 @keyframes drawer-left-out { from { transform: translateX(0); } to { transform: translateX(-100%); } }

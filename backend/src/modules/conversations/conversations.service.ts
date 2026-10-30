@@ -29,6 +29,8 @@ const RATING_OPTIONS: { value: ConversationRating; label: string }[] = [
   { value: 'neutral', label: 'عادي 😐' },
   { value: 'negative', label: 'غير راضٍ 👎' },
 ];
+/** Sent once after the customer answers the rating request. */
+const RATING_THANKS = 'شكراً لتقييمك! 🌟';
 /** Free-form (non-template) messages reach a customer only within 24h of their last message; keep a margin. */
 const RATING_WINDOW_MS = 23.5 * 3600 * 1000;
 
@@ -854,12 +856,42 @@ export class ConversationsService implements OnModuleInit {
           ...(message.customerId ? { customerId: message.customerId } : {}),
         },
       },
-      { returnDocument: 'after', sort: { lastMessageAt: -1 }, projection: { _id: 1, status: 1 } },
+      // The state before the tap tells whether this answers the latest request or repeats an answer already given.
+      { returnDocument: 'before', sort: { lastMessageAt: -1 }, projection: { _id: 1, metaConnectionId: 1, ratedAt: 1, ratingRequestedAt: 1 } },
     ).lean().exec();
-    if (conversation) {
-      this.eventsGateway.server.to(`store_${storeId}`).emit('conversation_rating', { conversationId: String(conversation._id), rating, ratedAt: at });
+    if (!conversation) return;
+    this.eventsGateway.server.to(`store_${storeId}`).emit('conversation_rating', { conversationId: String(conversation._id), rating, ratedAt: at });
+    const firstAnswer = !conversation.ratedAt || (conversation.ratingRequestedAt && conversation.ratedAt < conversation.ratingRequestedAt);
+    if (firstAnswer) {
+      await this.sendRatingThanks(String(conversation._id), customerPhone, storeId, conversation.metaConnectionId)
+        .catch((error) => this.logger.warn(`Rating thanks for ${customerPhone} failed: ${error?.message}`));
     }
-    return conversation;
+  }
+
+  /** "Thank you" after the customer's first answer to a rating request; a failure is only logged. */
+  private async sendRatingThanks(conversationId: string, customerPhone: string, storeId: string, metaConnectionId?: string | null) {
+    const channels = await this.channelsService.findAllByStore(storeId, { maskCredentials: false });
+    const channel = channels.find((c) => c.type === 'whatsapp' && (!metaConnectionId || c.credentials?.metaConnectionId === metaConnectionId))
+      || channels.find((c) => c.type === 'whatsapp');
+    if (!channel) return;
+    const walletCharge = await this.billingService.chargeMetaUsageForStore(storeId, MetaUsageType.SESSION_TEXT, { referenceId: conversationId, source: 'rating_thanks' });
+    let providerResponse: any;
+    try {
+      providerResponse = await this.messagingService.sendWhatsAppMessage(channel.credentials!.phoneNumberId, channel.credentials!.accessToken, customerPhone, RATING_THANKS);
+    } catch (error) {
+      if (walletCharge) await this.billingService.refundMetaUsage(walletCharge.id, 'Rating thanks send failed');
+      throw error;
+    }
+    const whatsappMessageId = providerResponse?.messages?.[0]?.id || providerResponse?.message_id;
+    const messageData = {
+      from: 'me', text: RATING_THANKS, type: 'text', isManual: false, timestamp: Date.now(),
+      metadata: {
+        source: 'rating_thanks',
+        ...(whatsappMessageId ? { whatsappMessageId, status: 'accepted', walletTransactionId: walletCharge?.id || null, metaConnectionId: channel.credentials?.metaConnectionId || metaConnectionId || null } : {}),
+      },
+    };
+    await this.addMessage(customerPhone, storeId, 'whatsapp', messageData);
+    this.eventsGateway.server.to(`store_${storeId}`).emit('new_message', { ...messageData, customerPhone, platform: 'whatsapp', storeId });
   }
 
   async sendMessage(conversationId: string, storeId: string, text: string) {

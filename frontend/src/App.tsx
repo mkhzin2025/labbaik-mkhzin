@@ -22,7 +22,6 @@ import TermsPage from './pages/TermsPage';
 import AccountDeletionPage from './pages/AccountDeletionPage';
 import AccountDeletionAdminPage from './pages/AccountDeletionAdminPage';
 import AnalyticsPage from './pages/AnalyticsPage';
-import CampaignReportPage from './pages/CampaignReportPage';
 import { ToastProvider } from './components/Toast';
 import { ThemeProvider } from './context/ThemeContext';
 import './index.css';
@@ -103,9 +102,6 @@ function App() {
             }
           />
 
-
-          {/* Printable campaigns report: full page, outside the dashboard chrome */}
-          <Route path="/campaigns-report" element={<PrivateRoute><CampaignReportPage /></PrivateRoute>} />
 
           {/* Public Landing Page */}
           <Route path="/" element={<LandingPage />} />

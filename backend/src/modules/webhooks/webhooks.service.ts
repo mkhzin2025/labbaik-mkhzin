@@ -305,8 +305,9 @@ export class WebhooksService {
         from: normalized.from, text: normalized.text, type: normalized.type, timestamp: normalized.timestamp,
         attachments: normalized.attachments, metadata: { ...normalized.metadata, rating }, customerId: customer.id, customerName,
       };
-      await this.conversationsService.recordRating(normalized.from, storeId, rating, ratingMessage);
+      // Shown before the "thank you" that recordRating sends.
       this.eventsGateway.server.to(`store_${storeId}`).emit('new_message', { ...ratingMessage, platform: 'whatsapp', storeId });
+      await this.conversationsService.recordRating(normalized.from, storeId, rating, ratingMessage);
       return;
     }
 

@@ -12,6 +12,8 @@ import { WhatsAppCampaign, WhatsAppCampaignAudience, WhatsAppCampaignParameters,
 import { CampaignRecipientStatus, WhatsAppCampaignRecipient } from './entities/whatsapp-campaign-recipient.entity';
 import { MetaWhatsAppService } from './meta-whatsapp.service';
 import { MetaTemplatePayloadBuilder } from './services/meta-template-payload.builder';
+import { writeCampaignsReportPdf } from './campaigns-report-pdf';
+import type { Response } from 'express';
 
 /** Upper bound on parallel sends per campaign; the chosen messages/second paces them. */
 const MAX_SEND_CONCURRENCY = 160;
@@ -650,6 +652,26 @@ export class WhatsAppCampaignsService implements OnApplicationBootstrap, OnModul
       paymentFailed: Number(payment?.count || 0),
       timeline: timeline.map((row: any) => ({ kind: row.kind, bucket: new Date(row.bucket).toISOString(), count: Number(row.count) })),
     };
+  }
+
+  /** Downloads the PDF report of the chosen campaigns (an overview, then one page per campaign). */
+  async writeReportPdfForUser(userId: string, organizationId: string | undefined, query: { ids: string[]; from: string; to: string; tzOffsetMinutes: number }, response: Response) {
+    const { organization } = await this.accessibleStores(userId, organizationId);
+    const queue = [...query.ids];
+    const campaigns: Awaited<ReturnType<WhatsAppCampaignsService['getForUser']>>[] = [];
+    const worker = async () => {
+      for (let id = queue.shift(); id; id = queue.shift()) campaigns.push(await this.getForUser(userId, organizationId, id));
+    };
+    await Promise.all(Array.from({ length: 4 }, worker));
+    campaigns.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+    writeCampaignsReportPdf(response, {
+      organizationName: organization.name,
+      from: query.from,
+      to: query.to,
+      generatedAt: new Date(),
+      tzOffsetMinutes: query.tzOffsetMinutes,
+      campaigns,
+    });
   }
 
   async recipientsForUser(userId: string, organizationId: string | undefined, id: string, query: { page: number; limit: number; filter: RecipientFilter; search?: string }) {
