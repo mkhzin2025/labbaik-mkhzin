@@ -11,7 +11,7 @@ import { MetaUsageType } from '../billing/entities/pricing-rule.entity';
 import { normalizePhoneNumber } from '../../common/utils/phone.util';
 import { WHATSAPP_MEDIA_TYPES, WHATSAPP_MEDIA_UNSUPPORTED } from '../../common/utils/whatsapp-media-types';
 import { WhatsAppMediaService } from '../channels/whatsapp-media.service';
-import { TtlCache } from '../../common/utils/ttl-cache';
+import { TtlCache, concurrencyLimit } from '../../common/utils/ttl-cache';
 import { randomBytes } from 'crypto';
 import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
@@ -71,6 +71,13 @@ const INBOX_COUNTS_TTL_MS = 3_000;
  * so a busy dashboard never starts a second full scan while the first is still running.
  */
 const REPORT_CACHE_TTL_MS = 5 * 60_000;
+/**
+ * Past its TTL a report is still answered at once for this long while one background run refreshes it, so only
+ * the very first visit of a branch waits for the full scan (which may outlast a proxy's 60s read timeout).
+ */
+const REPORT_SERVE_STALE_MS = 60 * 60_000;
+/** Report scans of different branches or periods share the server: at most this many run at a time. */
+const REPORT_MAX_CONCURRENT = 2;
 /** A branch's expired snoozes are reopened at most this often (lazily, when its inbox is read). */
 const SNOOZE_WAKE_INTERVAL_MS = 10_000;
 /** Start-up data repairs run in the background after boot, so they never hold up the API or webhooks. */
@@ -108,8 +115,9 @@ const afterCursor = ({ t, id }: { t: Date | null; id: Types.ObjectId }) =>
 export class ConversationsService implements OnModuleInit {
   private readonly logger = new Logger(ConversationsService.name);
   private readonly countsCache = new TtlCache<InboxCounts>(INBOX_COUNTS_TTL_MS);
-  private readonly statsCache = new TtlCache<any>(REPORT_CACHE_TTL_MS, 200);
-  private readonly analyticsCache = new TtlCache<any>(REPORT_CACHE_TTL_MS, 200);
+  private readonly statsCache = new TtlCache<any>(REPORT_CACHE_TTL_MS, 200, REPORT_SERVE_STALE_MS);
+  private readonly analyticsCache = new TtlCache<any>(REPORT_CACHE_TTL_MS, 200, REPORT_SERVE_STALE_MS);
+  private readonly reportSlot = concurrencyLimit(REPORT_MAX_CONCURRENT);
   private readonly snoozeWakes = new Map<string, { at: number; done: Promise<void> }>();
 
   constructor(
@@ -162,7 +170,8 @@ export class ConversationsService implements OnModuleInit {
     const stalePreviews = await this.conversationModel.find({ lastMessage: /^تعذر توليد رد تلقائي/ }, { messages: { $slice: -1 } }).lean().exec();
     for (const conv of stalePreviews) {
       const last = conv.messages?.[conv.messages.length - 1];
-      await this.conversationModel.updateOne({ _id: conv._id }, { $set: { lastMessage: last?.text || '' } });
+      // Only while the preview is still the old note: a message that arrived since set a newer one.
+      await this.conversationModel.updateOne({ _id: conv._id, lastMessage: /^تعذر توليد رد تلقائي/ }, { $set: { lastMessage: last?.text || '' } });
     }
   }
 
@@ -172,10 +181,14 @@ export class ConversationsService implements OnModuleInit {
       .find({ awaitingReply: true, lastMessage: { $regex: /^[\s\S]{1,40}$/ } }, { lastMessage: 1 })
       .lean()
       .exec();
-    const ids = rows.filter((row) => ConversationsService.isAcknowledgement(row.lastMessage)).map((row) => row._id);
-    if (ids.length) {
-      await this.conversationModel.updateMany({ _id: { $in: ids } }, { $set: { awaitingReply: false } });
-      this.logger.log(`Cleared awaitingReply on ${ids.length} conversation(s) ending with a thanks or emoji`);
+    const acks = rows.filter((row) => ConversationsService.isAcknowledgement(row.lastMessage));
+    if (acks.length) {
+      // Cleared only while the thread still ends with that same thanks: a real question that arrived since the
+      // read above keeps its wait.
+      const result = await this.conversationModel.bulkWrite(acks.map((row) => ({
+        updateOne: { filter: { _id: row._id, awaitingReply: true, lastMessage: row.lastMessage }, update: { $set: { awaitingReply: false } } },
+      })), { ordered: false });
+      this.logger.log(`Cleared awaitingReply on ${result.modifiedCount} conversation(s) ending with a thanks or emoji`);
     }
   }
 
@@ -248,27 +261,43 @@ export class ConversationsService implements OnModuleInit {
         await this.conversationModel.updateOne({ _id: candidate._id }, { $set: { customerPhone: phone } });
         continue;
       }
-      const source = await this.conversationModel.findById(candidate._id).exec();
+      const source = await this.conversationModel.findById(candidate._id).lean().exec();
       if (!source) continue;
-      const messages = [...(target.messages || []), ...(source.messages || [])]
-        .sort((a: any, b: any) => (Number(a.timestamp) || 0) - (Number(b.timestamp) || 0));
-      const latest = [target, source].sort((a, b) => (new Date(b.lastMessageAt || 0).getTime()) - (new Date(a.lastMessageAt || 0).getTime()))[0];
-      await this.conversationModel.updateOne({ _id: target._id }, {
-        $set: {
-          messages,
-          unreadCount: (target.unreadCount || 0) + (source.unreadCount || 0),
-          tags: Array.from(new Set([...(target.tags || []), ...(source.tags || [])])),
-          lastMessage: latest.lastMessage,
-          lastMessageAt: latest.lastMessageAt,
-          customerId: target.customerId || source.customerId,
-          metaConnectionId: target.metaConnectionId || source.metaConnectionId,
-        },
-      });
-      await this.conversationModel.deleteOne({ _id: source._id });
+      await this.mergeInto(target._id, source);
       merged++;
     }
     if (merged) this.logger.log(`Merged ${merged} duplicate WhatsApp conversation(s)`);
     return merged;
+  }
+
+  /**
+   * Moves a duplicate thread into `targetId` while the app is live, so every step is atomic and safe to repeat:
+   * - the source's messages are pushed (never a $set of the whole array, which would drop a message the customer
+   *   sent to the target meanwhile), together with a `mergedFrom` marker in the same write, so a merge interrupted
+   *   before the source was deleted does not add its messages twice when the next start repeats it;
+   * - preview, customer and connection only replace the target's when the source has the newer / missing value;
+   * - the source is deleted last.
+   * Raw collection writes: `mergedFrom` is bookkeeping outside the schema, and the messages are already stored values.
+   */
+  private async mergeInto(targetId: Types.ObjectId, source: any) {
+    const collection = this.conversationModel.collection;
+    await collection.updateOne(
+      { _id: targetId, mergedFrom: { $ne: source._id } },
+      {
+        $push: { messages: { $each: source.messages || [], $sort: { timestamp: 1 } } },
+        $inc: { unreadCount: source.unreadCount || 0 },
+        $addToSet: { tags: { $each: source.tags || [] }, mergedFrom: source._id },
+      } as any,
+    );
+    if (source.lastMessageAt) {
+      await collection.updateOne(
+        { _id: targetId, $or: [{ lastMessageAt: { $lt: source.lastMessageAt } }, { lastMessageAt: null }] },
+        { $set: { lastMessage: source.lastMessage, lastMessageAt: source.lastMessageAt } },
+      );
+    }
+    if (source.customerId) await collection.updateOne({ _id: targetId, customerId: { $in: [null, ''] } }, { $set: { customerId: source.customerId } });
+    if (source.metaConnectionId) await collection.updateOne({ _id: targetId, metaConnectionId: { $in: [null, ''] } }, { $set: { metaConnectionId: source.metaConnectionId } });
+    await collection.deleteOne({ _id: source._id });
   }
 
   async addMessage(customerPhone: string, storeId: string, platform: string, messageData: any) {
@@ -667,7 +696,7 @@ export class ConversationsService implements OnModuleInit {
   async getAnalytics(storeIds: string[], days: number, tzOffsetMinutes: number) {
     const stores = [...new Set(storeIds)].sort();
     const key = JSON.stringify([stores, days, tzOffsetMinutes]);
-    return this.analyticsCache.get(key, stores, () => this.computeAnalytics(storeIds, days, tzOffsetMinutes));
+    return this.analyticsCache.get(key, stores, () => this.reportSlot(() => this.computeAnalytics(storeIds, days, tzOffsetMinutes)));
   }
 
   private async computeAnalytics(storeIds: string[], days: number, tzOffsetMinutes: number) {
@@ -783,7 +812,7 @@ export class ConversationsService implements OnModuleInit {
   }
 
   async getStats(storeId: string) {
-    return this.statsCache.get(storeId, [storeId], () => this.computeStats(storeId));
+    return this.statsCache.get(storeId, [storeId], () => this.reportSlot(() => this.computeStats(storeId)));
   }
 
   /**

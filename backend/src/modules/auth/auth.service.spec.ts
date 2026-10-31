@@ -2,6 +2,8 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { AuthService } from './auth.service';
 import { UsersService } from '../users/users.service';
 import { JwtService } from '@nestjs/jwt';
+import { OrganizationsService } from '../organizations/organizations.service';
+import { StoresService } from '../stores/stores.service';
 import { UnauthorizedException } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 
@@ -31,6 +33,13 @@ describe('AuthService', () => {
     sign: jest.fn(() => 'mockToken'),
   };
 
+  // AuthService gained these when organizations were added; login only needs the user's organization.
+  const mockOrganizationsService = {
+    ensureForUser: jest.fn(async () => ({ id: 'org-1', name: 'Test Org' })),
+    createForUser: jest.fn(),
+  };
+  const mockStoresService = { createBranch: jest.fn() };
+
   beforeEach(async () => {
     jest.clearAllMocks();
 
@@ -39,6 +48,8 @@ describe('AuthService', () => {
         AuthService,
         { provide: UsersService, useValue: mockUsersService },
         { provide: JwtService, useValue: mockJwtService },
+        { provide: OrganizationsService, useValue: mockOrganizationsService },
+        { provide: StoresService, useValue: mockStoresService },
       ],
     }).compile();
 
@@ -59,6 +70,8 @@ describe('AuthService', () => {
       
       expect(result).toHaveProperty('token', 'mockToken');
       expect(result.user.email).toBe('test@labbaik.ai');
+      expect(result.user).not.toHaveProperty('password');
+      expect(mockJwtService.sign).toHaveBeenCalledWith(expect.objectContaining({ sub: '1', organizationId: 'org-1' }));
     });
 
     it('should throw UnauthorizedException for invalid password', async () => {
