@@ -811,8 +811,9 @@ export class ConversationsService implements OnModuleInit {
     return result;
   }
 
-  async getStats(storeId: string) {
-    return this.statsCache.get(storeId, [storeId], () => this.reportSlot(() => this.computeStats(storeId)));
+  async getStats(storeIds: string[]) {
+    const stores = [...new Set(storeIds)].sort();
+    return this.statsCache.get(JSON.stringify(stores), stores, () => this.reportSlot(() => this.computeStats(stores)));
   }
 
   /**
@@ -821,9 +822,9 @@ export class ConversationsService implements OnModuleInit {
    * Text length is counted in code points ($strLenCP); JavaScript counted UTF-16 units, so an emoji now counts as
    * 1 character instead of 2 in the "hours saved" estimate.
    */
-  private async computeStats(storeId: string) {
+  private async computeStats(storeIds: string[]) {
     const cursor = this.conversationModel.aggregate<{ platform: string; rating?: string | null; messages: { from: string; isManual?: boolean; timestamp: any; textLength: number }[] }>([
-      { $match: { storeId } },
+      { $match: { storeId: { $in: storeIds } } },
       {
         $project: {
           _id: 0,
@@ -844,7 +845,7 @@ export class ConversationsService implements OnModuleInit {
         },
       },
     ]).cursor({ batchSize: 500 });
-    const connectedChannels = await this.channelsService.findAllByStore(storeId);
+    const connectedChannels = (await Promise.all(storeIds.map((id) => this.channelsService.findAllByStore(id)))).flat();
 
     let totalConversations = 0;
     let totalMessages = 0;

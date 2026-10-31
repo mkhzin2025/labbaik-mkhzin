@@ -101,8 +101,8 @@ export class ConversationsController {
   @Get('stats')
   @Access('home', 'conversations')
   async getStats(@Request() req: any, @Query('storeId') storeId?: string) {
-    const { store } = await this.organizationsService.getStoreForUser(req.user.id, req.user.organizationId, storeId);
-    return this.conversationsService.getStats(store.id);
+    // Every branch the user can see (as the inbox counts), or just the one asked for.
+    return this.conversationsService.getStats(await this.resolveStoreIds(req, 'organization', storeId));
   }
 
   @Get('analytics')
