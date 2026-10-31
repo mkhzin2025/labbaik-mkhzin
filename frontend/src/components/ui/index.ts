@@ -7,6 +7,7 @@ export { Form, FormGroup, FormField, FormActions, type FormProps } from './Form'
 export { Modal, ModalBody, ModalFooter, type ModalProps } from './Modal';
 export { Alert, Toast, type AlertProps, type ToastProps } from './Alert';
 export { StatCard, type StatCardProps } from './StatCard';
+export { CountUp, type CountUpProps } from './CountUp';
 export { Skeleton, SkeletonCard, type SkeletonProps } from './Skeleton';
 export { EmptyState, type EmptyStateProps } from './EmptyState';
 export { ErrorState, type ErrorStateProps } from './ErrorState';

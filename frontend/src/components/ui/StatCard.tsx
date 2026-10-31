@@ -1,6 +1,7 @@
 import React from 'react';
-import { cn, toEnglishDigits } from '@/lib/utils';
+import { cn } from '@/lib/utils';
 import { Card, CardBody } from './Card';
+import { CountUp } from './CountUp';
 
 export interface StatCardProps extends React.HTMLAttributes<HTMLDivElement> {
   icon: React.ReactNode;
@@ -51,7 +52,7 @@ const StatCard = React.forwardRef<HTMLDivElement, StatCardProps>(
           <div className="space-y-1">
             <h3 className="text-neutral-500 dark:text-neutral-400 text-xs font-bold uppercase tracking-wider">{label}</h3>
             <p className="text-2xl font-black text-neutral-900 dark:text-white tabular-nums">
-              {typeof value === 'number' ? value.toLocaleString('en-US') : toEnglishDigits(value)}
+              <CountUp value={value} />
             </p>
             {subtitle && (
               <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-2">{subtitle}</p>

@@ -26,7 +26,7 @@ import {
   BarChart,
   Bar
 } from 'recharts';
-import { Card, CardBody, StatCard, ErrorState } from '@/components/ui';
+import { Card, CardBody, StatCard, ErrorState, CountUp } from '@/components/ui';
 import { toEnglishDigits, formatNumber } from '@/lib/utils';
 
 // Same cards, sizes and grid as the loaded page, so nothing shifts when the numbers arrive.
@@ -259,7 +259,7 @@ export default function DashboardHome() {
             <div>
               <h2 className="text-neutral-500 dark:text-neutral-400 text-sm font-semibold mb-2">الوقت الموفر يدوياً</h2>
               <p className="text-3xl font-black text-neutral-900 dark:text-white">
-                {stats?.hoursSaved ?? 0}
+                <CountUp value={stats?.hoursSaved ?? 0} />
                 <span className="text-base font-semibold text-labbaik-blue mr-2">ساعة</span>
               </p>
             </div>
@@ -280,7 +280,7 @@ export default function DashboardHome() {
               <div>
                 <div className="flex justify-between items-center mb-2">
                   <span className="text-xs font-semibold text-neutral-600 dark:text-neutral-400">تيل بوت (AI)</span>
-                  <span className="text-xs font-bold text-labbaik-blue">3 ثوانٍ</span>
+                  <span className="text-xs font-bold text-labbaik-blue"><CountUp value={3} /> ثوانٍ</span>
                 </div>
                 <div className="h-2 w-full bg-neutral-100 dark:bg-neutral-800 rounded-full overflow-hidden border border-neutral-200/50 dark:border-transparent">
                   <div className="h-full bg-labbaik-blue rounded-full w-full"></div>
@@ -289,7 +289,7 @@ export default function DashboardHome() {
               <div>
                 <div className="flex justify-between items-center mb-2">
                   <span className="text-xs font-semibold text-neutral-600 dark:text-neutral-400">البشر (Human)</span>
-                  <span className="text-xs font-bold text-error-500">{toEnglishDigits(stats?.avgHumanSpeed ?? 10)} دقيقة</span>
+                  <span className="text-xs font-bold text-error-500"><CountUp value={stats?.avgHumanSpeed ?? 10} /> دقيقة</span>
                 </div>
                 <div className="h-2 w-full bg-neutral-100 dark:bg-neutral-800 rounded-full overflow-hidden border border-neutral-200/50 dark:border-transparent">
                   <div className="h-full bg-error-400/40 rounded-full w-[15%]"></div>
@@ -398,7 +398,7 @@ export default function DashboardHome() {
                   const satisfied = stats?.sentimentStats?.find(s => s.key === 'positive')?.value || 0;
                   return (
                     <>
-                      <span className="text-2xl font-bold text-neutral-900 dark:text-white">{rated ? `${toEnglishDigits(Math.round((satisfied / rated) * 100))}%` : '—'}</span>
+                      <span className="text-2xl font-bold text-neutral-900 dark:text-white">{rated ? <CountUp value={`${Math.round((satisfied / rated) * 100)}%`} /> : '—'}</span>
                       <span className="text-xs text-neutral-500 dark:text-neutral-400 font-medium mt-1">{rated ? 'راضون' : 'لا تقييمات بعد'}</span>
                     </>
                   );

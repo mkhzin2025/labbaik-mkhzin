@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, FileDown, Loader2, Megaphone } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import api from '../../api/client';
+import { CountUp } from '@/components/ui';
 import { ActivityChart, CampaignStatusBadge, type ActivityPoint, type CampaignStats, type CampaignStatus } from '../whatsapp/campaignShared';
 import { dateTime, num, pct } from '../whatsapp/campaignFormat';
 import { CATEGORY_LABELS } from '../whatsapp/templateUtils';
@@ -192,7 +193,7 @@ function Kpi({ label, value, note }: { label: string; value: string; note?: stri
   return (
     <div className="rounded-lg bg-labbaik-page px-3 py-2.5">
       <p className="text-[11px] font-bold text-labbaik-text-muted">{label}</p>
-      <p className="mt-0.5 text-xl font-black tabular-nums text-neutral-900 dark:text-white">{value}</p>
+      <p className="mt-0.5 text-xl font-black tabular-nums text-neutral-900 dark:text-white"><CountUp value={value} /></p>
       {note && <p className="text-[11px] text-labbaik-text-muted">{note}</p>}
     </div>
   );

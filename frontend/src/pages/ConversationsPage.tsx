@@ -50,6 +50,7 @@ import {
 import { format, isYesterday } from 'date-fns';
 import { ar } from 'date-fns/locale';
 import { formatNumber, toEnglishDigits } from '@/lib/utils';
+import { CountUp } from '@/components/ui';
 import { createSyncScheduler, type SyncScheduler } from '@/lib/sync-scheduler';
 import Composer from '../components/conversations/Composer';
 
@@ -1251,7 +1252,7 @@ export default function ConversationsPage() {
                 onClick={() => { setStatusView(key); if (key !== 'active' && listTab === 'pending') setListTab('all'); }}
                 className={`py-1.5 rounded-md flex flex-col items-center justify-center leading-tight transition-colors cursor-pointer ${statusView === key ? 'bg-labbaik-surface text-labbaik-blue dark:text-purple-200 shadow-sm' : 'text-labbaik-text-muted hover:text-neutral-900 dark:hover:text-white'}`}
               >
-                <span className="tabular-nums text-sm font-black">{formatNumber(statusCounts[key])}</span>
+                <CountUp className="tabular-nums text-sm font-black" value={statusCounts[key]} />
                 <span className="text-[11px] font-bold whitespace-nowrap">{label}</span>
               </button>
             ))}
@@ -1272,7 +1273,7 @@ export default function ConversationsPage() {
                 onClick={() => setListTab(key)}
                 className={`py-1.5 px-2 rounded-lg flex flex-col items-center justify-center leading-tight transition-colors cursor-pointer ${listTab === key ? 'bg-labbaik-blue text-labbaik-on-accent' : 'bg-labbaik-page text-labbaik-text-muted hover:text-labbaik-blue'}`}
               >
-                <span className="tabular-nums text-sm font-black">{formatNumber(count)}</span>
+                <CountUp className="tabular-nums text-sm font-black" value={count} />
                 <span className="text-[11px] font-bold whitespace-nowrap">{label}</span>
               </button>
             ))}

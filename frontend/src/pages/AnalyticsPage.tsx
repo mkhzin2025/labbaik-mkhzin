@@ -5,6 +5,7 @@ import { FaFacebook, FaInstagram, FaMapMarkerAlt, FaWhatsapp } from 'react-icons
 import api from '../api/client';
 import { useToast } from '../components/Toast';
 import { toEnglishDigits } from '@/lib/utils';
+import { CountUp } from '@/components/ui';
 import type { Branch } from '../components/customers/BranchSelector';
 import CampaignPerformance from '../components/analytics/CampaignPerformance';
 
@@ -288,7 +289,7 @@ function StatTile({ label, value, note, change, tone, href }: { label: string; v
   const body = (
     <>
       <p className="text-xs font-bold text-labbaik-text-muted">{label}</p>
-      <p className={`mt-1 text-2xl font-black tabular-nums ${tone === 'warn' ? 'text-amber-700 dark:text-amber-300' : 'text-neutral-900 dark:text-white'}`}>{value}</p>
+      <p className={`mt-1 text-2xl font-black tabular-nums ${tone === 'warn' ? 'text-amber-700 dark:text-amber-300' : 'text-neutral-900 dark:text-white'}`}><CountUp value={value} /></p>
       <div className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-labbaik-text-muted">
         {change !== undefined && change !== null && (
           <span className="inline-flex items-center gap-0.5 font-bold text-neutral-700 dark:text-neutral-200" title="مقارنة بالفترة السابقة">
