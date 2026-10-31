@@ -42,25 +42,33 @@ const utcDay = (date: Date) => new Date(Math.floor(date.getTime() / DAY_MS) * DA
 type DailyClick = { day: number; type: string; text: string; count: number };
 type TemplateRef = Pick<WhatsAppCampaign, 'connectionId' | 'templateId' | 'templateName' | 'templateLanguage'>;
 
-/** When the same template (same number) was sent just before and just after campaign `alias`. */
-const NEIGHBOUR_STARTS = (alias: string) => `
-  (SELECT MIN(n."startedAt") FROM whatsapp_campaigns n WHERE n."connectionId" = ${alias}."connectionId" AND n."templateName" = ${alias}."templateName"
-     AND n."templateLanguage" = ${alias}."templateLanguage" AND n.id <> ${alias}.id AND n."startedAt" > ${alias}."startedAt") AS "nextStart",
-  (SELECT MAX(n."startedAt") FROM whatsapp_campaigns n WHERE n."connectionId" = ${alias}."connectionId" AND n."templateName" = ${alias}."templateName"
-     AND n."templateLanguage" = ${alias}."templateLanguage" AND n.id <> ${alias}.id AND n."startedAt" <= ${alias}."startedAt") AS "prevStart"`;
+/**
+ * For campaign `alias`: when the same template (same number) is next sent on a later UTC day, and the recipients
+ * of every send of it that started on the same UTC day (this one included).
+ */
+const NEIGHBOUR_STARTS = (alias: string) => {
+  const sameTemplate = `n."connectionId" = ${alias}."connectionId" AND n."templateName" = ${alias}."templateName" AND n."templateLanguage" = ${alias}."templateLanguage"`;
+  const dayStart = `(date_trunc('day', ${alias}."startedAt" AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')`;
+  return `
+  (SELECT MIN(n."startedAt") FROM whatsapp_campaigns n WHERE ${sameTemplate} AND n."startedAt" >= ${dayStart} + interval '1 day') AS "nextStart",
+  (SELECT COALESCE(SUM(n."totalRecipients"), 0)::int FROM whatsapp_campaigns n WHERE ${sameTemplate}
+     AND n."startedAt" >= ${dayStart} AND n."startedAt" < ${dayStart} + interval '1 day') AS "sameDayRecipients"`;
+};
 
 /**
  * The UTC days whose Meta clicks belong to a campaign: from its start day until the same template is sent
- * again (or 30 days). A send of the template on the same start day makes the numbers shared.
+ * on a later day (or 30 days). Meta counts per day, so sends of the template on the same start day split
+ * those clicks by audience size (`share`) instead of each claiming all of them.
  */
-function clickWindow(startedAt: Date, nextStart?: Date | string | null, prevStart?: Date | string | null) {
+function clickWindow(startedAt: Date, nextStart: Date | string | null | undefined, recipients: number, sameDayRecipients: number) {
   const start = utcDay(startedAt);
   const nextDay = nextStart ? utcDay(new Date(nextStart)) : null;
-  const shared = (!!nextDay && nextDay.getTime() === start.getTime()) || (!!prevStart && utcDay(new Date(prevStart)).getTime() === start.getTime());
+  const shared = Number(sameDayRecipients) > Number(recipients);
+  const share = shared ? Number(recipients) / Number(sameDayRecipients) : 1;
   let end = new Date(Math.min(Date.now(), start.getTime() + META_CLICKS_WINDOW_DAYS * DAY_MS));
   if (nextDay && nextDay > start && nextDay < end) end = nextDay;
   if (end <= start) end = new Date(start.getTime() + DAY_MS);
-  return { start, end, shared };
+  return { start, end, shared, share };
 }
 
 export type MetaButtonClicks = {
@@ -881,7 +889,7 @@ export class WhatsAppCampaignsService implements OnApplicationBootstrap, OnModul
         `SELECT ${NEIGHBOUR_STARTS('c')} FROM whatsapp_campaigns c WHERE c.id = $1`,
         [campaign.id],
       );
-      const window = clickWindow(campaign.startedAt, neighbours?.nextStart, neighbours?.prevStart);
+      const window = clickWindow(campaign.startedAt, neighbours?.nextStart, campaign.totalRecipients, neighbours?.sameDayRecipients);
       const totals = new Map<string, { type: string; text: string; count: number }>();
       for (const row of await this.templateDailyClicks(campaign, window.start)) {
         if (row.day < window.start.getTime() || row.day >= window.end.getTime()) continue;
@@ -890,7 +898,9 @@ export class WhatsAppCampaignsService implements OnApplicationBootstrap, OnModul
         entry.count += row.count;
         totals.set(key, entry);
       }
-      const buttons = [...totals.values()].sort((a, b) => b.count - a.count);
+      const buttons = [...totals.values()]
+        .map((button) => ({ ...button, count: Math.round(button.count * window.share) }))
+        .sort((a, b) => b.count - a.count);
       return {
         available: true,
         shared: window.shared,
@@ -931,14 +941,14 @@ export class WhatsAppCampaignsService implements OnApplicationBootstrap, OnModul
     const queue = [...groups.values()];
     const worker = async () => {
       for (let group = queue.shift(); group; group = queue.shift()) {
-        const windows = group.map((row) => ({ row, window: clickWindow(new Date(row.startedAt), row.nextStart, row.prevStart) }));
+        const windows = group.map((row) => ({ row, window: clickWindow(new Date(row.startedAt), row.nextStart, row.totalRecipients, row.sameDayRecipients) }));
         const from = new Date(Math.min(...windows.map(({ window }) => window.start.getTime())));
         const daily = await this.templateDailyClicks(group[0], from).catch(() => null);
         if (!daily) continue;
         for (const { row, window } of windows) {
           const clicks = daily.reduce((sum, d) => (d.day >= window.start.getTime() && d.day < window.end.getTime() ? sum + d.count : sum), 0);
-          const share = row.totalRecipients ? Math.min(1, Number(row.total) / Number(row.totalRecipients)) : 1;
-          metaClicks.set(row.id, Math.round(clicks * share));
+          const inScope = row.totalRecipients ? Math.min(1, Number(row.total) / Number(row.totalRecipients)) : 1;
+          metaClicks.set(row.id, Math.round(clicks * window.share * inScope));
         }
       }
     };

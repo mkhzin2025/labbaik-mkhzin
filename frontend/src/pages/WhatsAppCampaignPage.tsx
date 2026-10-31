@@ -378,7 +378,7 @@ export default function WhatsAppCampaignPage() {
               {campaign.metaButtons.shared && (
                 <p className="mt-3 flex items-start gap-1.5 text-xs text-amber-800 dark:text-amber-300">
                   <AlertTriangle size={13} className="mt-0.5 shrink-0" />
-                  أُرسل هذا القالب في حملة أخرى في اليوم نفسه، فالأرقام تشمل نقراتها أيضًا.
+                  أُرسل هذا القالب في حملة أخرى في اليوم نفسه، وميتا تحسب النقرات لليوم كاملًا، فقُسّمت بين الحملات حسب عدد المستلمين (أرقام تقديرية).
                 </p>
               )}
             </Panel>
