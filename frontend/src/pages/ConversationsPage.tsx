@@ -771,7 +771,7 @@ export default function ConversationsPage() {
   };
 
   // Socket listeners are bound once; they call through this ref so they always see the current render.
-  const socketHandlersRef = useRef<Record<'message' | 'status' | 'convStatus' | 'blocked', (payload: unknown) => void>>(null!);
+  const socketHandlersRef = useRef<Record<'message' | 'status' | 'convStatus' | 'blocked' | 'reconnect', (payload: unknown) => void>>(null!);
 
   const setupSocket = () => {
     const token = localStorage.getItem('access_token');
@@ -785,6 +785,8 @@ export default function ConversationsPage() {
     // Another teammate (or another tab) changed a conversation's status.
     socketRef.current.on('conversation_status', (payload) => socketHandlersRef.current.convStatus(payload));
     socketRef.current.on('conversation_blocked', (payload) => socketHandlersRef.current.blocked(payload));
+    // Events sent while the connection was down are not replayed: catch up once it is back (not on the first connect).
+    socketRef.current.io.on('reconnect', () => socketHandlersRef.current.reconnect(null));
   };
 
   const applyBlocked = (conversationId: string, blockedAt: string | null) => {
@@ -950,6 +952,7 @@ export default function ConversationsPage() {
       const event = payload as { conversationId?: string; blockedAt?: string | null } | null;
       if (event?.conversationId) applyBlocked(event.conversationId, event.blockedAt || null);
     },
+    reconnect: () => scheduleRealtimeSync(true),
   };
 
   const selectConversation = async (conv: Conversation) => {
