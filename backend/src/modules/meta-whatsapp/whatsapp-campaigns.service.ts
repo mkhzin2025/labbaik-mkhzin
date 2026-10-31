@@ -699,12 +699,20 @@ export class WhatsAppCampaignsService implements OnApplicationBootstrap, OnModul
       this.metaButtonClicks(campaign),
     ]);
     if (metaButtons.available) stats.interactions = stats.replied - stats.clicked + metaButtons.total;
+    // Meta can't split clicks by branch, so each branch gets the share of its recipients (as the reports page does).
+    const branchStats = (row: any) => {
+      const branch = toStats(row);
+      if (metaButtons.available && stats.total) {
+        branch.interactions = branch.replied - branch.clicked + Math.round(metaButtons.total * (branch.total / stats.total));
+      }
+      return branch;
+    };
     return {
       ...this.toPublic(campaign),
       parameters: campaign.parameters,
       previewText: campaign.previewText,
       stats,
-      byBranch: byBranch.map((row: any) => ({ storeId: row.storeId, storeName: row.storeName, stats: toStats(row) })),
+      byBranch: byBranch.map((row: any) => ({ storeId: row.storeId, storeName: row.storeName, stats: branchStats(row) })),
       buttons: buttons.map((row: any) => ({ text: row.text, count: Number(row.count) })),
       metaButtons,
       errors: errors.map((row: any) => ({ error: row.error, count: Number(row.count) })),
