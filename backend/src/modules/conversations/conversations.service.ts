@@ -11,6 +11,7 @@ import { MetaUsageType } from '../billing/entities/pricing-rule.entity';
 import { normalizePhoneNumber } from '../../common/utils/phone.util';
 import { WHATSAPP_MEDIA_TYPES, WHATSAPP_MEDIA_UNSUPPORTED } from '../../common/utils/whatsapp-media-types';
 import { WhatsAppMediaService } from '../channels/whatsapp-media.service';
+import { TtlCache } from '../../common/utils/ttl-cache';
 import { randomBytes } from 'crypto';
 import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
@@ -28,6 +29,7 @@ export interface InboxFilters {
   search?: string;
   rating?: ConversationRating;
 }
+export interface InboxCounts { active: number; snoozed: number; closed: number; unread: number; needsReply: number; pending: number }
 
 /** Sent when the team closes a WhatsApp conversation; the reply button ids carry the rating. */
 const RATING_PROMPT = 'قيّم تجربتك معنا 🙏';
@@ -56,6 +58,25 @@ const INBOX_PAGE_DEFAULT = 30;
 const INBOX_PAGE_MAX = 100;
 const MESSAGES_PAGE_DEFAULT = 30;
 const MESSAGES_PAGE_MAX = 100;
+
+/**
+ * Inbox badge counts are reused for this long. Every open inbox asks for them after realtime events, so without
+ * it each message cost (sessions × 6) counts over the whole branch. The inbox waits longer than this before
+ * refreshing after an event (COUNTS_EVENT_DELAY_MS in ConversationsPage), so the refresh always sees the event.
+ */
+const INBOX_COUNTS_TTL_MS = 3_000;
+/**
+ * Dashboard and analytics totals walk every stored message of the branch (on a branch of ~800k threads that
+ * takes more than a minute); they are all-time or per-day figures, not live ones. Longer than one computation,
+ * so a busy dashboard never starts a second full scan while the first is still running.
+ */
+const REPORT_CACHE_TTL_MS = 5 * 60_000;
+/** A branch's expired snoozes are reopened at most this often (lazily, when its inbox is read). */
+const SNOOZE_WAKE_INTERVAL_MS = 10_000;
+/** Start-up data repairs run in the background after boot, so they never hold up the API or webhooks. */
+const STARTUP_MAINTENANCE_DELAY_MS = 30_000;
+/** Marks one-off data repairs as done, so a restart does not scan the whole collection again. */
+const MAINTENANCE_COLLECTION = 'maintenance_tasks';
 
 const clampLimit = (value: number | undefined, fallback: number, max: number) =>
   Number.isFinite(value) && (value as number) > 0 ? Math.min(Math.floor(value as number), max) : fallback;
@@ -86,6 +107,10 @@ const afterCursor = ({ t, id }: { t: Date | null; id: Types.ObjectId }) =>
 @Injectable()
 export class ConversationsService implements OnModuleInit {
   private readonly logger = new Logger(ConversationsService.name);
+  private readonly countsCache = new TtlCache<InboxCounts>(INBOX_COUNTS_TTL_MS);
+  private readonly statsCache = new TtlCache<any>(REPORT_CACHE_TTL_MS, 200);
+  private readonly analyticsCache = new TtlCache<any>(REPORT_CACHE_TTL_MS, 200);
+  private readonly snoozeWakes = new Map<string, { at: number; done: Promise<void> }>();
 
   constructor(
     @InjectModel(Conversation.name)
@@ -98,27 +123,46 @@ export class ConversationsService implements OnModuleInit {
     private readonly whatsAppMediaService: WhatsAppMediaService,
   ) {}
 
-  async onModuleInit() {
+  onModuleInit() {
+    // Each of these scans the whole collection. They used to be awaited here, which held the app (and every
+    // webhook) until they finished; now they run once the API is up.
+    setTimeout(() => void this.runStartupMaintenance(), STARTUP_MAINTENANCE_DELAY_MS).unref?.();
+  }
+
+  async runStartupMaintenance() {
     try {
       await this.mergeDuplicateWhatsAppConversations();
-      // Remove the old "AI reply failed" system notes; auto-reply now stops silently instead.
-      await this.conversationModel.updateMany(
-        { 'messages.type': 'system_error', 'messages.text': /^تعذر توليد رد تلقائي/ },
-        { $pull: { messages: { type: 'system_error', text: /^تعذر توليد رد تلقائي/ } } } as any,
-      );
-      const stalePreviews = await this.conversationModel.find({ lastMessage: /^تعذر توليد رد تلقائي/ }).exec();
-      for (const conv of stalePreviews) {
-        const last = conv.messages?.[conv.messages.length - 1];
-        await this.conversationModel.updateOne({ _id: conv._id }, { $set: { lastMessage: last?.text || '' } });
-      }
     } catch (error) {
       this.logger.error('Failed to merge duplicate WhatsApp conversations', error?.stack);
     }
+    // One-off repairs of data written by older versions: nothing writes these shapes any more.
+    await this.runOnce('remove-ai-failure-notes-v1', () => this.removeAiFailureNotes());
+    await this.runOnce('backfill-awaiting-reply-v1', () => this.backfillAwaitingReply());
+    await this.runOnce('clear-acknowledgement-waits-v1', () => this.clearAcknowledgementWaits());
+  }
+
+  /** Runs a one-off data repair unless it already completed; a failed run is retried at the next start. */
+  private async runOnce(task: string, run: () => Promise<unknown>) {
+    const tasks = this.conversationModel.db.collection<{ _id: string; completedAt: Date }>(MAINTENANCE_COLLECTION);
     try {
-      await this.backfillAwaitingReply();
-      await this.clearAcknowledgementWaits();
+      if (await tasks.findOne({ _id: task })) return;
+      await run();
+      await tasks.updateOne({ _id: task }, { $set: { completedAt: new Date() } }, { upsert: true });
     } catch (error) {
-      this.logger.error('Failed to backfill awaitingReply', error?.stack);
+      this.logger.error(`Start-up task ${task} failed`, error?.stack);
+    }
+  }
+
+  /** Removes the old "AI reply failed" system notes; auto-reply now stops silently instead. */
+  private async removeAiFailureNotes() {
+    await this.conversationModel.updateMany(
+      { 'messages.type': 'system_error', 'messages.text': /^تعذر توليد رد تلقائي/ },
+      { $pull: { messages: { type: 'system_error', text: /^تعذر توليد رد تلقائي/ } } } as any,
+    );
+    const stalePreviews = await this.conversationModel.find({ lastMessage: /^تعذر توليد رد تلقائي/ }, { messages: { $slice: -1 } }).lean().exec();
+    for (const conv of stalePreviews) {
+      const last = conv.messages?.[conv.messages.length - 1];
+      await this.conversationModel.updateOne({ _id: conv._id }, { $set: { lastMessage: last?.text || '' } });
     }
   }
 
@@ -187,18 +231,25 @@ export class ConversationsService implements OnModuleInit {
    * into the conversation for the international number, so one number shows as one conversation.
    */
   async mergeDuplicateWhatsAppConversations() {
-    const candidates = await this.conversationModel.find({ platform: 'whatsapp', customerPhone: { $not: /^9[0-9]{8,}$/ } }).exec();
+    // Most candidates are international numbers that are already normalized (outside +9…): read only the fields
+    // the check needs, and load a thread's messages only when it is actually merged.
+    const candidates = await this.conversationModel
+      .find({ platform: 'whatsapp', customerPhone: { $not: /^9[0-9]{8,}$/ } }, { customerPhone: 1, storeId: 1, status: 1 })
+      .lean()
+      .exec();
     let merged = 0;
-    for (const source of candidates) {
-      const phone = normalizePhoneNumber(source.customerPhone);
-      if (!phone || phone === source.customerPhone) continue;
+    for (const candidate of candidates) {
+      const phone = normalizePhoneNumber(candidate.customerPhone);
+      if (!phone || phone === candidate.customerPhone) continue;
       const target = await this.conversationModel.findOne({
-        _id: { $ne: source._id }, platform: 'whatsapp', storeId: source.storeId, customerPhone: phone, status: source.status,
+        _id: { $ne: candidate._id }, platform: 'whatsapp', storeId: candidate.storeId, customerPhone: phone, status: candidate.status,
       }).exec();
       if (!target) {
-        await this.conversationModel.updateOne({ _id: source._id }, { $set: { customerPhone: phone } });
+        await this.conversationModel.updateOne({ _id: candidate._id }, { $set: { customerPhone: phone } });
         continue;
       }
+      const source = await this.conversationModel.findById(candidate._id).exec();
+      if (!source) continue;
       const messages = [...(target.messages || []), ...(source.messages || [])]
         .sort((a: any, b: any) => (Number(a.timestamp) || 0) - (Number(b.timestamp) || 0));
       const latest = [target, source].sort((a, b) => (new Date(b.lastMessageAt || 0).getTime()) - (new Date(a.lastMessageAt || 0).getTime()))[0];
@@ -305,6 +356,7 @@ export class ConversationsService implements OnModuleInit {
       moved.push({ from: String(source._id), to: String(target._id) });
     }
 
+    this.invalidateCounts(fromStoreId, targetStoreId);
     const event = { customerId: customer.id, previousCustomerId: customerId, fromStoreId, toStoreId: targetStoreId, conversations: moved };
     this.eventsGateway.server.to(`store_${fromStoreId}`).to(`store_${targetStoreId}`).emit('customer_transferred', event);
     return { customer, ...event };
@@ -325,6 +377,7 @@ export class ConversationsService implements OnModuleInit {
     }
     const conversation = await this.conversationModel.findById(id, { storeId: 1, status: 1, snoozedUntil: 1 }).lean().exec();
     if (!conversation) throw new NotFoundException('Conversation not found');
+    this.invalidateCounts(conversation.storeId);
     this.eventsGateway.server.to(`store_${conversation.storeId}`).emit('conversation_status', {
       conversationId: String(conversation._id),
       status: conversation.status,
@@ -333,34 +386,52 @@ export class ConversationsService implements OnModuleInit {
     return { id: String(conversation._id), status: conversation.status, snoozedUntil: conversation.snoozedUntil || null };
   }
 
-  /** Snoozes are lazy: anything past its wake-up time is reopened before a list is read. */
+  /**
+   * Snoozes are lazy: anything past its wake-up time is reopened before a list is read. Each branch is checked
+   * at most every SNOOZE_WAKE_INTERVAL_MS (the list and the counts both ask, for every open inbox); callers in
+   * that window wait for the check already running. The inbox shows an expired snooze as open meanwhile.
+   */
   private async wakeSnoozed(storeIds: string[]) {
-    if (!storeIds.length) return;
-    await this.conversationModel.updateMany(
-      { storeId: { $in: storeIds }, status: 'snoozed', snoozedUntil: { $lte: new Date() } },
-      { $set: { status: 'open', snoozedUntil: null, statusUpdatedAt: new Date() } },
-    );
+    const now = Date.now();
+    const running: Promise<void>[] = [];
+    const due: string[] = [];
+    for (const id of storeIds) {
+      const last = this.snoozeWakes.get(id);
+      if (last && now - last.at < SNOOZE_WAKE_INTERVAL_MS) running.push(last.done);
+      else due.push(id);
+    }
+    if (due.length) {
+      const wake = this.conversationModel.updateMany(
+        { storeId: { $in: due }, status: 'snoozed', snoozedUntil: { $lte: new Date(now) } },
+        { $set: { status: 'open', snoozedUntil: null, statusUpdatedAt: new Date(now) } },
+      ).exec().then(() => undefined);
+      // Waiters never see the error (the caller that started the check does); the branch is checked again next time.
+      const entry = { at: now, done: wake.catch(() => { for (const id of due) if (this.snoozeWakes.get(id) === entry) this.snoozeWakes.delete(id); }) };
+      for (const id of due) this.snoozeWakes.set(id, entry);
+      running.push(wake);
+    }
+    await Promise.all(running);
   }
-
 
   async hasWhatsAppMessage(storeId: string, whatsappMessageId: string) {
     if (!whatsappMessageId) return false;
-    const count = await this.conversationModel.countDocuments({
+    // exists() stops at the first match; countDocuments() ran an aggregation to count every one.
+    const found = await this.conversationModel.exists({
       storeId,
       platform: 'whatsapp',
       'messages.metadata.whatsappMessageId': whatsappMessageId,
     });
-    return count > 0;
+    return Boolean(found);
   }
 
   async hasWhatsAppMessageInStores(storeIds: string[], whatsappMessageId: string) {
     if (!whatsappMessageId || !storeIds.length) return false;
-    const count = await this.conversationModel.countDocuments({
+    const found = await this.conversationModel.exists({
       storeId: { $in: storeIds },
       platform: 'whatsapp',
       'messages.metadata.whatsappMessageId': whatsappMessageId,
     });
-    return count > 0;
+    return Boolean(found);
   }
 
   async updateWhatsAppMessageStatusInStores(storeIds: string[], whatsappMessageId: string, status: string, timestamp?: number, errors?: any[]) {
@@ -397,7 +468,14 @@ export class ConversationsService implements OnModuleInit {
   }
 
   async markAsRead(id: string) {
-    return this.conversationModel.findByIdAndUpdate(id, { unreadCount: 0 }, { returnDocument: 'after' });
+    const conversation = await this.conversationModel.findByIdAndUpdate(id, { unreadCount: 0 }, { returnDocument: 'after' });
+    this.invalidateCounts(conversation?.storeId);
+    return conversation;
+  }
+
+  /** Team actions show in the badges at once; incoming messages show within INBOX_COUNTS_TTL_MS. */
+  private invalidateCounts(...storeIds: (string | null | undefined)[]) {
+    for (const id of storeIds) if (id) this.countsCache.invalidate(id);
   }
 
   /**
@@ -444,22 +522,47 @@ export class ConversationsService implements OnModuleInit {
     };
   }
 
-  /** Badge counts for the status tabs, plus unread / needs-reply inside the selected status tab. */
-  async countInbox(storeIds: string[], filters: InboxFilters) {
+  /**
+   * Badge counts for the status tabs, plus unread / needs-reply inside the selected status tab.
+   * The result depends only on the branches and the filters (not on who asks), so that is the cache key: two
+   * users with the same branch access share it, and a user never gets counts for branches outside their list.
+   */
+  async countInbox(storeIds: string[], filters: InboxFilters): Promise<InboxCounts> {
     if (!storeIds.length) return { active: 0, snoozed: 0, closed: 0, unread: 0, needsReply: 0, pending: 0 };
+    const stores = [...new Set(storeIds)].sort();
+    const key = JSON.stringify([
+      stores, filters.view || 'active', filters.platform || null, filters.tag || null, filters.rating || null, filters.search?.trim() || null,
+    ]);
+    return this.countsCache.get(key, stores, () => this.computeInboxCounts(storeIds, filters));
+  }
+
+  private async computeInboxCounts(storeIds: string[], filters: InboxFilters): Promise<InboxCounts> {
     await this.wakeSnoozed(storeIds);
     const base = { ...filters, tab: undefined };
     const count = (query: Record<string, any>) => this.conversationModel.countDocuments(query).exec();
     const current = this.inboxQuery(storeIds, { ...base, view: filters.view || 'active' });
-    const [active, snoozed, closed, unread, needsReply, pending] = await Promise.all([
-      count(this.inboxQuery(storeIds, { ...base, view: 'active' })),
-      count(this.inboxQuery(storeIds, { ...base, view: 'snoozed' })),
-      count(this.inboxQuery(storeIds, { ...base, view: 'closed' })),
+    const [byStatus, unread, needsReply] = await Promise.all([
+      this.countByStatus(this.inboxQuery(storeIds, { ...base, view: undefined })),
       count({ ...current, unreadCount: { $gt: 0 } }),
       count({ ...current, ...ConversationsService.needsTeamReplyQuery() }),
-      count(this.inboxQuery(storeIds, { ...base, view: filters.view || 'active', tab: 'pending' })),
     ]);
-    return { active, snoozed, closed, unread, needsReply, pending };
+    return { ...byStatus, unread, needsReply };
+  }
+
+  /**
+   * The four status-tab counts in one pass, grouped by status. Separate counts walked the branch once each, and
+   * the planner sometimes answered the "active" one ($nin) by reading every document instead of the status
+   * index. Active is everything not snoozed or closed, including threads stored without a status (as $nin was).
+   * Pending ignores the status view, as before (the pending tab replaces the view's status filter).
+   */
+  private async countByStatus(match: Record<string, any>) {
+    const rows = await this.conversationModel.aggregate<{ _id: unknown; n: number }>([
+      { $match: match },
+      { $group: { _id: '$status', n: { $sum: 1 } } },
+    ]).exec();
+    const of = (status: ConversationStatus) => rows.find((row) => row._id === status)?.n || 0;
+    const total = rows.reduce((sum, row) => sum + row.n, 0);
+    return { active: total - of('snoozed') - of('closed'), snoozed: of('snoozed'), closed: of('closed'), pending: of('pending') };
   }
 
   /**
@@ -562,6 +665,12 @@ export class ConversationsService implements OnModuleInit {
    * `tzOffsetMinutes` (minutes east of UTC) buckets days and hours in the viewer's local time.
    */
   async getAnalytics(storeIds: string[], days: number, tzOffsetMinutes: number) {
+    const stores = [...new Set(storeIds)].sort();
+    const key = JSON.stringify([stores, days, tzOffsetMinutes]);
+    return this.analyticsCache.get(key, stores, () => this.computeAnalytics(storeIds, days, tzOffsetMinutes));
+  }
+
+  private async computeAnalytics(storeIds: string[], days: number, tzOffsetMinutes: number) {
     const DAY = 86_400_000;
     const shift = tzOffsetMinutes * 60_000;
     const now = Date.now();
@@ -583,13 +692,14 @@ export class ConversationsService implements OnModuleInit {
     };
     if (!storeIds.length) return empty;
 
-    const conversations = await this.conversationModel
+    // Streamed: a busy period covers most of the branch's threads, too many to hold in memory at once.
+    const conversations = this.conversationModel
       .find(
         { storeId: { $in: storeIds }, $or: [{ lastMessageAt: { $gte: new Date(prevStart) } }, { lastMessageAt: { $exists: false } }] },
         { platform: 1, lastSentiment: 1, 'messages.from': 1, 'messages.type': 1, 'messages.timestamp': 1, 'messages.isManual': 1 },
       )
       .lean()
-      .exec();
+      .cursor({ batchSize: 500 });
 
     const dayKey = (t: number) => new Date(Math.floor((t + shift) / DAY) * DAY).toISOString().slice(0, 10);
     const daily = new Map<string, { date: string; incoming: number; auto: number; team: number }>();
@@ -605,7 +715,7 @@ export class ConversationsService implements OnModuleInit {
     const isCustomer = (m: any) => m.from !== 'me' && m.from !== 'system' && m.type !== 'system_error';
     const time = (m: any) => new Date(m.timestamp).getTime();
 
-    for (const conv of conversations as any[]) {
+    for await (const conv of conversations as AsyncIterable<any>) {
       const messages = (conv.messages || []).filter((m: any) => Number.isFinite(time(m)));
       if (!messages.length) continue;
       const firstAt = time(messages[0]);
@@ -673,9 +783,41 @@ export class ConversationsService implements OnModuleInit {
   }
 
   async getStats(storeId: string) {
-    const conversations = await this.conversationModel.find({ storeId }).exec();
+    return this.statsCache.get(storeId, [storeId], () => this.computeStats(storeId));
+  }
+
+  /**
+   * Dashboard totals over every message of the branch. Only the fields the totals use leave MongoDB (no message
+   * text, attachments or metadata), and threads are streamed instead of all being held in memory at once.
+   * Text length is counted in code points ($strLenCP); JavaScript counted UTF-16 units, so an emoji now counts as
+   * 1 character instead of 2 in the "hours saved" estimate.
+   */
+  private async computeStats(storeId: string) {
+    const cursor = this.conversationModel.aggregate<{ platform: string; rating?: string | null; messages: { from: string; isManual?: boolean; timestamp: any; textLength: number }[] }>([
+      { $match: { storeId } },
+      {
+        $project: {
+          _id: 0,
+          platform: 1,
+          rating: 1,
+          messages: {
+            $map: {
+              input: { $ifNull: ['$messages', []] },
+              as: 'm',
+              in: {
+                from: '$$m.from',
+                isManual: '$$m.isManual',
+                timestamp: '$$m.timestamp',
+                textLength: { $cond: [{ $eq: [{ $type: '$$m.text' }, 'string'] }, { $strLenCP: '$$m.text' }, 0] },
+              },
+            },
+          },
+        },
+      },
+    ]).cursor({ batchSize: 500 });
     const connectedChannels = await this.channelsService.findAllByStore(storeId);
-    
+
+    let totalConversations = 0;
     let totalMessages = 0;
     let aiReplies = 0;
     let totalAiChars = 0;
@@ -695,30 +837,34 @@ export class ConversationsService implements OnModuleInit {
       timelineData[dateStr] = 0;
     }
 
-    conversations.forEach(conv => {
+    for await (const conv of cursor) {
+      totalConversations++;
       totalMessages += conv.messages.length;
       const convMessages = conv.messages;
       for (let i = 0; i < convMessages.length; i++) {
         const msg = convMessages[i];
-        if (msg.from === 'me' && (msg as any).isManual !== true) {
+        if (msg.from === 'me' && msg.isManual !== true) {
           aiReplies++;
-          totalAiChars += (msg.text || '').length;
+          totalAiChars += msg.textLength;
         }
         if (msg.from !== 'me' && i < convMessages.length - 1) {
           const nextMsg = convMessages[i+1];
-          if ((nextMsg as any).from === 'me' && (nextMsg as any).isManual === true) {
+          if (nextMsg.from === 'me' && nextMsg.isManual === true) {
             const diff = (new Date(nextMsg.timestamp).getTime() - new Date(msg.timestamp).getTime()) / 1000;
             if (diff > 0 && diff < 86400) { totalHumanResponseTime += diff; humanResponseCount++; }
           }
         }
-        const mDate = new Date(msg.timestamp).toISOString().split('T')[0];
+        // A malformed timestamp used to throw (toISOString of an invalid date) and fail the whole dashboard.
+        const time = new Date(msg.timestamp).getTime();
+        if (!Number.isFinite(time)) continue;
+        const mDate = new Date(time).toISOString().split('T')[0];
         if (timelineData.hasOwnProperty(mDate)) timelineData[mDate]++;
       }
       if (platformCount.hasOwnProperty(conv.platform)) platformCount[conv.platform]++;
       // Satisfaction comes from the customers' own ratings, not from guessing at their messages.
       if (conv.rating && sentiments.hasOwnProperty(conv.rating)) sentiments[conv.rating]++;
       else unrated++;
-    });
+    }
 
     const wordsPerMinute = 40;
     const charsPerWord = 5;
@@ -726,7 +872,7 @@ export class ConversationsService implements OnModuleInit {
     const avgHumanSpeedSeconds = humanResponseCount > 0 ? totalHumanResponseTime / humanResponseCount : 600;
 
     return {
-      totalConversations: conversations.length,
+      totalConversations,
       totalMessages,
       aiReplies,
       activeChannels: connectedChannels.length,
@@ -820,11 +966,14 @@ export class ConversationsService implements OnModuleInit {
   }
 
   async toggleAi(conversationId: string, enabled: boolean, reason: 'manual' | 'handoff' | 'ai_error' = 'manual') {
-    return this.conversationModel.findByIdAndUpdate(conversationId, {
+    const conversation = await this.conversationModel.findByIdAndUpdate(conversationId, {
       aiEnabled: enabled,
       aiDisabledUntil: enabled ? null : new Date(Date.now() + 24 * 60 * 60 * 1000),
       aiPausedReason: enabled ? null : reason,
     }, { returnDocument: 'after' });
+    // "Needs a reply" depends on whether automatic replies are paused.
+    this.invalidateCounts(conversation?.storeId);
+    return conversation;
   }
 
   async updateFlowState(id: string, flowId: string | null, nodeId: string | null, invalidReplies = 0) {
@@ -836,7 +985,9 @@ export class ConversationsService implements OnModuleInit {
   }
 
   async updateTags(conversationId: string, tags: string[]) {
-    return this.conversationModel.findByIdAndUpdate(conversationId, { tags: Array.from(new Set(tags)) }, { returnDocument: 'after' });
+    const conversation = await this.conversationModel.findByIdAndUpdate(conversationId, { tags: Array.from(new Set(tags)) }, { returnDocument: 'after' });
+    this.invalidateCounts(conversation?.storeId);
+    return conversation;
   }
 
   /**
@@ -967,6 +1118,7 @@ export class ConversationsService implements OnModuleInit {
         : { blockedAt: null },
     });
     const affected = await this.conversationModel.find(filter, { storeId: 1, status: 1 }).lean().exec();
+    this.invalidateCounts(...affected.map((row) => row.storeId));
     for (const row of affected) {
       this.eventsGateway.server.to(`store_${row.storeId}`).emit('conversation_status', { conversationId: String(row._id), status: row.status, snoozedUntil: null });
       this.eventsGateway.server.to(`store_${row.storeId}`).emit('conversation_blocked', { conversationId: String(row._id), blockedAt: blocked ? now : null });
@@ -999,7 +1151,7 @@ export class ConversationsService implements OnModuleInit {
     const spec = WHATSAPP_MEDIA_TYPES[file.mimetype];
     if (!spec) throw new BadRequestException(WHATSAPP_MEDIA_UNSUPPORTED);
     if (file.buffer.length > spec.max) throw new BadRequestException(`حجم الملف أكبر من حد واتساب (${spec.max / (1024 * 1024)} ميجابايت).`);
-    const conversation = await this.conversationModel.findOne({ _id: conversationId, storeId });
+    const conversation = await this.conversationModel.findOne({ _id: conversationId, storeId }).select('-messages');
     if (!conversation) throw new NotFoundException('Conversation not found');
     if (conversation.blockedAt) throw new BadRequestException('هذا العميل محظور. ألغِ الحظر أولًا لمراسلته.');
     if (conversation.platform !== 'whatsapp') throw new BadRequestException('إرسال المرفقات متاح لمحادثات واتساب فقط.');
@@ -1054,7 +1206,7 @@ export class ConversationsService implements OnModuleInit {
   }
 
   async sendMessage(conversationId: string, storeId: string, text: string) {
-    const conversation = await this.conversationModel.findOne({ _id: conversationId, storeId });
+    const conversation = await this.conversationModel.findOne({ _id: conversationId, storeId }).select('-messages');
     if (!conversation) throw new NotFoundException('Conversation not found');
     if (conversation.blockedAt) throw new BadRequestException('هذا العميل محظور. ألغِ الحظر أولًا لمراسلته.');
     const channels = await this.channelsService.findAllByStore(storeId, { maskCredentials: false });

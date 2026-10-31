@@ -50,6 +50,7 @@ import {
 import { format, isYesterday } from 'date-fns';
 import { ar } from 'date-fns/locale';
 import { formatNumber, toEnglishDigits } from '@/lib/utils';
+import { createSyncScheduler, type SyncScheduler } from '@/lib/sync-scheduler';
 import Composer from '../components/conversations/Composer';
 
 interface Message {
@@ -121,6 +122,18 @@ const REPLY_WINDOW_MS = 24 * 3600 * 1000;
 const BOT_GRACE_MS = 2 * 60 * 1000;
 const MESSAGES_PAGE_SIZE = 30;
 const SEARCH_DEBOUNCE_MS = 350;
+/**
+ * After realtime events the badge counts refresh this long after the event at the earliest. The server reuses
+ * counts for up to 3s (INBOX_COUNTS_TTL_MS in conversations.service.ts); waiting longer means the refresh
+ * always includes the event. Keep it above that value.
+ */
+const COUNTS_EVENT_DELAY_MS = 3_500;
+/** However busy the inbox (a campaign sends many messages a second), counts refresh at most this often. */
+const COUNTS_MIN_INTERVAL_MS = 5_000;
+/** A conversation that is not in the loaded rows is pulled in this soon after its message... */
+const HEAD_SYNC_DELAY_MS = 400;
+/** ...and the first page is fetched again at most this often during a steady stream. */
+const HEAD_SYNC_MIN_INTERVAL_MS = 2_000;
 const EMPTY_COUNTS: InboxCounts = { active: 0, snoozed: 0, closed: 0, unread: 0, needsReply: 0 };
 
 const fetchListPage = (params: Record<string, string | undefined>, cursor?: string) =>
@@ -518,7 +531,6 @@ export default function ConversationsPage() {
   const loadingMoreRef = useRef(false);
   const loadingOlderRef = useRef(false);
   const scrollIntentRef = useRef<{ kind: 'bottom'; smooth: boolean } | { kind: 'keep'; height: number; top: number } | null>(null);
-  const realtimeSyncRef = useRef<{ timer?: number; head: boolean }>({ head: false });
   const conversationsRef = useRef<Conversation[]>([]);
   conversationsRef.current = conversations;
   const { showToast } = useToast();
@@ -642,22 +654,25 @@ export default function ConversationsPage() {
   }, [nextCursor, loading, listError]);
 
   // Realtime events are coalesced: counts refresh, and an unknown conversation pulls the first page back in.
-  const scheduleRealtimeSync = (needsHead: boolean) => {
-    const sync = realtimeSyncRef.current;
-    sync.head ||= needsHead;
-    window.clearTimeout(sync.timer);
-    sync.timer = window.setTimeout(() => {
-      const refreshHead = sync.head;
-      sync.head = false;
-      loadCounts();
-      if (!refreshHead) return;
+  // Each has its own pace (see createSyncScheduler); both pause while the tab is hidden.
+  const countsSyncRef = useRef<SyncScheduler | null>(null);
+  const headSyncRef = useRef<SyncScheduler | null>(null);
+  useEffect(() => {
+    const counts = createSyncScheduler(loadCounts, COUNTS_EVENT_DELAY_MS, COUNTS_MIN_INTERVAL_MS);
+    const head = createSyncScheduler(() => {
       const request = listRequestRef.current;
       fetchListPage(listParamsRef.current)
         .then((page) => { if (request === listRequestRef.current) setConversations((prev) => mergeUnique(page.items, prev)); })
         .catch(() => {});
-    }, 400);
+    }, HEAD_SYNC_DELAY_MS, HEAD_SYNC_MIN_INTERVAL_MS);
+    countsSyncRef.current = counts;
+    headSyncRef.current = head;
+    return () => { counts.dispose(); head.dispose(); };
+  }, [loadCounts]);
+  const scheduleRealtimeSync = (needsHead: boolean) => {
+    countsSyncRef.current?.notify();
+    if (needsHead) headSyncRef.current?.notify();
   };
-  useEffect(() => () => window.clearTimeout(realtimeSyncRef.current.timer), []);
 
   // Open a conversation → load its latest messages.
   useEffect(() => {
@@ -850,11 +865,13 @@ export default function ConversationsPage() {
       };
     });
 
-    setConversations((prev) => prev.map((conversation) => ({
+    // Campaigns bring delivery/read receipts by the thousand; most are for rows not on screen, so leave state as is.
+    const matches = (messages: Message[] = []) => messages.some((message) => message.metadata?.whatsappMessageId === payload.whatsappMessageId);
+    setConversations((prev) => (prev.some((conversation) => matches(conversation.messages)) ? prev.map((conversation) => ({
       ...conversation,
       messages: updateMessages(conversation.messages || []),
-    })));
-    setMessages(updateMessages);
+    })) : prev));
+    setMessages((prev) => (matches(prev) ? updateMessages(prev) : prev));
   };
 
   const handleIncomingRealtimeMessage = (payload: any) => {
@@ -911,7 +928,12 @@ export default function ConversationsPage() {
         return [updatedConv, ...prev.slice(0, idx), ...prev.slice(idx + 1)];
       });
     }
-    scheduleRealtimeSync(!known);
+    // The socket is in every branch room of the organization, so it also hears branches (and platforms) this
+    // view filters out; those change neither the list nor the counts shown here.
+    const view = listParamsRef.current;
+    const outsideView = (view.storeId && targetStoreId && targetStoreId !== view.storeId)
+      || (view.platform && payload.platform && payload.platform !== view.platform);
+    if (!outsideView) scheduleRealtimeSync(!known);
 
     if (isCurrentlyOpen) {
       if (newMessage.from === 'me' || isNearBottom()) scrollIntentRef.current = { kind: 'bottom', smooth: true };
