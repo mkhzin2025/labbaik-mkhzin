@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { FileDown, Loader2, X } from 'lucide-react';
 import api from '../../api/client';
 import type { Campaign } from '../whatsapp/campaignShared';
-import { dateTime, num, pct } from '../whatsapp/campaignFormat';
+import { dateTime, engagement, num, pct } from '../whatsapp/campaignFormat';
 
 /** Campaigns this small are tests (a few numbers, branch managers): listed, but not ticked by default. */
 const TEST_SIZE = 50;
@@ -151,7 +151,7 @@ export default function CampaignReportDialog({ days, onClose }: { days: number; 
                           {c.stats.total < TEST_SIZE && <span className="mr-1.5 text-[11px] font-medium text-labbaik-text-muted">(تجريبية)</span>}
                         </span>
                         <span className="block text-[11px] text-labbaik-text-muted tabular-nums">
-                          {dateTime(c.createdAt)} · {num(c.stats.total)} مستلم · قراءة {pct(c.stats.read, c.stats.delivered)} · تفاعل {pct(c.stats.replied, c.stats.read)}
+                          {dateTime(c.createdAt)} · {num(c.stats.total)} مستلم · قراءة {pct(c.stats.read, c.stats.delivered)} · تفاعل {engagement(c.stats)}
                         </span>
                       </span>
                     </label>

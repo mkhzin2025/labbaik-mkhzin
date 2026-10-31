@@ -1,7 +1,7 @@
 import type { Response } from 'express';
 import { PAGE_MARGIN, REPORT_COLORS as C, createTaelReport, formatNumber as format, formatPercent as percent } from '../../common/pdf/tael-report-kit';
 
-type Stats = { total: number; accepted: number; delivered: number; read: number; replied: number; failed: number; skipped: number };
+type Stats = { total: number; accepted: number; delivered: number; read: number; replied: number; interactions: number; failed: number; skipped: number };
 type Label = { name: string };
 
 export type CampaignReportItem = {
@@ -16,6 +16,8 @@ export type CampaignReportItem = {
   stats: Stats;
   byBranch: { storeName: string | null; stats: Stats }[];
   buttons: { text: string; count: number }[];
+  /** Meta's counts for every button (URL ones included); used instead of `buttons` when available. */
+  metaButtons?: { available: boolean; total: number; buttons: { text: string; count: number }[] };
   errors: { error: string; count: number }[];
 };
 
@@ -47,7 +49,9 @@ const groupErrors = (errors: { error: string; count: number }[]) => {
   return [...map.entries()].map(([reason, count]) => ({ reason, count })).sort((a, b) => b.count - a.count);
 };
 
-const interaction = (s: Stats) => (s.read ? s.replied / s.read : 0);
+/** Replies plus Meta's button clicks, as a share of readers (capped: clicks are counted per press, not per person). */
+const interaction = (s: Stats) => (s.read ? Math.min(1, s.interactions / s.read) : 0);
+const rate = (s: Stats) => percent(Math.min(s.interactions, s.read), s.read);
 
 /**
  * WhatsApp campaigns report in the Tael Bot report style: an overview of the chosen campaigns,
@@ -68,7 +72,7 @@ export function writeCampaignsReportPdf(response: Response, report: CampaignsRep
   const totals = campaigns.reduce<Stats>((acc, c) => {
     for (const key of Object.keys(acc) as (keyof Stats)[]) acc[key] += c.stats[key] || 0;
     return acc;
-  }, { total: 0, accepted: 0, delivered: 0, read: 0, replied: 0, failed: 0, skipped: 0 });
+  }, { total: 0, accepted: 0, delivered: 0, read: 0, replied: 0, interactions: 0, failed: 0, skipped: 0 });
 
   const r = createTaelReport(response, `campaigns-report-${report.from}_${report.to}.pdf`);
   const { doc, height, right, contentWidth, text } = r;
@@ -80,7 +84,7 @@ export function writeCampaignsReportPdf(response: Response, report: CampaignsRep
       { label: 'قبلها واتساب', value: s.accepted, note: `${percent(s.accepted, s.total)} من المستهدفين`, color: C.brand },
       { label: 'وصلت', value: s.delivered, note: `${percent(s.delivered, s.accepted)} من المقبولة`, color: C.lilac },
       { label: 'قُرئت', value: s.read, note: `${percent(s.read, s.delivered)} من الواصلة`, color: C.orange },
-      { label: 'تفاعلوا', value: s.replied, note: `${percent(s.replied, s.read)} من القارئين`, color: C.teal },
+      { label: 'التفاعلات', value: s.interactions, note: `${rate(s)} من القارئين`, color: C.teal },
     ];
     const labelWidth = 74;
     const valueWidth = Math.min(150, boxWidth * 0.36);
@@ -91,7 +95,7 @@ export function writeCampaignsReportPdf(response: Response, report: CampaignsRep
       const rowY = y + index * rowHeight;
       text(stage.label, x + boxWidth - labelWidth, rowY + 2, labelWidth, { size: 9, color: C.ink, bold: true });
       doc.roundedRect(barX, rowY + 3, barWidth, barHeight, 3).fill(C.soft);
-      const filled = s.total ? (stage.value / s.total) * barWidth : 0;
+      const filled = s.total ? Math.min(1, stage.value / s.total) * barWidth : 0;
       if (filled > 0) doc.roundedRect(barX + barWidth - filled, rowY + 3, Math.max(filled, 2), barHeight, 3).fill(stage.color);
       text(format(stage.value), x, rowY + 1, valueWidth, { size: 9.5, color: C.ink, bold: true, align: 'left' });
       if (stage.note) text(stage.note, x, rowY + 13, valueWidth, { size: 6.8, color: C.muted, align: 'left' });
@@ -106,8 +110,8 @@ export function writeCampaignsReportPdf(response: Response, report: CampaignsRep
   text([report.organizationName, 'أداء الحملات المختارة: الوصول والقراءة والتفاعل'].filter(Boolean).join(' | '), PAGE_MARGIN, 136, contentWidth, { size: 9.5, color: C.muted });
 
   r.cards([
-    { label: 'نسبة التفاعل', value: percent(totals.replied, totals.read), note: `من العملاء الذين قرأوا الرسالة`, color: C.plum, hero: true },
-    { label: 'تفاعلوا', value: format(totals.replied), note: `من ${format(totals.read)} قرأوا`, color: C.teal },
+    { label: 'نسبة التفاعل', value: rate(totals), note: `من العملاء الذين قرأوا الرسالة`, color: C.plum, hero: true },
+    { label: 'التفاعلات', value: format(totals.interactions), note: `من ${format(totals.read)} قرأوا`, color: C.teal },
     { label: 'المستهدفون', value: format(totals.total), note: `في ${format(campaigns.length)} حملة`, color: C.plum },
     { label: 'وصلت', value: format(totals.delivered), note: `نسبة الوصول ${percent(totals.delivered, totals.accepted)}`, color: C.lilac },
     { label: 'قُرئت', value: format(totals.read), note: `نسبة القراءة ${percent(totals.read, totals.delivered)}`, color: C.orange },
@@ -136,8 +140,8 @@ export function writeCampaignsReportPdf(response: Response, report: CampaignsRep
     doc.roundedRect(barX, rowY + 3, barWidth, barHeight, 3).fill(C.soft);
     const filled = (interaction(c.stats) / peakRate) * barWidth;
     if (filled > 0) doc.roundedRect(barX + barWidth - filled, rowY + 3, Math.max(filled, 2), barHeight, 3).fill(C.teal);
-    text(percent(c.stats.replied, c.stats.read), rankX + 16 + 52, rowY + 2, valueWidth - 52, { size: 8.5, color: C.ink, bold: true, align: 'left' });
-    text(format(c.stats.replied), rankX + 16, rowY + 2.5, 48, { size: 7, color: C.teal, align: 'left' });
+    text(rate(c.stats), rankX + 16 + 52, rowY + 2, valueWidth - 52, { size: 8.5, color: C.ink, bold: true, align: 'left' });
+    text(format(c.stats.interactions), rankX + 16, rowY + 2.5, 48, { size: 7, color: C.teal, align: 'left' });
   });
   if (ranked.length > shown.length) text(`و ${format(ranked.length - shown.length)} حملة أخرى في جدول المقارنة`, rankX + 16, panelY + panelHeight - 18, rankWidth - 32, { size: 7, color: C.muted });
 
@@ -154,8 +158,8 @@ export function writeCampaignsReportPdf(response: Response, report: CampaignsRep
     { title: 'الوصول', subtitle: 'من المقبولة', value: (s) => percent(s.delivered, s.accepted) },
     { title: 'قُرئت', subtitle: 'رسالة', value: (s) => format(s.read) },
     { title: 'القراءة', subtitle: 'من الواصلة', value: (s) => percent(s.read, s.delivered) },
-    { title: 'تفاعلوا', subtitle: 'عميل', value: (s) => format(s.replied) },
-    { title: 'التفاعل', subtitle: 'من القارئين', value: (s) => percent(s.replied, s.read), strong: true },
+    { title: 'التفاعلات', subtitle: 'رد ونقرة', value: (s) => format(s.interactions) },
+    { title: 'التفاعل', subtitle: 'من القارئين', value: (s) => rate(s), strong: true },
     { title: 'لم تصل', subtitle: 'رسالة', value: (s) => format(s.failed) },
   ];
   const nameColumn = 200;
@@ -253,7 +257,7 @@ export function writeCampaignsReportPdf(response: Response, report: CampaignsRep
     r.chip(PAGE_MARGIN + 304, 20, 92, 'الحملة', `${format(index + 1)} من ${format(campaigns.length)}`);
 
     r.cards([
-      { label: 'نسبة التفاعل', value: percent(s.replied, s.read), note: `${format(s.replied)} تفاعلوا من القارئين`, color: C.plum, hero: true },
+      { label: 'نسبة التفاعل', value: rate(s), note: `${format(s.interactions)} تفاعل من القارئين`, color: C.plum, hero: true },
       { label: 'المستهدفون', value: format(s.total), note: `${format(s.accepted)} قبلها واتساب`, color: C.plum },
       { label: 'وصلت', value: format(s.delivered), note: `نسبة الوصول ${percent(s.delivered, s.accepted)}`, color: C.lilac },
       { label: 'قُرئت', value: format(s.read), note: `نسبة القراءة ${percent(s.read, s.delivered)}`, color: C.orange },
@@ -297,8 +301,13 @@ export function writeCampaignsReportPdf(response: Response, report: CampaignsRep
 
     // Most used buttons (bottom right).
     const bottom = top + half + gap;
-    inner = r.panel(rightX, bottom, columnW, half, 'الأزرار الأكثر استخدامًا', `${format(s.replied)} تفاعلوا`);
-    const buttons = c.buttons.slice(0, 5);
+    const fromMeta = !!c.metaButtons?.available && c.metaButtons.buttons.length > 0;
+    // Meta's clicks are a rate of delivered messages; our own button replies are a share of everyone who replied.
+    const buttonBase = fromMeta ? s.delivered : s.replied;
+    inner = fromMeta
+      ? r.panel(rightX, bottom, columnW, half, 'النقرات على الأزرار', `${format(c.metaButtons!.total)} نقرة · حسب ميتا`)
+      : r.panel(rightX, bottom, columnW, half, 'الأزرار الأكثر استخدامًا', `${format(s.interactions)} تفاعل`);
+    const buttons = (fromMeta ? c.metaButtons!.buttons : c.buttons).slice(0, 5);
     if (!buttons.length) text('لا توجد ضغطات أزرار مسجّلة.', rightX + 16, inner + 20, columnW - 32, { size: 9, color: C.muted, align: 'center' });
     const buttonRow = (half - 50) / 5;
     const maxButton = Math.max(1, ...buttons.map((b) => b.count));
@@ -312,7 +321,7 @@ export function writeCampaignsReportPdf(response: Response, report: CampaignsRep
       const filled = (b.count / maxButton) * barWidth;
       doc.roundedRect(barX + barWidth - filled, rowY + 4, Math.max(filled, 2), 9, 3).fill(C.brand);
       text(format(b.count), rightX + 16 + 40, rowY + 2, 52, { size: 8.5, color: C.ink, bold: true, align: 'left' });
-      text(percent(b.count, s.replied), rightX + 16, rowY + 2, 36, { size: 7.5, color: C.muted, align: 'left' });
+      text(percent(b.count, buttonBase), rightX + 16, rowY + 2, 36, { size: 7.5, color: C.muted, align: 'left' });
     });
 
     // Why messages did not arrive (bottom left).

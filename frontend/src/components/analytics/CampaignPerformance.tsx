@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom';
 import api from '../../api/client';
 import { CountUp } from '@/components/ui';
 import { ActivityChart, CampaignStatusBadge, type ActivityPoint, type CampaignStats, type CampaignStatus } from '../whatsapp/campaignShared';
-import { dateTime, num, pct } from '../whatsapp/campaignFormat';
+import { dateTime, engagement, interactionsOf, num, pct } from '../whatsapp/campaignFormat';
 import { CATEGORY_LABELS } from '../whatsapp/templateUtils';
 import CampaignReportDialog from './CampaignReportDialog';
 
@@ -111,7 +111,7 @@ export default function CampaignPerformance({ days, storeId }: { days: number; s
             <Kpi label="رسائل قبلها واتساب" value={num(totals.accepted)} note={`من ${num(totals.total)} مستهدف`} />
             <Kpi label="نسبة الوصول" value={pct(totals.delivered, totals.accepted)} />
             <Kpi label="نسبة القراءة" value={pct(totals.read, totals.delivered)} />
-            <Kpi label="نسبة التفاعل" value={pct(totals.replied, totals.read)} note={`من القارئين · ${num(totals.clicked)} ضغطة زر`} />
+            <Kpi label="نسبة التفاعل" value={engagement(totals)} note={`من القارئين · ${num(interactionsOf(totals))} تفاعل (ردود ونقرات)`} />
           </div>
 
           <div className="overflow-x-auto">
@@ -123,8 +123,8 @@ export default function CampaignPerformance({ days, storeId }: { days: number; s
                   <th className="text-right font-bold">مُرسلة</th>
                   <th className="text-right font-bold">وصلت</th>
                   <th className="text-right font-bold">قُرئت</th>
-                  <th className="text-right font-bold" title="نسبة من قرأوا الرسالة ثم تفاعلوا">تفاعل <span className="font-medium">(من القارئين)</span></th>
-                  <th className="text-right font-bold">ضغط زر</th>
+                  <th className="text-right font-bold" title="الردود والنقرات على الأزرار مقارنة بمن قرأوا الرسالة">تفاعل <span className="font-medium">(من القارئين)</span></th>
+                  <th className="text-right font-bold" title="الردود والنقرات على كل الأزرار، ومنها أزرار الروابط حسب ميتا">التفاعلات</th>
                   <th className="text-right font-bold">فشل</th>
                   <th className="text-right font-bold">آخر حملة</th>
                 </tr>
@@ -145,8 +145,8 @@ export default function CampaignPerformance({ days, storeId }: { days: number; s
                       <td className="tabular-nums font-bold text-neutral-900 dark:text-white">{num(t.stats.accepted)}</td>
                       <td className="tabular-nums">{pct(t.stats.delivered, t.stats.accepted)}</td>
                       <td className="tabular-nums">{pct(t.stats.read, t.stats.delivered)}</td>
-                      <td className="tabular-nums">{pct(t.stats.replied, t.stats.read)} <span className="text-xs text-labbaik-text-muted">({num(t.stats.replied)})</span></td>
-                      <td className="tabular-nums">{num(t.stats.clicked)}</td>
+                      <td className="tabular-nums">{engagement(t.stats)}</td>
+                      <td className="tabular-nums">{num(interactionsOf(t.stats))}</td>
                       <td className="tabular-nums">{num(t.stats.failed)}</td>
                       <td className="text-xs text-labbaik-text-muted whitespace-nowrap">{dateTime(t.lastSentAt)}</td>
                     </tr>
@@ -171,7 +171,7 @@ export default function CampaignPerformance({ days, storeId }: { days: number; s
                         <span className="flex-1 min-w-0">
                           <span className="block text-sm font-bold text-neutral-900 dark:text-white truncate group-hover:text-labbaik-blue">{c.name}</span>
                           <span className="block text-[11px] text-labbaik-text-muted tabular-nums">
-                            {dateTime(c.createdAt)} · {num(c.stats.total)} · قراءة {pct(c.stats.read, c.stats.delivered)} · تفاعل {pct(c.stats.replied, c.stats.read)}
+                            {dateTime(c.createdAt)} · {num(c.stats.total)} · قراءة {pct(c.stats.read, c.stats.delivered)} · تفاعل {engagement(c.stats)}
                           </span>
                         </span>
                         <CampaignStatusBadge status={c.status} />

@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { AlertTriangle, Ban, CalendarClock, CheckCircle2, Clock, Loader2, MinusCircle, Table2 } from 'lucide-react';
-import { num, pct } from './campaignFormat';
+import { engagement, interactionsOf, num, pct } from './campaignFormat';
 import type { HeaderMedia } from './templateUtils';
 
 export type CampaignStats = {
@@ -12,6 +12,8 @@ export type CampaignStats = {
   read: number;
   replied: number;
   clicked: number;
+  /** Replies plus Meta's clicks on every button (URL ones included); just replies when Meta's numbers are missing. */
+  interactions?: number;
   failed: number;
   skipped: number;
 };
@@ -60,6 +62,8 @@ export type CampaignDetails = Campaign & {
   parameters: { body: string[]; header: string[]; buttons: { index: number; text: string }[]; otpCode?: string | null; nameFallback?: string | null; headerMedia?: HeaderMedia | null };
   byBranch: { storeId: string; storeName: string | null; stats: CampaignStats }[];
   buttons: { text: string; count: number }[];
+  /** Meta's click totals for every template button (URL buttons included), for the days this campaign owns. */
+  metaButtons: { available: boolean; reason?: string; shared?: boolean; from?: string; to?: string; total: number; buttons: { type: string; text: string; count: number }[] };
   errors: { error: string; count: number }[];
   /** Numbers Meta rejected over unpaid WhatsApp billing; can be re-sent once the account is paid up. */
   paymentFailed: number;
@@ -105,7 +109,7 @@ export function Funnel({ stats }: { stats: CampaignStats }) {
     { label: 'قبلها واتساب', value: stats.accepted, note: pct(stats.accepted, stats.total) },
     { label: 'وصلت', value: stats.delivered, note: `${pct(stats.delivered, stats.accepted)} من المقبولة` },
     { label: 'قُرئت', value: stats.read, note: `${pct(stats.read, stats.delivered)} من الواصلة` },
-    { label: 'تفاعلوا بالرد', value: stats.replied, note: `${pct(stats.replied, stats.read)} من القارئين` },
+    { label: 'التفاعلات', value: interactionsOf(stats), note: `${engagement(stats)} من القارئين` },
   ];
   return (
     <ul className="space-y-2" aria-label="مراحل وصول الحملة">

@@ -609,6 +609,52 @@ export class MetaWhatsAppService implements OnModuleInit {
   }
 
 
+  /**
+   * Button clicks Meta counted for a template between two dates, per button per UTC day (template_analytics).
+   * Covers URL buttons too, which send no webhook. Totals only: Meta does not say who clicked.
+   */
+  async templateButtonClicks(
+    connectionId: string,
+    template: { templateId: string | null; name: string; language: string },
+    from: Date,
+    to: Date,
+  ): Promise<{ day: number; type: string; text: string; count: number }[]> {
+    const local = (template.templateId && await this.templateRepository.findOne({ where: { id: template.templateId } }))
+      || await this.templateRepository.findOne({ where: { connectionId, name: template.name, language: template.language } });
+    if (!local?.metaTemplateId) throw new NotFoundException('Template is not synced from Meta');
+
+    const secretConnection = await this.cachedConnection(connectionId);
+    const accessToken = this.credentialEncryption.decryptSecret(secretConnection.accessToken)!;
+    const rows: { day: number; type: string; text: string; count: number }[] = [];
+    let url: string | null = `https://graph.facebook.com/${this.getGraphVersion()}/${secretConnection.wabaId}/template_analytics`;
+    let params: Record<string, string | number> | undefined = {
+      start: Math.floor(from.getTime() / 1000),
+      end: Math.floor(to.getTime() / 1000),
+      granularity: 'DAILY',
+      metric_types: JSON.stringify(['CLICKED']),
+      template_ids: JSON.stringify([local.metaTemplateId]),
+    };
+    try {
+      for (let page = 0; url && page < 10; page++) {
+        const response = await axios.get(url, { headers: { Authorization: `Bearer ${accessToken}` }, params, timeout: 15000 });
+        for (const group of response.data?.data || []) {
+          for (const point of group?.data_points || []) {
+            const day = Number(point?.start || 0) * 1000;
+            for (const click of point?.clicked || []) {
+              const count = Number(click?.count || 0);
+              if (count > 0) rows.push({ day, type: String(click?.type || 'unknown'), text: String(click?.button_content || ''), count });
+            }
+          }
+        }
+        url = response.data?.paging?.next || null;
+        params = undefined;
+      }
+    } catch (error: any) {
+      throw new BadRequestException(this.metaErrorMessage(error));
+    }
+    return rows;
+  }
+
   async getWebhookConnection(connectionId: string) {
     return this.cachedConnection(connectionId);
   }

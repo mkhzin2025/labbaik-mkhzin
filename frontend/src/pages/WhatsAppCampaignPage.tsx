@@ -16,7 +16,8 @@ import {
   type ActivityPoint,
   type CampaignDetails,
 } from '../components/whatsapp/campaignShared';
-import { dateTime, isActive, num, pct } from '../components/whatsapp/campaignFormat';
+import { dateTime, engagement, interactionsOf, isActive, num, pct } from '../components/whatsapp/campaignFormat';
+import { toEnglishDigits } from '@/lib/utils';
 
 type Recipient = {
   id: string; customerId: string | null; storeId: string; storeName: string | null; phone: string; customerName: string | null; status: string; error: string | null;
@@ -34,6 +35,15 @@ const FILTERS = [
 ] as const;
 
 const PAGE_SIZE = 25;
+
+const BUTTON_TYPES: Record<string, string> = {
+  url_button: 'رابط موقع',
+  quick_reply_button: 'رد سريع',
+  phone_number_button: 'اتصال',
+  copy_code_button: 'نسخ رمز',
+};
+
+const day = (iso?: string) => (iso ? toEnglishDigits(new Date(iso).toLocaleDateString('ar-SA-u-ca-gregory-nu-latn', { day: 'numeric', month: 'short', timeZone: 'UTC' })) : '');
 
 const errorMessage = (error: unknown, fallback: string) => {
   const data = (error as { response?: { data?: { message?: string } } })?.response?.data;
@@ -189,6 +199,7 @@ export default function WhatsAppCampaignPage() {
   const retryable = !isActive(campaign.status) && (stats.failed + stats.skipped) > 0;
   const analysis = template ? analyzeTemplate(template) : null;
   const params = campaign.parameters;
+  const clicks = campaign.metaButtons?.available && campaign.metaButtons.buttons.length ? campaign.metaButtons : null;
 
   return (
     <div className="max-w-6xl space-y-4 pb-10" dir="rtl">
@@ -268,11 +279,12 @@ export default function WhatsAppCampaignPage() {
         <p className="flex items-start gap-1.5 rounded-lg bg-red-500/10 px-3 py-2 text-sm font-bold text-red-800 dark:text-red-300"><AlertTriangle size={16} className="mt-0.5 shrink-0" />{campaign.lastError}</p>
       )}
 
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+      <div className={`grid grid-cols-2 gap-3 ${clicks ? 'md:grid-cols-3 xl:grid-cols-6' : 'lg:grid-cols-5'}`}>
         <Tile label="المستهدفون" value={num(stats.total)} note={`${num(campaign.sourceRecords)} سجل قبل التنقية`} />
         <Tile label="نسبة الوصول" value={pct(stats.delivered, stats.accepted)} note={`${num(stats.delivered)} وصلت`} />
         <Tile label="نسبة القراءة" value={pct(stats.read, stats.delivered)} note={`${num(stats.read)} قرأوا`} />
-        <Tile label="نسبة التفاعل" value={pct(stats.replied, stats.read)} note={`من القارئين · ${num(stats.replied)} ردّوا · ${num(stats.clicked)} ضغطوا زرًا`} />
+        <Tile label="نسبة التفاعل" value={engagement(stats)} note={`من القارئين · ${num(interactionsOf(stats))} تفاعل · ${num(stats.replied)} ردّوا${clicks ? ` · ${num(clicks.total)} نقرة` : ''}`} />
+        {clicks && <Tile label="نسبة النقر" value={pct(clicks.total, stats.delivered)} note={`${num(clicks.total)} نقرة على الأزرار · حسب ميتا`} />}
         <Tile label="فشل" value={num(stats.failed)} note={stats.skipped ? `${num(stats.skipped)} لم تُرسل` : pct(stats.failed, stats.total)} tone={stats.failed ? 'warn' : undefined} />
       </div>
 
@@ -345,7 +357,32 @@ export default function WhatsAppCampaignPage() {
             )}
           </Panel>
 
-          {campaign.buttons.length > 0 && (
+          {clicks ? (
+            <Panel
+              title="النقرات على الأزرار"
+              subtitle={`حسب ميتا لهذا القالب من ${day(clicks.from)} إلى ${day(clicks.to)}. أرقام إجمالية لا تحدد من ضغط، والنسبة من الرسائل التي وصلت.`}
+            >
+              <ul className="space-y-2">
+                {clicks.buttons.map((b) => (
+                  <li key={`${b.type}:${b.text}`} className="text-sm">
+                    <div className="flex items-center gap-2">
+                      <MousePointerClick size={14} className="shrink-0 text-labbaik-text-muted" />
+                      <span className="flex-1 min-w-0 truncate font-bold text-neutral-800 dark:text-neutral-100" dir="auto">{b.text || 'زر'}</span>
+                      <b className="tabular-nums text-neutral-900 dark:text-white">{num(b.count)}</b>
+                      <span className="w-10 text-left tabular-nums text-xs text-labbaik-text-muted">{pct(b.count, stats.delivered)}</span>
+                    </div>
+                    <p className="mr-[22px] text-[11px] text-labbaik-text-muted">{BUTTON_TYPES[b.type] || 'زر'}</p>
+                  </li>
+                ))}
+              </ul>
+              {campaign.metaButtons.shared && (
+                <p className="mt-3 flex items-start gap-1.5 text-xs text-amber-800 dark:text-amber-300">
+                  <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+                  أُرسل هذا القالب في حملة أخرى في اليوم نفسه، فالأرقام تشمل نقراتها أيضًا.
+                </p>
+              )}
+            </Panel>
+          ) : campaign.buttons.length > 0 && (
             <Panel title="الأزرار الأكثر ضغطًا">
               <ul className="space-y-1.5">
                 {campaign.buttons.map((b) => (
@@ -356,6 +393,9 @@ export default function WhatsAppCampaignPage() {
                   </li>
                 ))}
               </ul>
+              {campaign.metaButtons?.reason && (
+                <p className="mt-3 text-xs text-labbaik-text-muted wrap-anywhere" dir="auto">تعذر جلب نقرات روابط الأزرار من ميتا: {campaign.metaButtons.reason}</p>
+              )}
             </Panel>
           )}
 

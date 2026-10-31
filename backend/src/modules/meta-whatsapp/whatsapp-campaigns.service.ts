@@ -30,6 +30,51 @@ const MAX_CONSECUTIVE_FAILURES = 25;
  * Meta-side failures caused by the business's own billing (unpaid WhatsApp invoices, a failing card; code 131042).
  * Meta accepted these messages, so the plain retry skips them; once billing is fixed they can be sent again.
  */
+/** Meta's button-click counts are refreshed at most this often per campaign (the details page polls every 30s). */
+const META_CLICKS_TTL_MS = 15 * 60_000;
+/** After a failed Meta call, wait this long before asking again. */
+const META_CLICKS_RETRY_MS = 5 * 60_000;
+/** Clicks are counted for this long after a campaign starts, unless the same template is sent again sooner. */
+const META_CLICKS_WINDOW_DAYS = 30;
+const DAY_MS = 24 * 3600 * 1000;
+const utcDay = (date: Date) => new Date(Math.floor(date.getTime() / DAY_MS) * DAY_MS);
+
+type DailyClick = { day: number; type: string; text: string; count: number };
+type TemplateRef = Pick<WhatsAppCampaign, 'connectionId' | 'templateId' | 'templateName' | 'templateLanguage'>;
+
+/** When the same template (same number) was sent just before and just after campaign `alias`. */
+const NEIGHBOUR_STARTS = (alias: string) => `
+  (SELECT MIN(n."startedAt") FROM whatsapp_campaigns n WHERE n."connectionId" = ${alias}."connectionId" AND n."templateName" = ${alias}."templateName"
+     AND n."templateLanguage" = ${alias}."templateLanguage" AND n.id <> ${alias}.id AND n."startedAt" > ${alias}."startedAt") AS "nextStart",
+  (SELECT MAX(n."startedAt") FROM whatsapp_campaigns n WHERE n."connectionId" = ${alias}."connectionId" AND n."templateName" = ${alias}."templateName"
+     AND n."templateLanguage" = ${alias}."templateLanguage" AND n.id <> ${alias}.id AND n."startedAt" <= ${alias}."startedAt") AS "prevStart"`;
+
+/**
+ * The UTC days whose Meta clicks belong to a campaign: from its start day until the same template is sent
+ * again (or 30 days). A send of the template on the same start day makes the numbers shared.
+ */
+function clickWindow(startedAt: Date, nextStart?: Date | string | null, prevStart?: Date | string | null) {
+  const start = utcDay(startedAt);
+  const nextDay = nextStart ? utcDay(new Date(nextStart)) : null;
+  const shared = (!!nextDay && nextDay.getTime() === start.getTime()) || (!!prevStart && utcDay(new Date(prevStart)).getTime() === start.getTime());
+  let end = new Date(Math.min(Date.now(), start.getTime() + META_CLICKS_WINDOW_DAYS * DAY_MS));
+  if (nextDay && nextDay > start && nextDay < end) end = nextDay;
+  if (end <= start) end = new Date(start.getTime() + DAY_MS);
+  return { start, end, shared };
+}
+
+export type MetaButtonClicks = {
+  available: boolean;
+  /** Why the numbers are missing (Meta error, template not synced...). */
+  reason?: string;
+  /** Another campaign sent the same template on the same day, so Meta's daily totals include its clicks too. */
+  shared?: boolean;
+  from?: string;
+  to?: string;
+  total: number;
+  buttons: { type: string; text: string; count: number }[];
+};
+
 const PAYMENT_FAILURE_SQL = `r.status = 'failed' AND (r.error ILIKE '%unsettled payment%' OR r.error ILIKE '%payment method%' OR r.error ILIKE '%131042%')`;
 
 export type CampaignStats = {
@@ -40,6 +85,8 @@ export type CampaignStats = {
   read: number;
   replied: number;
   clicked: number;
+  /** Replies plus Meta's clicks on every button (URL ones included); just replies when Meta's numbers are missing. */
+  interactions: number;
   failed: number;
   skipped: number;
 };
@@ -76,6 +123,7 @@ const toStats = (row: any = {}): CampaignStats => ({
   read: Number(row.read || 0),
   replied: Number(row.replied || 0),
   clicked: Number(row.clicked || 0),
+  interactions: Number(row.replied || 0),
   failed: Number(row.failed || 0),
   skipped: Number(row.skipped || 0),
 });
@@ -90,6 +138,7 @@ export class WhatsAppCampaignsService implements OnApplicationBootstrap, OnModul
   private readonly logger = new Logger(WhatsAppCampaignsService.name);
   private readonly running = new Set<string>();
   private scheduleTimer?: NodeJS.Timeout;
+  private readonly metaClicks = new Map<string, { at: number; ttl: number; value: Promise<DailyClick[]> }>();
 
   constructor(
     @InjectRepository(WhatsAppCampaign) private readonly campaignRepository: Repository<WhatsAppCampaign>,
@@ -594,9 +643,16 @@ export class WhatsAppCampaignsService implements OnApplicationBootstrap, OnModul
       .skip((query.page - 1) * query.limit)
       .take(query.limit)
       .getManyAndCount();
-    const stats = await this.statsFor(campaigns.map((campaign) => campaign.id));
+    const ids = campaigns.map((campaign) => campaign.id);
+    const [stats, interactions] = await Promise.all([
+      this.statsFor(ids),
+      ids.length ? this.campaignInteractions([ids], 'c.id = ANY($1::uuid[])') : null,
+    ]);
     return {
-      items: campaigns.map((campaign) => ({ ...this.toPublic(campaign), stats: stats.get(campaign.id) || toStats() })),
+      items: campaigns.map((campaign) => {
+        const row = stats.get(campaign.id) || toStats();
+        return { ...this.toPublic(campaign), stats: { ...row, interactions: interactions?.byCampaign.get(campaign.id) ?? row.interactions } };
+      }),
       total,
       page: query.page,
       limit: query.limit,
@@ -605,7 +661,7 @@ export class WhatsAppCampaignsService implements OnApplicationBootstrap, OnModul
 
   async getForUser(userId: string, organizationId: string | undefined, id: string) {
     const campaign = await this.findAccessible(userId, organizationId, id);
-    const [stats, byBranch, buttons, errors, timeline, [payment]] = await Promise.all([
+    const [stats, byBranch, buttons, errors, timeline, [payment], metaButtons] = await Promise.all([
       this.statsFor([id]).then((map) => map.get(id) || toStats()),
       this.recipientRepository.query(
         `SELECT r."storeId", MAX(r."storeName") AS "storeName", ${STATS_SELECT}
@@ -640,7 +696,9 @@ export class WhatsAppCampaignsService implements OnApplicationBootstrap, OnModul
         `SELECT COUNT(*)::int AS count FROM whatsapp_campaign_recipients r WHERE r."campaignId" = $1 AND ${PAYMENT_FAILURE_SQL}`,
         [id],
       ),
+      this.metaButtonClicks(campaign),
     ]);
+    if (metaButtons.available) stats.interactions = stats.replied - stats.clicked + metaButtons.total;
     return {
       ...this.toPublic(campaign),
       parameters: campaign.parameters,
@@ -648,6 +706,7 @@ export class WhatsAppCampaignsService implements OnApplicationBootstrap, OnModul
       stats,
       byBranch: byBranch.map((row: any) => ({ storeId: row.storeId, storeName: row.storeName, stats: toStats(row) })),
       buttons: buttons.map((row: any) => ({ text: row.text, count: Number(row.count) })),
+      metaButtons,
       errors: errors.map((row: any) => ({ error: row.error, count: Number(row.count) })),
       paymentFailed: Number(payment?.count || 0),
       timeline: timeline.map((row: any) => ({ kind: row.kind, bucket: new Date(row.bucket).toISOString(), count: Number(row.count) })),
@@ -712,7 +771,7 @@ export class WhatsAppCampaignsService implements OnApplicationBootstrap, OnModul
     const params = [organization.id, since, storeIds];
     const scope = `c."organizationId" = $1 AND c."createdAt" >= $2 AND r."storeId" = ANY($3::uuid[])`;
 
-    const [totalsRow, templates, daily, campaigns] = await Promise.all([
+    const [totalsRow, templates, daily, campaigns, interactions] = await Promise.all([
       this.recipientRepository.query(
         `SELECT COUNT(DISTINCT c.id)::int AS campaigns, ${STATS_SELECT}
            FROM whatsapp_campaigns c JOIN whatsapp_campaign_recipients r ON r."campaignId" = c.id WHERE ${scope}`,
@@ -752,11 +811,13 @@ export class WhatsAppCampaignsService implements OnApplicationBootstrap, OnModul
           GROUP BY c.id ORDER BY c."createdAt" DESC LIMIT 200`,
         params,
       ),
+      this.campaignInteractions(params, scope),
     ]);
+    const withInteractions = (stats: CampaignStats, value: number | undefined) => ({ ...stats, interactions: value ?? stats.interactions });
 
     return {
       period: { days: query.days, from: since.toISOString(), to: new Date().toISOString() },
-      totals: { campaigns: Number(totalsRow[0]?.campaigns || 0), ...toStats(totalsRow[0]) },
+      totals: { campaigns: Number(totalsRow[0]?.campaigns || 0), ...withInteractions(toStats(totalsRow[0]), interactions.total) },
       templates: templates.map((row: any) => ({
         key: `${row.templateName}::${row.templateLanguage}`,
         templateId: row.templateId,
@@ -765,7 +826,7 @@ export class WhatsAppCampaignsService implements OnApplicationBootstrap, OnModul
         templateCategory: row.templateCategory,
         campaigns: Number(row.campaigns),
         lastSentAt: row.lastSentAt,
-        stats: toStats(row),
+        stats: withInteractions(toStats(row), interactions.byTemplate.get(`${row.templateName}::${row.templateLanguage}`)),
       })),
       daily: daily.map((row: any) => ({ key: row.key, kind: row.kind, day: row.day, count: Number(row.count) })),
       campaigns: campaigns.map((row: any) => ({
@@ -775,9 +836,118 @@ export class WhatsAppCampaignsService implements OnApplicationBootstrap, OnModul
         createdAt: row.createdAt,
         key: `${row.templateName}::${row.templateLanguage}`,
         templateName: row.templateName,
-        stats: toStats(row),
+        stats: withInteractions(toStats(row), interactions.byCampaign.get(row.id)),
       })),
     };
+  }
+
+  /** Meta's daily button clicks for one template from a UTC day until now, cached (pages poll every 30s). */
+  private templateDailyClicks(campaign: TemplateRef, from: Date): Promise<DailyClick[]> {
+    const key = `${campaign.connectionId}|${campaign.templateName}|${campaign.templateLanguage}|${from.getTime()}`;
+    const hit = this.metaClicks.get(key);
+    if (hit && Date.now() - hit.at < hit.ttl) return hit.value;
+    const value = this.metaWhatsAppService.templateButtonClicks(
+      campaign.connectionId,
+      { templateId: campaign.templateId, name: campaign.templateName, language: campaign.templateLanguage },
+      from,
+      new Date(),
+    );
+    const entry = { at: Date.now(), ttl: META_CLICKS_TTL_MS, value };
+    this.metaClicks.set(key, entry);
+    value.catch((error: any) => {
+      entry.ttl = META_CLICKS_RETRY_MS;
+      this.logger.warn(`Meta button clicks unavailable for template ${campaign.templateName}: ${error?.message}`);
+    });
+    if (this.metaClicks.size > 500) this.metaClicks.delete(this.metaClicks.keys().next().value!);
+    return value;
+  }
+
+  /**
+   * Clicks on every template button as Meta counts them, URL buttons included (those send no webhook).
+   * Meta reports per template per UTC day; see clickWindow for which days belong to this campaign.
+   */
+  private async metaButtonClicks(campaign: WhatsAppCampaign): Promise<MetaButtonClicks> {
+    if (!campaign.startedAt) return { available: false, reason: 'لم يبدأ الإرسال بعد.', total: 0, buttons: [] };
+    try {
+      const [neighbours] = await this.campaignRepository.query(
+        `SELECT ${NEIGHBOUR_STARTS('c')} FROM whatsapp_campaigns c WHERE c.id = $1`,
+        [campaign.id],
+      );
+      const window = clickWindow(campaign.startedAt, neighbours?.nextStart, neighbours?.prevStart);
+      const totals = new Map<string, { type: string; text: string; count: number }>();
+      for (const row of await this.templateDailyClicks(campaign, window.start)) {
+        if (row.day < window.start.getTime() || row.day >= window.end.getTime()) continue;
+        const key = `${row.type}::${row.text}`;
+        const entry = totals.get(key) || { type: row.type, text: row.text, count: 0 };
+        entry.count += row.count;
+        totals.set(key, entry);
+      }
+      const buttons = [...totals.values()].sort((a, b) => b.count - a.count);
+      return {
+        available: true,
+        shared: window.shared,
+        from: window.start.toISOString(),
+        to: window.end.toISOString(),
+        total: buttons.reduce((sum, button) => sum + button.count, 0),
+        buttons,
+      };
+    } catch (error: any) {
+      return { available: false, reason: errorText(error), total: 0, buttons: [] };
+    }
+  }
+
+  /**
+   * Interactions per campaign (campaigns matching `scope`): replies plus Meta's clicks on every button. Our own button replies
+   * are dropped first since Meta's quick-reply counts include them. With a branch filter the clicks (which Meta
+   * can't split by branch) are scaled to the share of the campaign's recipients in scope.
+   */
+  private async campaignInteractions(params: unknown[], scope: string) {
+    const rows: any[] = await this.recipientRepository.query(
+      `SELECT c.id, c."connectionId", c."templateId", c."templateName", c."templateLanguage", c."startedAt", c."totalRecipients",
+              ${NEIGHBOUR_STARTS('c')},
+              COUNT(*)::int AS total,
+              COUNT(*) FILTER (WHERE r."repliedAt" IS NOT NULL)::int AS replied,
+              COUNT(*) FILTER (WHERE r."replyType" = 'button')::int AS clicked
+         FROM whatsapp_campaigns c JOIN whatsapp_campaign_recipients r ON r."campaignId" = c.id
+        WHERE ${scope}
+        GROUP BY c.id`,
+      params,
+    );
+    const groups = new Map<string, any[]>();
+    for (const row of rows) {
+      if (!row.startedAt) continue;
+      const key = `${row.connectionId}|${row.templateName}|${row.templateLanguage}`;
+      groups.set(key, [...(groups.get(key) || []), row]);
+    }
+    const metaClicks = new Map<string, number>();
+    const queue = [...groups.values()];
+    const worker = async () => {
+      for (let group = queue.shift(); group; group = queue.shift()) {
+        const windows = group.map((row) => ({ row, window: clickWindow(new Date(row.startedAt), row.nextStart, row.prevStart) }));
+        const from = new Date(Math.min(...windows.map(({ window }) => window.start.getTime())));
+        const daily = await this.templateDailyClicks(group[0], from).catch(() => null);
+        if (!daily) continue;
+        for (const { row, window } of windows) {
+          const clicks = daily.reduce((sum, d) => (d.day >= window.start.getTime() && d.day < window.end.getTime() ? sum + d.count : sum), 0);
+          const share = row.totalRecipients ? Math.min(1, Number(row.total) / Number(row.totalRecipients)) : 1;
+          metaClicks.set(row.id, Math.round(clicks * share));
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: 4 }, worker));
+    // Rolled up from the campaigns, since Meta's clicks are attributed per campaign.
+    const byCampaign = new Map<string, number>();
+    const byTemplate = new Map<string, number>();
+    let total = 0;
+    for (const row of rows) {
+      const meta = metaClicks.get(row.id);
+      const value = meta === undefined ? Number(row.replied) : Number(row.replied) - Number(row.clicked) + meta;
+      const key = `${row.templateName}::${row.templateLanguage}`;
+      byCampaign.set(row.id, value);
+      byTemplate.set(key, (byTemplate.get(key) || 0) + value);
+      total += value;
+    }
+    return { byCampaign, byTemplate, total };
   }
 
   private async statsFor(campaignIds: string[]) {
