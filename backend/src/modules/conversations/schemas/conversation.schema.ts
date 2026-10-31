@@ -94,6 +94,10 @@ export class Conversation extends Document {
   @Prop({ type: Date, default: null })
   ratingRequestedAt: Date | null;
 
+  // Mirrors the customer's block (kept in the customers table) so the inbox can show it without a lookup.
+  @Prop({ type: Date, default: null })
+  blockedAt: Date | null;
+
   @Prop({ type: [String], default: [] })
   tags: string[];
 

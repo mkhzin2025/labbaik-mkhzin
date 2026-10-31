@@ -1,4 +1,5 @@
-import { Controller, Get, Post, Param, UseGuards, Request, Patch, Body, NotFoundException, Res, BadRequestException, Query, ForbiddenException } from '@nestjs/common';
+import { Controller, Get, Post, Param, UseGuards, Request, Patch, Body, NotFoundException, Res, BadRequestException, Query, ForbiddenException, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiBody, ApiNotFoundResponse, ApiOperation, ApiParam, ApiResponse, ApiTags, ApiUnauthorizedResponse } from '@nestjs/swagger';
 import { ConversationsService } from './conversations.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -12,7 +13,7 @@ import { IsIn, IsInt, IsISO8601, IsOptional, IsString, IsUUID, Max, MaxLength, M
 import { Type } from 'class-transformer';
 import { CONVERSATION_RATINGS, CONVERSATION_STATUSES } from './schemas/conversation.schema';
 import type { ConversationRating, ConversationStatus } from './schemas/conversation.schema';
-import type { InboxFilters, InboxTab, InboxView } from './conversations.service';
+import type { InboxFilters, InboxTab, InboxView, UploadedChatFile } from './conversations.service';
 import { Access } from '../organizations/access';
 
 export class InboxFilterQueryDto {
@@ -25,7 +26,7 @@ export class InboxFilterQueryDto {
   @IsOptional() @IsIn(['active', 'snoozed', 'closed'])
   view?: InboxView;
 
-  @IsOptional() @IsIn(['all', 'unread', 'needs_reply'])
+  @IsOptional() @IsIn(['all', 'unread', 'needs_reply', 'pending'])
   tab?: InboxTab;
 
   @IsOptional() @IsIn(['whatsapp', 'instagram', 'facebook', 'google_maps'])
@@ -183,6 +184,22 @@ export class ConversationsController {
   async sendMessage(@Param('id') id: string, @Body('text') text: string, @Request() req: any) {
     const conversation: any = await this.requireOwnedConversation(id, req);
     return this.conversationsService.sendMessage(id, conversation.storeId, text);
+  }
+
+  /** Blocks (or unblocks) the conversation's customer across the organization: their messages are dropped and campaigns skip them. */
+  @Post(':id/block')
+  async setBlocked(@Param('id') id: string, @Body('blocked') blocked: boolean, @Request() req: any) {
+    const conversation: any = await this.requireOwnedConversation(id, req);
+    const organization = await this.organizationsService.getForUser(req.user.id, req.user.organizationId);
+    return this.conversationsService.setCustomerBlocked(id, conversation.storeId, organization.id, blocked !== false);
+  }
+
+  /** Sends an image, video, audio or document (with an optional caption) to the customer. */
+  @Post(':id/attachments')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 16 * 1024 * 1024 } }))
+  async sendAttachment(@Param('id') id: string, @UploadedFile() file: UploadedChatFile, @Body('caption') caption: string | undefined, @Request() req: any) {
+    const conversation: any = await this.requireOwnedConversation(id, req);
+    return this.conversationsService.sendAttachment(id, conversation.storeId, file, typeof caption === 'string' ? caption.slice(0, 1024) : undefined);
   }
 
   private toFilters(query: InboxFilterQueryDto): InboxFilters {

@@ -86,12 +86,24 @@ describe('WebhooksService', () => {
 
     await expect(service.normalizeWhatsAppMessage({
       from: '966500000000',
-      id: 'wamid.unknown',
+      id: 'wamid.reaction',
       timestamp: '1710000000',
       type: 'reaction',
-      reaction: { emoji: '+1' },
+      reaction: { message_id: 'wamid.ours', emoji: '👍' },
     }, 'token', {})).resolves.toMatchObject({
-      text: '[Unsupported WhatsApp message: reaction]',
+      text: 'تفاعل بـ 👍',
+      type: 'reaction',
+      metadata: { reaction: { message_id: 'wamid.ours', emoji: '👍' } },
+    });
+
+    await expect(service.normalizeWhatsAppMessage({
+      from: '966500000000',
+      id: 'wamid.unknown',
+      timestamp: '1710000000',
+      type: 'order',
+      order: { catalog_id: '1' },
+    }, 'token', {})).resolves.toMatchObject({
+      text: '[Unsupported WhatsApp message: order]',
       type: 'unsupported',
     });
   });

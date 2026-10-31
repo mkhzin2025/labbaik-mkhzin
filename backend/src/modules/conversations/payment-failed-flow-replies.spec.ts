@@ -9,7 +9,7 @@ describe('ConversationsService.findPaymentFailedFlowReplies', () => {
 
   function run(docs: any[]) {
     const find = jest.fn(() => ({ lean: () => ({ exec: async () => docs }) }));
-    const service = new ConversationsService({ find } as any, {} as any, {} as any, {} as any, {} as any, {} as any);
+    const service = new ConversationsService({ find } as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any);
     return service.findPaymentFailedFlowReplies(['966500000001'], ['s1'], since);
   }
 

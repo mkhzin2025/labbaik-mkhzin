@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
-import { Loader2, Mic, Pencil, Plus, Send, Smile, StickyNote, Trash2, X, Zap } from 'lucide-react';
+import { FileText, Loader2, Mic, Pencil, Plus, Send, Smile, StickyNote, Trash2, X, Zap } from 'lucide-react';
 import api from '../../api/client';
 import { useToast } from '../Toast';
 import { EMOJIS } from './emojis';
@@ -18,18 +18,36 @@ const newId = () => Math.random().toString(36).slice(2, 10) + Date.now().toStrin
 
 interface ComposerProps {
   onSend: (text: string) => Promise<void> | void;
+  /** Sends a file with the typed text as its caption; without it the attach button stays disabled. */
+  onSendFile?: (file: File, caption: string) => Promise<void> | void;
   disabled?: boolean;
 }
 
+/** What WhatsApp accepts (see the server's WHATSAPP_MEDIA_TYPES). */
+const ATTACH_ACCEPT = 'image/jpeg,image/png,video/mp4,video/3gpp,audio/aac,audio/mp4,audio/mpeg,audio/amr,audio/ogg,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,text/plain';
+
 /**
  * Message box for the inbox: multi-line text (Enter sends, Shift+Enter breaks a line), emoji picker,
- * and team-shared quick replies triggered by typing "/" or from the notes button.
- * Attachments and voice notes are shown as "coming soon" until media sending exists on the server.
+ * team-shared quick replies triggered by typing "/" or from the notes button, and a file to attach
+ * (picked or pasted) that goes out with the text as its caption. Voice notes are still "coming soon".
  */
-export default function Composer({ onSend, disabled = false }: ComposerProps) {
+export default function Composer({ onSend, onSendFile, disabled = false }: ComposerProps) {
   const { showToast } = useToast();
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
+  const [file, setFile] = useState<File | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const preview = useMemo(() => (file && file.type.startsWith('image/') ? URL.createObjectURL(file) : ''), [file]);
+  useEffect(() => () => { if (preview) URL.revokeObjectURL(preview); }, [preview]);
+
+  const pickFile = (picked?: File | null) => {
+    if (!picked) return;
+    if (!ATTACH_ACCEPT.split(',').includes(picked.type)) { showToast('نوع الملف غير مدعوم في واتساب. المسموح: صور JPG/PNG، فيديو MP4، صوت، ومستندات PDF/Word/Excel.', 'error'); return; }
+    const max = picked.type.startsWith('image/') ? 5 : 16;
+    if (picked.size > max * 1024 * 1024) { showToast(`حجم الملف أكبر من حد واتساب (${max} ميجابايت).`, 'error'); return; }
+    setFile(picked);
+    textareaRef.current?.focus();
+  };
   const [replies, setReplies] = useState<QuickReply[]>([]);
   const [panel, setPanel] = useState<'none' | 'quick' | 'emoji'>('none');
   const [activeIndex, setActiveIndex] = useState(0);
@@ -61,7 +79,6 @@ export default function Composer({ onSend, disabled = false }: ComposerProps) {
   // Plain typing also suggests replies whose shortcut or text starts like the message, without taking over Enter.
   const typedQuery = slashQuery === undefined && !text.includes('\n') && text.trim().length >= MIN_SUGGEST_CHARS ? text.trim().toLowerCase() : '';
   const [dismissedFor, setDismissedFor] = useState<string | null>(null);
-  const [navigated, setNavigated] = useState(false);
   const suggestions = useMemo(() => {
     if (!typedQuery || typedQuery === dismissedFor) return [];
     const starts = replies.filter((r) => r.shortcut.toLowerCase().startsWith(typedQuery) || r.text.toLowerCase().startsWith(typedQuery));
@@ -79,7 +96,7 @@ export default function Composer({ onSend, disabled = false }: ComposerProps) {
     return replies.filter((r) => r.shortcut.toLowerCase().includes(q) || r.text.toLowerCase().includes(q));
   }, [replies, slashQuery, suggesting, suggestions]);
 
-  useEffect(() => { setActiveIndex(0); setNavigated(false); }, [slashQuery, typedQuery, panel]);
+  useEffect(() => { setActiveIndex(0); }, [slashQuery, typedQuery, panel]);
 
   const focusEnd = () => requestAnimationFrame(() => {
     const el = textareaRef.current;
@@ -109,27 +126,31 @@ export default function Composer({ onSend, disabled = false }: ComposerProps) {
 
   const send = useCallback(async () => {
     const value = text.trim();
-    if (!value || sending || disabled) return;
+    if ((!value && !file) || sending || disabled) return;
+    const attached = file;
     setSending(true);
     setText('');
+    setFile(null);
     try {
-      await onSend(value);
+      if (attached && onSendFile) await onSendFile(attached, value);
+      else await onSend(value);
     } catch {
-      setText(value); // keep what was typed if sending failed
+      // keep what was typed (and the file) if sending failed
+      setText(value);
+      setFile(attached);
     } finally {
       setSending(false);
       textareaRef.current?.focus();
     }
-  }, [text, sending, disabled, onSend]);
+  }, [text, file, sending, disabled, onSend, onSendFile]);
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.nativeEvent.isComposing) return;
     if (quickOpen && matches.length) {
-      if (event.key === 'ArrowDown') { event.preventDefault(); setNavigated(true); setActiveIndex((i) => (i + 1) % matches.length); return; }
-      if (event.key === 'ArrowUp') { event.preventDefault(); setNavigated(true); setActiveIndex((i) => (i - 1 + matches.length) % matches.length); return; }
-      // While suggesting from plain typing, Enter still sends unless the user picked a suggestion with the arrows.
-      const enterPicks = event.key === 'Enter' && !event.shiftKey && (!suggesting || navigated);
-      if (event.key === 'Tab' || enterPicks) { event.preventDefault(); insertReply(matches[activeIndex]); return; }
+      if (event.key === 'ArrowDown') { event.preventDefault(); setActiveIndex((i) => (i + 1) % matches.length); return; }
+      if (event.key === 'ArrowUp') { event.preventDefault(); setActiveIndex((i) => (i - 1 + matches.length) % matches.length); return; }
+      // Enter (or Tab) inserts the highlighted reply; Esc hides the suggestions so Enter sends what was typed.
+      if (event.key === 'Tab' || (event.key === 'Enter' && !event.shiftKey)) { event.preventDefault(); insertReply(matches[activeIndex]); return; }
     }
     if (event.key === 'Escape' && (quickOpen || panel !== 'none')) {
       event.preventDefault();
@@ -186,7 +207,7 @@ export default function Composer({ onSend, disabled = false }: ComposerProps) {
             )}
           </ul>
           <p className="px-3 py-1.5 border-t border-labbaik-border text-[11px] text-labbaik-text-muted">
-            {suggesting ? 'Tab لإدراج المقترح · ↑↓ ثم Enter لاختيار غيره · Enter وحده يرسل ما كتبته · Esc للإخفاء' : '↑↓ للتنقل · Enter للإدراج · Esc للإغلاق'}
+            {suggesting ? 'Enter لإدراج المقترح · ↑↓ لاختيار غيره · Esc للإخفاء ثم Enter لإرسال ما كتبته' : '↑↓ للتنقل · Enter للإدراج · Esc للإغلاق'}
           </p>
         </div>
       )}
@@ -204,9 +225,23 @@ export default function Composer({ onSend, disabled = false }: ComposerProps) {
         </div>
       )}
 
+      {file && (
+        <div className="mb-2 flex items-center gap-3 rounded-xl border border-labbaik-border bg-labbaik-page p-2">
+          {preview
+            ? <img src={preview} alt="" className="h-14 w-14 shrink-0 rounded-lg object-cover" />
+            : <span className="grid h-14 w-14 shrink-0 place-items-center rounded-lg bg-labbaik-surface text-labbaik-text-muted"><FileText size={22} /></span>}
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-sm font-bold text-neutral-900 dark:text-white">{file.name}</span>
+            <span className="block text-xs text-labbaik-text-muted">{(file.size / 1024 / 1024).toFixed(1)} ميجابايت · ما تكتبه يُرسل كتعليق على الملف</span>
+          </span>
+          <button type="button" onClick={() => setFile(null)} aria-label="إزالة المرفق" className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-labbaik-text-muted hover:text-red-600 hover:bg-red-500/10 cursor-pointer"><X size={16} /></button>
+        </div>
+      )}
+
       <div className="flex items-end gap-2">
         <div className="flex-1 min-w-0 flex items-end gap-1 rounded-2xl border border-labbaik-border bg-labbaik-page px-1.5 py-1 focus-within:border-labbaik-blue focus-within:ring-2 focus-within:ring-labbaik-blue/20 transition-colors">
-          <button type="button" disabled title="إرفاق صورة أو ملف (قريبًا)" aria-label="إرفاق ملف، قريبًا" className={iconButton}><Plus size={19} /></button>
+          <input ref={fileRef} type="file" accept={ATTACH_ACCEPT} className="hidden" onChange={(e) => { pickFile(e.target.files?.[0]); e.target.value = ''; }} />
+          <button type="button" disabled={!onSendFile || disabled} onClick={() => fileRef.current?.click()} title="إرفاق صورة أو ملف" aria-label="إرفاق صورة أو ملف" className={iconButton}><Plus size={19} /></button>
           <textarea
             ref={textareaRef}
             rows={1}
@@ -214,14 +249,18 @@ export default function Composer({ onSend, disabled = false }: ComposerProps) {
             disabled={disabled}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={onKeyDown}
-            placeholder="اكتب رسالة... أو «/» للردود السريعة"
+            onPaste={(e) => {
+              const pasted = Array.from(e.clipboardData.files)[0];
+              if (pasted && onSendFile) { e.preventDefault(); pickFile(pasted); }
+            }}
+            placeholder={file ? 'أضف تعليقًا (اختياري)...' : 'اكتب رسالة... أو «/» للردود السريعة'}
             aria-label="نص الرد"
             className="flex-1 min-w-0 resize-none bg-transparent py-2.5 px-1 text-sm leading-6 text-neutral-900 dark:text-white focus:outline-none placeholder:text-labbaik-text-muted max-h-40"
           />
           <button type="button" onClick={() => setPanel(panel === 'quick' ? 'none' : 'quick')} aria-label="الردود السريعة" aria-expanded={panel === 'quick'} title="الردود السريعة" className={iconButton}><StickyNote size={18} /></button>
           <button type="button" onClick={() => setPanel(panel === 'emoji' ? 'none' : 'emoji')} aria-label="إيموجي" aria-expanded={panel === 'emoji'} title="إيموجي" className={iconButton}><Smile size={18} /></button>
         </div>
-        {text.trim() ? (
+        {text.trim() || file ? (
           <button
             type="button"
             onClick={() => void send()}

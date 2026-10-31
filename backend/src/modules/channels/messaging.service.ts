@@ -64,6 +64,21 @@ export class MessagingService {
   }
 
   /**
+   * Blocks (or unblocks) a customer on the business number through Meta's Block Users API: a blocked user
+   * cannot message the business. Meta only allows blocking users who wrote within the last 24 hours.
+   */
+  async setWhatsAppUserBlocked(phoneNumberId: string, accessToken: string, user: string, blocked: boolean) {
+    const plainAccessToken = this.credentialEncryption.decryptSecret(accessToken);
+    const response = await axios.request({
+      method: blocked ? 'POST' : 'DELETE',
+      url: `https://graph.facebook.com/${this.getGraphVersion()}/${phoneNumberId}/block_users`,
+      data: { messaging_product: 'whatsapp', block_users: [{ user }] },
+      headers: { Authorization: `Bearer ${plainAccessToken}`, 'Content-Type': 'application/json' },
+    });
+    return response.data;
+  }
+
+  /**
    * Uploads a file to Meta for this phone number and returns its media id. Ids stay valid for 30 days,
    * so they are cached per number and file and refreshed well before that.
    */

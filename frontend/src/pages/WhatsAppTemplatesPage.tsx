@@ -125,8 +125,9 @@ export default function WhatsAppTemplatesPage() {
   // Test send: pasted numbers replace the audience; the server does not save them as customers.
   const [testMode, setTestMode] = useState(false);
   const [testText, setTestText] = useState('');
-  const [mode, setMode] = useState<'single' | 'list'>('list');
-  const [to, setTo] = useState('');
+  // ?to=<number> (from a conversation whose 24h window has closed) opens a single send to that customer.
+  const [mode, setMode] = useState<'single' | 'list'>(() => (searchParams.get('to') ? 'single' : 'list'));
+  const [to, setTo] = useState(() => searchParams.get('to') || '');
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [sending, setSending] = useState(false);

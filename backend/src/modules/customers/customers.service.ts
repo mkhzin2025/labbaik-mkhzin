@@ -167,7 +167,7 @@ export class CustomersService implements OnModuleInit {
   async onModuleInit() {
     try {
       await this.customerRepository.query(
-        'ALTER TABLE customers ADD COLUMN IF NOT EXISTS "marketingOptOut" boolean NOT NULL DEFAULT false, ADD COLUMN IF NOT EXISTS "marketingOptOutAt" timestamptz NULL;',
+        'ALTER TABLE customers ADD COLUMN IF NOT EXISTS "marketingOptOut" boolean NOT NULL DEFAULT false, ADD COLUMN IF NOT EXISTS "marketingOptOutAt" timestamptz NULL, ADD COLUMN IF NOT EXISTS "blockedAt" timestamptz NULL;',
       );
     } catch (e: any) {
       this.logger.warn(`Auto-migration for marketingOptOut skipped or failed: ${e.message}`);
@@ -784,6 +784,7 @@ export class CustomersService implements OnModuleInit {
       .addSelect('store.name', 'storeName')
       .addSelect('customer.fullName', 'fullName')
       .addSelect('customer.marketingOptOut', 'marketingOptOut')
+      .addSelect('customer.blockedAt', 'blockedAt')
       .addSelect('customer.updatedAt', 'updatedAt')
       .addSelect("REGEXP_REPLACE(COALESCE(customer.phoneNumber, customer.whatsappId, ''), '[^0-9]', '', 'g')", 'digits')
       .getQueryAndParameters();
@@ -799,12 +800,12 @@ export class CustomersService implements OnModuleInit {
           FROM matched m
           CROSS JOIN LATERAL (SELECT CASE WHEN s.d LIKE '9660%' THEN '966' || substr(s.d, 5) ELSE s.d END AS d
             FROM (SELECT CASE WHEN m.digits LIKE '00%' THEN substr(m.digits, 3) ELSE m.digits END AS d) s) p),
-      marketable AS (SELECT * FROM normalized WHERE NOT "marketingOptOut"),
+      marketable AS (SELECT * FROM normalized WHERE NOT "marketingOptOut" AND "blockedAt" IS NULL),
       unique_numbers AS (SELECT DISTINCT ON (phone) * FROM marketable WHERE phone <> '' ORDER BY phone, "updatedAt" DESC),
       opted_out AS (
         SELECT DISTINCT REGEXP_REPLACE(COALESCE(c."phoneNumber", c."whatsappId", ''), '[^0-9]', '', 'g') AS phone
           FROM customers c JOIN stores s ON s.id = c."storeId"
-         WHERE s."organizationId" = ${org} AND c."marketingOptOut" = true),
+         WHERE s."organizationId" = ${org} AND (c."marketingOptOut" = true OR c."blockedAt" IS NOT NULL)),
       recipients AS (SELECT u.* FROM unique_numbers u WHERE NOT EXISTS (SELECT 1 FROM opted_out o WHERE o.phone = u.phone))`;
     return { sql, params: [...params, organizationId] };
   }
@@ -1195,6 +1196,51 @@ export class CustomersService implements OnModuleInit {
     const saved = await this.customerRepository.save(customer);
     if (optOutChanged) await this.syncMarketingOptOut(organizationId, saved);
     return this.findOne(saved.id, storeId);
+  }
+
+  /** The digit strings a number may be stored as (966…, 00966…, 05…, 5…), so a block matches every record of it. */
+  private phoneVariants(phoneNumber: string) {
+    const phone = this.normalizePhone(phoneNumber);
+    if (!phone) return [];
+    const variants = new Set([phone, `00${phone}`]);
+    if (phone.startsWith('966')) {
+      const local = phone.slice(3);
+      variants.add(local).add(`0${local}`).add(`9660${local}`);
+    }
+    return [...variants];
+  }
+
+  /** Blocks or unblocks a number on every record it has in the organization; returns how many records changed. */
+  async setBlocked(organizationId: string, phoneNumber: string, blocked: boolean) {
+    const variants = this.phoneVariants(phoneNumber);
+    if (!variants.length) return 0;
+    const result = await this.customerRepository.query(
+      `UPDATE customers c SET "blockedAt" = $1
+         FROM stores s
+        WHERE s.id = c."storeId" AND s."organizationId" = $2
+          AND REGEXP_REPLACE(COALESCE(c."phoneNumber", c."whatsappId", ''), '[^0-9]', '', 'g') = ANY($3::text[])`,
+      [blocked ? new Date() : null, organizationId, variants],
+    );
+    return Number(result?.[1] ?? 0);
+  }
+
+  async organizationStoreIds(organizationId: string): Promise<string[]> {
+    const rows: { id: string }[] = await this.customerRepository.query('SELECT id FROM stores WHERE "organizationId" = $1', [organizationId]);
+    return rows.map((row) => row.id);
+  }
+
+  /** Whether the team blocked this number in any branch of the organization. */
+  async isBlocked(organizationId: string | null | undefined, phoneNumber: string) {
+    const variants = this.phoneVariants(phoneNumber);
+    if (!organizationId || !variants.length) return false;
+    const rows = await this.customerRepository.query(
+      `SELECT 1 FROM customers c JOIN stores s ON s.id = c."storeId"
+        WHERE s."organizationId" = $1 AND c."blockedAt" IS NOT NULL
+          AND REGEXP_REPLACE(COALESCE(c."phoneNumber", c."whatsappId", ''), '[^0-9]', '', 'g') = ANY($2::text[])
+        LIMIT 1`,
+      [organizationId, variants],
+    );
+    return rows.length > 0;
   }
 
   /** The opt-out belongs to the person, so it is copied to their records in the organization's other branches. */

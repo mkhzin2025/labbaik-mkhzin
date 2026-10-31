@@ -9,9 +9,17 @@ import { EventsGateway } from '../events/events.gateway';
 import { BillingService } from '../billing/billing.service';
 import { MetaUsageType } from '../billing/entities/pricing-rule.entity';
 import { normalizePhoneNumber } from '../../common/utils/phone.util';
+import { WHATSAPP_MEDIA_TYPES, WHATSAPP_MEDIA_UNSUPPORTED } from '../../common/utils/whatsapp-media-types';
+import { WhatsAppMediaService } from '../channels/whatsapp-media.service';
+import { randomBytes } from 'crypto';
+import { existsSync, mkdirSync, writeFileSync } from 'fs';
+import { join } from 'path';
+
+/** Multer's in-memory file, typed locally because @types/multer is not installed. */
+export type UploadedChatFile = { buffer: Buffer; mimetype: string; originalname: string; size: number };
 
 export type InboxView = 'active' | 'snoozed' | 'closed';
-export type InboxTab = 'all' | 'unread' | 'needs_reply';
+export type InboxTab = 'all' | 'unread' | 'needs_reply' | 'pending';
 export interface InboxFilters {
   view?: InboxView;
   tab?: InboxTab;
@@ -29,10 +37,20 @@ const RATING_OPTIONS: { value: ConversationRating; label: string }[] = [
   { value: 'neutral', label: 'عادي 😐' },
   { value: 'negative', label: 'غير راضٍ 👎' },
 ];
-/** Sent once after the customer answers the rating request. */
-const RATING_THANKS = 'شكراً لتقييمك! 🌟';
 /** Free-form (non-template) messages reach a customer only within 24h of their last message; keep a margin. */
 const RATING_WINDOW_MS = 23.5 * 3600 * 1000;
+/** Closing messages that need no reply, normalized as in isAcknowledgement (no diacritics, ة→ه, أ/إ/آ→ا). */
+const ACKNOWLEDGEMENTS = new Set([
+  'شكرا', 'مشكور', 'مشكورين', 'مشكوره', 'تسلم', 'تسلمي', 'تسلمون', 'يسلمو', 'يعطيك العافيه', 'الله يعطيك العافيه',
+  'يعطيكم العافيه', 'جزاك الله خير', 'جزاكم الله خير', 'الله يجزاك خير', 'الله يسعدك', 'تمام', 'طيب', 'اوكي', 'اوك',
+  'حلو', 'ممتاز', 'زين', 'العفو', 'عفوا', 'ok', 'okay', 'thanks', 'thank you', 'thx', 'تم', 'خلاص', 'وصل', 'تمام شكرا',
+]);
+/** How long automation gets to answer before an unanswered customer message counts as the team's to reply to. */
+const BOT_GRACE_MS = 2 * 60 * 1000;
+/** WhatsApp (and Messenger) allow free-form replies only within 24h of the customer's last message. */
+const REPLY_WINDOW_MS = 24 * 3600 * 1000;
+/** A customer is asked to rate at most once in this period, however often the conversation is closed. */
+const RATING_COOLDOWN_MS = 24 * 3600 * 1000;
 
 const INBOX_PAGE_DEFAULT = 30;
 const INBOX_PAGE_MAX = 100;
@@ -77,6 +95,7 @@ export class ConversationsService implements OnModuleInit {
     private readonly customersService: CustomersService,
     private readonly eventsGateway: EventsGateway,
     private readonly billingService: BillingService,
+    private readonly whatsAppMediaService: WhatsAppMediaService,
   ) {}
 
   async onModuleInit() {
@@ -97,8 +116,22 @@ export class ConversationsService implements OnModuleInit {
     }
     try {
       await this.backfillAwaitingReply();
+      await this.clearAcknowledgementWaits();
     } catch (error) {
       this.logger.error('Failed to backfill awaitingReply', error?.stack);
+    }
+  }
+
+  /** Threads that only "wait" on a closing thanks/emoji (from before isAcknowledgement existed) wait on nothing. */
+  private async clearAcknowledgementWaits() {
+    const rows = await this.conversationModel
+      .find({ awaitingReply: true, lastMessage: { $regex: /^[\s\S]{1,40}$/ } }, { lastMessage: 1 })
+      .lean()
+      .exec();
+    const ids = rows.filter((row) => ConversationsService.isAcknowledgement(row.lastMessage)).map((row) => row._id);
+    if (ids.length) {
+      await this.conversationModel.updateMany({ _id: { $in: ids } }, { $set: { awaitingReply: false } });
+      this.logger.log(`Cleared awaitingReply on ${ids.length} conversation(s) ending with a thanks or emoji`);
     }
   }
 
@@ -120,6 +153,25 @@ export class ConversationsService implements OnModuleInit {
       }],
       { updatePipeline: true },
     );
+  }
+
+  /** A short closing message that needs no answer: thanks, OK, or emoji only. */
+  static isAcknowledgement(text?: string | null) {
+    const raw = String(text || '').trim();
+    if (!raw || raw.length > 40) return false;
+    // Only emoji/punctuation, e.g. "👍" or "🙏🌹".
+    if (!/[\p{L}\p{N}]/u.test(raw)) return true;
+    const words = raw
+      .toLowerCase()
+      .replace(/[\p{Extended_Pictographic}️‍]/gu, ' ')
+      .replace(/[ًٌٍَُِّْـ]/g, '')
+      .replace(/[إأآ]/g, 'ا')
+      .replace(/ة(?=\s|$)/g, 'ه')
+      .replace(/[!.,،؟?…]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .replace(/\s+(لك|لكم|جزيلا|كثير|وايد|مره|مرا|عليك|عليكم)$/, '');
+    return ACKNOWLEDGEMENTS.has(words);
   }
 
   private static isCustomerMessage(message: { from?: string; type?: string }) {
@@ -172,12 +224,15 @@ export class ConversationsService implements OnModuleInit {
     customerPhone = this.normalizeCustomerPhone(customerPhone, platform);
     const { customerName, ...message } = messageData;
     messageData = message;
+    // An emoji reaction is kept in the thread but asks nothing: it neither reopens the conversation nor waits for a reply.
+    const quiet = messageData.type === 'reaction';
     const updateQuery: any = {
       $push: { messages: messageData },
-      $set: { 
+      $set: {
         lastMessage: messageData.text,
         lastMessageAt: new Date(),
-        awaitingReply: ConversationsService.isCustomerMessage(messageData),
+        // A closing "thanks" / "👍" still reopens the thread, but nobody owes an answer to it.
+        awaitingReply: !quiet && ConversationsService.isCustomerMessage(messageData) && !ConversationsService.isAcknowledgement(messageData.text),
       }
     };
 
@@ -187,11 +242,11 @@ export class ConversationsService implements OnModuleInit {
     if (messageData.metadata?.metaConnectionId) updateQuery.$set.metaConnectionId = messageData.metadata.metaConnectionId;
     if (messageData.tags && messageData.tags.length > 0) updateQuery.$addToSet = { tags: { $each: messageData.tags } };
 
-    if (messageData.from !== 'me') updateQuery.$inc = { unreadCount: 1 };
+    if (messageData.from !== 'me' && !quiet) updateQuery.$inc = { unreadCount: 1 };
 
     // A customer writing again reopens a snoozed or closed conversation.
     const fromCustomer = messageData.from !== 'me' && messageData.from !== 'system';
-    if (fromCustomer) {
+    if (fromCustomer && !quiet) {
       updateQuery.$set.status = 'open';
       updateQuery.$set.snoozedUntil = null;
     }
@@ -371,21 +426,40 @@ export class ConversationsService implements OnModuleInit {
     };
   }
 
+  /**
+   * "Needs a reply" for the team: the customer's last message is unanswered and automation is not going to
+   * answer it, either because automatic replies are paused for this conversation or because nothing has replied
+   * within BOT_GRACE_MS. Messages the bot is about to answer stay out of the team's list.
+   */
+  private static needsTeamReplyQuery() {
+    const now = Date.now();
+    return {
+      awaitingReply: true,
+      // Past 24h a free-form reply is no longer allowed (only a template), so it is not a reply the team owes.
+      lastMessageAt: { $gt: new Date(now - REPLY_WINDOW_MS) },
+      $or: [
+        { lastMessageAt: { $lte: new Date(now - BOT_GRACE_MS) } },
+        { aiEnabled: false, aiDisabledUntil: { $gt: new Date(now) } },
+      ],
+    };
+  }
+
   /** Badge counts for the status tabs, plus unread / needs-reply inside the selected status tab. */
   async countInbox(storeIds: string[], filters: InboxFilters) {
-    if (!storeIds.length) return { active: 0, snoozed: 0, closed: 0, unread: 0, needsReply: 0 };
+    if (!storeIds.length) return { active: 0, snoozed: 0, closed: 0, unread: 0, needsReply: 0, pending: 0 };
     await this.wakeSnoozed(storeIds);
     const base = { ...filters, tab: undefined };
     const count = (query: Record<string, any>) => this.conversationModel.countDocuments(query).exec();
     const current = this.inboxQuery(storeIds, { ...base, view: filters.view || 'active' });
-    const [active, snoozed, closed, unread, needsReply] = await Promise.all([
+    const [active, snoozed, closed, unread, needsReply, pending] = await Promise.all([
       count(this.inboxQuery(storeIds, { ...base, view: 'active' })),
       count(this.inboxQuery(storeIds, { ...base, view: 'snoozed' })),
       count(this.inboxQuery(storeIds, { ...base, view: 'closed' })),
       count({ ...current, unreadCount: { $gt: 0 } }),
-      count({ ...current, awaitingReply: true }),
+      count({ ...current, ...ConversationsService.needsTeamReplyQuery() }),
+      count(this.inboxQuery(storeIds, { ...base, view: filters.view || 'active', tab: 'pending' })),
     ]);
-    return { active, snoozed, closed, unread, needsReply };
+    return { active, snoozed, closed, unread, needsReply, pending };
   }
 
   /**
@@ -417,7 +491,9 @@ export class ConversationsService implements OnModuleInit {
     if (filters.view === 'active') query.status = { $nin: ['snoozed', 'closed'] };
     else if (filters.view) query.status = filters.view;
     if (filters.tab === 'unread') query.unreadCount = { $gt: 0 };
-    else if (filters.tab === 'needs_reply') query.awaitingReply = true;
+    else if (filters.tab === 'needs_reply') Object.assign(query, ConversationsService.needsTeamReplyQuery());
+    // Pending conversations the team parked (waiting on the customer or someone else), to come back to.
+    else if (filters.tab === 'pending') query.status = 'pending';
     const search = filters.search?.trim();
     if (search) {
       const pattern = new RegExp(escapeRegex(search), 'i');
@@ -765,8 +841,8 @@ export class ConversationsService implements OnModuleInit {
 
   /**
    * Asks the customer to rate the conversation, as WhatsApp reply buttons, once the team closes it.
-   * Skipped when the 24h window for free-form messages has passed, or when the customer was already asked
-   * since they last wrote (a conversation closed, reopened by the team and closed again).
+   * Skipped when the 24h window for free-form messages has passed, or when the customer was asked in the last
+   * 24 hours or has not written since the last request.
    */
   async sendRatingRequest(conversationId: string) {
     const conversation = await this.conversationModel
@@ -778,9 +854,16 @@ export class ConversationsService implements OnModuleInit {
       .map((m: any) => (typeof m.timestamp === 'number' ? m.timestamp : new Date(m.timestamp).getTime()) || 0));
     if (!lastCustomerAt || Date.now() - lastCustomerAt > RATING_WINDOW_MS) return;
 
-    // Claimed atomically so closing twice in quick succession sends one request.
+    // Claimed atomically so closing twice in quick succession sends one request. Asked again only once the
+    // customer has written since, and the cooldown has passed: closing, reopening and closing must not repeat it.
     const claimed = await this.conversationModel.findOneAndUpdate(
-      { _id: conversationId, $or: [{ ratingRequestedAt: null }, { ratingRequestedAt: { $lt: new Date(lastCustomerAt) } }] },
+      {
+        _id: conversationId,
+        $or: [
+          { ratingRequestedAt: null },
+          { ratingRequestedAt: { $lt: new Date(Math.min(lastCustomerAt, Date.now() - RATING_COOLDOWN_MS)) } },
+        ],
+      },
       { $set: { ratingRequestedAt: new Date() } },
       // The previous value comes back, to restore it if the send fails.
       { returnDocument: 'before', projection: { _id: 1, ratingRequestedAt: 1 } },
@@ -856,47 +939,124 @@ export class ConversationsService implements OnModuleInit {
           ...(message.customerId ? { customerId: message.customerId } : {}),
         },
       },
-      // The state before the tap tells whether this answers the latest request or repeats an answer already given.
-      { returnDocument: 'before', sort: { lastMessageAt: -1 }, projection: { _id: 1, metaConnectionId: 1, ratedAt: 1, ratingRequestedAt: 1 } },
+      { returnDocument: 'after', sort: { lastMessageAt: -1 }, projection: { _id: 1 } },
     ).lean().exec();
     if (!conversation) return;
     this.eventsGateway.server.to(`store_${storeId}`).emit('conversation_rating', { conversationId: String(conversation._id), rating, ratedAt: at });
-    const firstAnswer = !conversation.ratedAt || (conversation.ratingRequestedAt && conversation.ratedAt < conversation.ratingRequestedAt);
-    if (firstAnswer) {
-      await this.sendRatingThanks(String(conversation._id), customerPhone, storeId, conversation.metaConnectionId)
-        .catch((error) => this.logger.warn(`Rating thanks for ${customerPhone} failed: ${error?.message}`));
-    }
   }
 
-  /** "Thank you" after the customer's first answer to a rating request; a failure is only logged. */
-  private async sendRatingThanks(conversationId: string, customerPhone: string, storeId: string, metaConnectionId?: string | null) {
-    const channels = await this.channelsService.findAllByStore(storeId, { maskCredentials: false });
-    const channel = channels.find((c) => c.type === 'whatsapp' && (!metaConnectionId || c.credentials?.metaConnectionId === metaConnectionId))
-      || channels.find((c) => c.type === 'whatsapp');
-    if (!channel) return;
-    const walletCharge = await this.billingService.chargeMetaUsageForStore(storeId, MetaUsageType.SESSION_TEXT, { referenceId: conversationId, source: 'rating_thanks' });
-    let providerResponse: any;
-    try {
-      providerResponse = await this.messagingService.sendWhatsAppMessage(channel.credentials!.phoneNumberId, channel.credentials!.accessToken, customerPhone, RATING_THANKS);
-    } catch (error) {
-      if (walletCharge) await this.billingService.refundMetaUsage(walletCharge.id, 'Rating thanks send failed');
-      throw error;
+  /**
+   * Blocks or unblocks the customer of a WhatsApp conversation for the whole organization. While blocked their
+   * messages are dropped on arrival and campaigns skip them; blocking also closes their conversations (without
+   * a rating request). Meta is asked to block the number too, which it only allows within 24h of their last message,
+   * so `metaBlocked` says whether WhatsApp itself now stops them.
+   */
+  async setCustomerBlocked(conversationId: string, storeId: string, organizationId: string, blocked: boolean) {
+    const conversation = await this.conversationModel.findOne({ _id: conversationId, storeId }, { platform: 1, customerPhone: 1, metaConnectionId: 1 }).lean().exec();
+    if (!conversation) throw new NotFoundException('Conversation not found');
+    if (conversation.platform !== 'whatsapp') throw new BadRequestException('الحظر متاح لمحادثات واتساب فقط.');
+    const phone = conversation.customerPhone;
+    await this.customersService.setBlocked(organizationId, phone, blocked);
+
+    const storeIds = await this.customersService.organizationStoreIds(organizationId);
+    const filter = { customerPhone: phone, platform: 'whatsapp', storeId: { $in: storeIds } };
+    const now = new Date();
+    await this.conversationModel.updateMany(filter, {
+      $set: blocked
+        ? { blockedAt: now, status: 'closed', snoozedUntil: null, statusUpdatedAt: now, unreadCount: 0, awaitingReply: false }
+        : { blockedAt: null },
+    });
+    const affected = await this.conversationModel.find(filter, { storeId: 1, status: 1 }).lean().exec();
+    for (const row of affected) {
+      this.eventsGateway.server.to(`store_${row.storeId}`).emit('conversation_status', { conversationId: String(row._id), status: row.status, snoozedUntil: null });
+      this.eventsGateway.server.to(`store_${row.storeId}`).emit('conversation_blocked', { conversationId: String(row._id), blockedAt: blocked ? now : null });
     }
+
+    let metaBlocked = false;
+    let metaError: string | null = null;
+    try {
+      const channels = await this.channelsService.findAllByStore(storeId, { maskCredentials: false });
+      const channel = channels.find((c) => c.type === 'whatsapp' && (!conversation.metaConnectionId || c.credentials?.metaConnectionId === conversation.metaConnectionId))
+        || channels.find((c) => c.type === 'whatsapp');
+      if (!channel) throw new Error('No linked WhatsApp channel');
+      const result = await this.messagingService.setWhatsAppUserBlocked(channel.credentials!.phoneNumberId, channel.credentials!.accessToken, phone, blocked);
+      const failed = result?.block_users?.failed_users || [];
+      metaBlocked = !failed.length;
+      if (failed.length) metaError = failed[0]?.errors?.[0]?.message || 'رفضت Meta الطلب';
+    } catch (error: any) {
+      metaError = error?.response?.data?.error?.message || error?.message || 'تعذر الاتصال بـ Meta';
+      this.logger.warn(`Meta ${blocked ? 'block' : 'unblock'} of ${phone} failed: ${metaError}`);
+    }
+    return { blocked, blockedAt: blocked ? now : null, metaBlocked, metaError };
+  }
+
+  /**
+   * Sends an image, video, audio or document from the inbox (WhatsApp only). The file is kept next to received
+   * media so the thread shows it the same way, uploaded to Meta, and sent with the optional caption.
+   */
+  async sendAttachment(conversationId: string, storeId: string, file: UploadedChatFile, caption?: string) {
+    if (!file?.buffer?.length) throw new BadRequestException('اختر ملفًا لإرساله.');
+    const spec = WHATSAPP_MEDIA_TYPES[file.mimetype];
+    if (!spec) throw new BadRequestException(WHATSAPP_MEDIA_UNSUPPORTED);
+    if (file.buffer.length > spec.max) throw new BadRequestException(`حجم الملف أكبر من حد واتساب (${spec.max / (1024 * 1024)} ميجابايت).`);
+    const conversation = await this.conversationModel.findOne({ _id: conversationId, storeId });
+    if (!conversation) throw new NotFoundException('Conversation not found');
+    if (conversation.blockedAt) throw new BadRequestException('هذا العميل محظور. ألغِ الحظر أولًا لمراسلته.');
+    if (conversation.platform !== 'whatsapp') throw new BadRequestException('إرسال المرفقات متاح لمحادثات واتساب فقط.');
+    const channels = await this.channelsService.findAllByStore(storeId, { maskCredentials: false });
+    const channel = channels.find((c) => c.type === 'whatsapp' && (!conversation.metaConnectionId || c.credentials?.metaConnectionId === conversation.metaConnectionId))
+      || channels.find((c) => c.type === 'whatsapp');
+    if (!channel) throw new NotFoundException('No linked whatsapp channel found.');
+
+    const filename = `${Date.now()}-out-${spec.type}-${randomBytes(4).toString('hex')}${spec.ext}`;
+    const root = this.whatsAppMediaService.getWhatsAppUploadRoot();
+    if (!existsSync(root)) mkdirSync(root, { recursive: true });
+    writeFileSync(join(root, filename), file.buffer);
+    const originalFilename = Buffer.from(file.originalname || filename, 'latin1').toString('utf8');
+    const text = caption?.trim() || '';
+
+    const walletCharge = await this.billingService.chargeMetaUsageForStore(storeId, MetaUsageType.SESSION_TEXT, {
+      referenceId: conversationId,
+      source: 'manual_agent_media',
+    });
+    let providerResponse: any;
+    let mediaId: string;
+    try {
+      mediaId = await this.messagingService.uploadWhatsAppMedia(channel.credentials!.phoneNumberId, channel.credentials!.accessToken, filename, {
+        buffer: file.buffer, mimeType: file.mimetype, filename: originalFilename,
+      });
+      const media: Record<string, string> = { id: mediaId };
+      if (text && spec.type !== 'audio') media.caption = text;
+      if (spec.type === 'document') media.filename = originalFilename;
+      providerResponse = await this.messagingService.sendWhatsAppPayload(channel.credentials!.phoneNumberId, channel.credentials!.accessToken, conversation.customerPhone, { type: spec.type, [spec.type]: media });
+    } catch (error) {
+      if (walletCharge) await this.billingService.refundMetaUsage(walletCharge.id, 'Manual WhatsApp media send failed');
+      const errorText = this.getSendErrorText(error);
+      await this.addSystemError(conversation.customerPhone, storeId, conversation.platform, errorText, error);
+      throw new InternalServerErrorException(errorText);
+    }
+
     const whatsappMessageId = providerResponse?.messages?.[0]?.id || providerResponse?.message_id;
     const messageData = {
-      from: 'me', text: RATING_THANKS, type: 'text', isManual: false, timestamp: Date.now(),
-      metadata: {
-        source: 'rating_thanks',
-        ...(whatsappMessageId ? { whatsappMessageId, status: 'accepted', walletTransactionId: walletCharge?.id || null, metaConnectionId: channel.credentials?.metaConnectionId || metaConnectionId || null } : {}),
-      },
+      from: 'me',
+      text: text || `[${spec.type}]`,
+      type: spec.type,
+      attachments: [{ id: mediaId, type: spec.type, mimeType: file.mimetype, filename, originalFilename, caption: text || undefined, url: `/conversations/attachments/${filename}` }],
+      isManual: true,
+      timestamp: Date.now(),
+      metadata: whatsappMessageId ? { whatsappMessageId, status: 'accepted', walletTransactionId: walletCharge?.id || null, metaConnectionId: channel.credentials?.metaConnectionId || conversation.metaConnectionId || null } : {},
     };
-    await this.addMessage(customerPhone, storeId, 'whatsapp', messageData);
-    this.eventsGateway.server.to(`store_${storeId}`).emit('new_message', { ...messageData, customerPhone, platform: 'whatsapp', storeId });
+    await this.addMessage(conversation.customerPhone, storeId, conversation.platform, messageData);
+    // Same as a typed reply: the team has taken over, so automatic replies pause for a while.
+    await this.conversationModel.findByIdAndUpdate(conversationId, { aiEnabled: false, aiDisabledUntil: new Date(Date.now() + 30 * 60 * 1000), aiPausedReason: 'agent_reply' });
+    this.eventsGateway.server.to(`store_${storeId}`).emit('new_message', { ...messageData, customerPhone: conversation.customerPhone, platform: conversation.platform, storeId });
+    return { status: 'sent', message: messageData };
   }
 
   async sendMessage(conversationId: string, storeId: string, text: string) {
     const conversation = await this.conversationModel.findOne({ _id: conversationId, storeId });
     if (!conversation) throw new NotFoundException('Conversation not found');
+    if (conversation.blockedAt) throw new BadRequestException('هذا العميل محظور. ألغِ الحظر أولًا لمراسلته.');
     const channels = await this.channelsService.findAllByStore(storeId, { maskCredentials: false });
     const channel = channels.find(c => c.type === conversation.platform && (!conversation.metaConnectionId || c.credentials?.metaConnectionId === conversation.metaConnectionId))
       || channels.find(c => c.type === conversation.platform);

@@ -60,6 +60,10 @@ export class Customer {
   @Column({ type: 'timestamptz', nullable: true })
   marketingOptOutAt: Date | null;
 
+  /** Blocked by the team (abusive customer): their messages are dropped and campaigns skip them. Set on every record of the number. */
+  @Column({ type: 'timestamptz', nullable: true })
+  blockedAt: Date | null;
+
   @Column('uuid')
   @Index()
   storeId: string;
