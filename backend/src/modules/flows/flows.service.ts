@@ -7,6 +7,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { Flow } from './entities/flow.entity';
 import { Store } from '../stores/entities/store.entity';
+import { WHATSAPP_MEDIA_TYPES, WHATSAPP_MEDIA_UNSUPPORTED } from '../../common/utils/whatsapp-media-types';
 import {
   FlowGraph,
   FlowMedia,
@@ -22,27 +23,7 @@ import {
 export type UploadedFlowFile = { buffer: Buffer; mimetype: string; originalname: string; size: number };
 
 const MB = 1024 * 1024;
-
-/** WhatsApp Cloud API supported media, with Meta's size limits. */
-const MEDIA_TYPES: Record<string, { type: FlowMedia['type']; ext: string; max: number }> = {
-  'image/jpeg': { type: 'image', ext: '.jpg', max: 5 * MB },
-  'image/png': { type: 'image', ext: '.png', max: 5 * MB },
-  'video/mp4': { type: 'video', ext: '.mp4', max: 16 * MB },
-  'video/3gpp': { type: 'video', ext: '.3gp', max: 16 * MB },
-  'audio/aac': { type: 'audio', ext: '.aac', max: 16 * MB },
-  'audio/mp4': { type: 'audio', ext: '.m4a', max: 16 * MB },
-  'audio/mpeg': { type: 'audio', ext: '.mp3', max: 16 * MB },
-  'audio/amr': { type: 'audio', ext: '.amr', max: 16 * MB },
-  'audio/ogg': { type: 'audio', ext: '.ogg', max: 16 * MB },
-  'application/pdf': { type: 'document', ext: '.pdf', max: 16 * MB },
-  'application/msword': { type: 'document', ext: '.doc', max: 16 * MB },
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': { type: 'document', ext: '.docx', max: 16 * MB },
-  'application/vnd.ms-excel': { type: 'document', ext: '.xls', max: 16 * MB },
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': { type: 'document', ext: '.xlsx', max: 16 * MB },
-  'application/vnd.ms-powerpoint': { type: 'document', ext: '.ppt', max: 16 * MB },
-  'application/vnd.openxmlformats-officedocument.presentationml.presentation': { type: 'document', ext: '.pptx', max: 16 * MB },
-  'text/plain': { type: 'document', ext: '.txt', max: 16 * MB },
-};
+const MEDIA_TYPES = WHATSAPP_MEDIA_TYPES;
 
 const TRIGGER_LABELS: Record<string, string> = {
   new_conversation: 'مع كل محادثة جديدة',
@@ -188,7 +169,7 @@ export class FlowsService {
   storeMedia(file: UploadedFlowFile): FlowMedia & { file: string; size: number } {
     if (!file?.buffer?.length) throw new BadRequestException('اختر ملفًا لرفعه.');
     const spec = MEDIA_TYPES[file.mimetype];
-    if (!spec) throw new BadRequestException('نوع الملف غير مدعوم في واتساب. المسموح: صور JPG/PNG، فيديو MP4، صوت MP3/AAC/OGG، ومستندات PDF/Word/Excel/PowerPoint.');
+    if (!spec) throw new BadRequestException(WHATSAPP_MEDIA_UNSUPPORTED);
     if (file.buffer.length > spec.max) throw new BadRequestException(`حجم الملف أكبر من حد واتساب (${spec.max / MB} ميجابايت).`);
 
     const root = this.mediaRoot();

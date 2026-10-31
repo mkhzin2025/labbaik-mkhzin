@@ -283,6 +283,11 @@ export class WebhooksService {
     const storeId = channel.store.id;
     const currentStore = await this.channelsService.getStoreContext(storeId);
     const ownerId = currentStore.owner?.id || (typeof currentStore.owner === 'string' ? currentStore.owner : 'global');
+    // A customer the team blocked: drop the message before downloading media, storing it or replying.
+    if (await this.customersService.isBlocked(currentStore.organizationId, message.from)) {
+      this.logger.log(`Dropped WhatsApp ${message.type} from blocked customer ${message.from}`);
+      return;
+    }
     const normalized = await this.normalizeWhatsAppMessage(message, channel.credentials.accessToken, webhookMetadata);
     if (metaConnectionId) normalized.metadata.metaConnectionId = metaConnectionId;
 
@@ -305,9 +310,19 @@ export class WebhooksService {
         from: normalized.from, text: normalized.text, type: normalized.type, timestamp: normalized.timestamp,
         attachments: normalized.attachments, metadata: { ...normalized.metadata, rating }, customerId: customer.id, customerName,
       };
-      // Shown before the "thank you" that recordRating sends.
-      this.eventsGateway.server.to(`store_${storeId}`).emit('new_message', { ...ratingMessage, platform: 'whatsapp', storeId });
       await this.conversationsService.recordRating(normalized.from, storeId, rating, ratingMessage);
+      this.eventsGateway.server.to(`store_${storeId}`).emit('new_message', { ...ratingMessage, platform: 'whatsapp', storeId });
+      return;
+    }
+
+    // Likewise a reaction: kept in the thread (without reopening it), but it is not a request to answer.
+    if (normalized.type === 'reaction') {
+      const reactionMessage = {
+        from: normalized.from, text: normalized.text, type: normalized.type, timestamp: normalized.timestamp,
+        attachments: [], metadata: normalized.metadata, customerId: customer.id, customerName,
+      };
+      await this.conversationsService.addMessage(normalized.from, storeId, 'whatsapp', reactionMessage);
+      this.eventsGateway.server.to(`store_${storeId}`).emit('new_message', { ...reactionMessage, platform: 'whatsapp', storeId });
       return;
     }
 
@@ -406,6 +421,12 @@ export class WebhooksService {
       const location = message.location;
       const text = location.name || location.address || `Location: ${location.latitude}, ${location.longitude}`;
       return { from: message.from, text, type: 'location', timestamp, attachments: [], metadata: { ...baseMetadata, location } };
+    }
+
+    // An emoji the customer put on one of the messages; an empty emoji means they took it back.
+    if (message.reaction) {
+      const emoji = String(message.reaction.emoji || '');
+      return { from: message.from, text: emoji ? `تفاعل بـ ${emoji}` : 'أزال تفاعله', type: 'reaction', timestamp, attachments: [], metadata: { ...baseMetadata, reaction: message.reaction } };
     }
 
     if (message.contacts) {

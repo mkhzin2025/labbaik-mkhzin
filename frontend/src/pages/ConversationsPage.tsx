@@ -1,5 +1,6 @@
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
+import { useNavigate } from 'react-router-dom';
 import { io, Socket } from 'socket.io-client';
 import CustomerAvatar from '../components/CustomerAvatar';
 import VoiceNotePlayer from '../components/VoiceNotePlayer';
@@ -37,7 +38,8 @@ import {
   Loader2,
   Building2,
   FolderOpen,
-  RotateCcw
+  RotateCcw,
+  Ban
 } from 'lucide-react';
 import { 
   FaWhatsapp, 
@@ -48,6 +50,7 @@ import {
 import { format, isYesterday } from 'date-fns';
 import { ar } from 'date-fns/locale';
 import { formatNumber, toEnglishDigits } from '@/lib/utils';
+import { createSyncScheduler, type SyncScheduler } from '@/lib/sync-scheduler';
 import Composer from '../components/conversations/Composer';
 
 interface Message {
@@ -94,6 +97,8 @@ interface Conversation {
   lastSentiment?: string;
   // The customer's answer to the rating message sent when the conversation was closed.
   rating?: Rating | null;
+  // Set while the team has blocked this customer (their messages are dropped).
+  blockedAt?: string | null;
   tags?: string[];
 }
 
@@ -106,13 +111,29 @@ const RATINGS: { id: Rating; label: string; emoji: string; cls: string }[] = [
 
 interface CustomerLabel { id: string; name: string; color: string }
 
-interface InboxCounts { active: number; snoozed: number; closed: number; unread: number; needsReply: number }
+interface InboxCounts { active: number; snoozed: number; closed: number; unread: number; needsReply: number; pending?: number }
 interface InboxPage { items: Conversation[]; nextCursor: string | null }
 interface MessagesPage { messages: Message[]; total: number; start: number; hasMore: boolean }
 
 const LIST_PAGE_SIZE = 30;
+/** WhatsApp allows free-form replies only within 24h of the customer's last message; after that, a template. */
+const REPLY_WINDOW_MS = 24 * 3600 * 1000;
+/** Time automation gets to answer before a waiting customer counts as the team's to reply to (as on the server). */
+const BOT_GRACE_MS = 2 * 60 * 1000;
 const MESSAGES_PAGE_SIZE = 30;
 const SEARCH_DEBOUNCE_MS = 350;
+/**
+ * After realtime events the badge counts refresh this long after the event at the earliest. The server reuses
+ * counts for up to 3s (INBOX_COUNTS_TTL_MS in conversations.service.ts); waiting longer means the refresh
+ * always includes the event. Keep it above that value.
+ */
+const COUNTS_EVENT_DELAY_MS = 3_500;
+/** However busy the inbox (a campaign sends many messages a second), counts refresh at most this often. */
+const COUNTS_MIN_INTERVAL_MS = 5_000;
+/** A conversation that is not in the loaded rows is pulled in this soon after its message... */
+const HEAD_SYNC_DELAY_MS = 400;
+/** ...and the first page is fetched again at most this often during a steady stream. */
+const HEAD_SYNC_MIN_INTERVAL_MS = 2_000;
 const EMPTY_COUNTS: InboxCounts = { active: 0, snoozed: 0, closed: 0, unread: 0, needsReply: 0 };
 
 const fetchListPage = (params: Record<string, string | undefined>, cursor?: string) =>
@@ -462,11 +483,12 @@ export default function ConversationsPage() {
   
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
   const [searchText, setSearchText] = useState('');
-  const [listTab, setListTab] = useState<'all' | 'unread' | 'needs_reply'>('all');
+  const [listTab, setListTab] = useState<'all' | 'unread' | 'needs_reply' | 'pending'>('all');
   const [statusView, setStatusView] = useState<StatusView>('active');
   const [statusBusy, setStatusBusy] = useState(false);
   // Ticks once a minute so relative times ("منذ 5 دقائق") stay current without a reload.
   const [now, setNow] = useState(() => Date.now());
+  const navigate = useNavigate();
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), MINUTE);
     return () => window.clearInterval(timer);
@@ -509,7 +531,6 @@ export default function ConversationsPage() {
   const loadingMoreRef = useRef(false);
   const loadingOlderRef = useRef(false);
   const scrollIntentRef = useRef<{ kind: 'bottom'; smooth: boolean } | { kind: 'keep'; height: number; top: number } | null>(null);
-  const realtimeSyncRef = useRef<{ timer?: number; head: boolean }>({ head: false });
   const conversationsRef = useRef<Conversation[]>([]);
   conversationsRef.current = conversations;
   const { showToast } = useToast();
@@ -633,22 +654,25 @@ export default function ConversationsPage() {
   }, [nextCursor, loading, listError]);
 
   // Realtime events are coalesced: counts refresh, and an unknown conversation pulls the first page back in.
-  const scheduleRealtimeSync = (needsHead: boolean) => {
-    const sync = realtimeSyncRef.current;
-    sync.head ||= needsHead;
-    window.clearTimeout(sync.timer);
-    sync.timer = window.setTimeout(() => {
-      const refreshHead = sync.head;
-      sync.head = false;
-      loadCounts();
-      if (!refreshHead) return;
+  // Each has its own pace (see createSyncScheduler); both pause while the tab is hidden.
+  const countsSyncRef = useRef<SyncScheduler | null>(null);
+  const headSyncRef = useRef<SyncScheduler | null>(null);
+  useEffect(() => {
+    const counts = createSyncScheduler(loadCounts, COUNTS_EVENT_DELAY_MS, COUNTS_MIN_INTERVAL_MS);
+    const head = createSyncScheduler(() => {
       const request = listRequestRef.current;
       fetchListPage(listParamsRef.current)
         .then((page) => { if (request === listRequestRef.current) setConversations((prev) => mergeUnique(page.items, prev)); })
         .catch(() => {});
-    }, 400);
+    }, HEAD_SYNC_DELAY_MS, HEAD_SYNC_MIN_INTERVAL_MS);
+    countsSyncRef.current = counts;
+    headSyncRef.current = head;
+    return () => { counts.dispose(); head.dispose(); };
+  }, [loadCounts]);
+  const scheduleRealtimeSync = (needsHead: boolean) => {
+    countsSyncRef.current?.notify();
+    if (needsHead) headSyncRef.current?.notify();
   };
-  useEffect(() => () => window.clearTimeout(realtimeSyncRef.current.timer), []);
 
   // Open a conversation → load its latest messages.
   useEffect(() => {
@@ -747,7 +771,7 @@ export default function ConversationsPage() {
   };
 
   // Socket listeners are bound once; they call through this ref so they always see the current render.
-  const socketHandlersRef = useRef<Record<'message' | 'status' | 'convStatus', (payload: unknown) => void>>(null!);
+  const socketHandlersRef = useRef<Record<'message' | 'status' | 'convStatus' | 'blocked', (payload: unknown) => void>>(null!);
 
   const setupSocket = () => {
     const token = localStorage.getItem('access_token');
@@ -760,6 +784,37 @@ export default function ConversationsPage() {
     socketRef.current.on('message_status', (payload) => socketHandlersRef.current.status(payload));
     // Another teammate (or another tab) changed a conversation's status.
     socketRef.current.on('conversation_status', (payload) => socketHandlersRef.current.convStatus(payload));
+    socketRef.current.on('conversation_blocked', (payload) => socketHandlersRef.current.blocked(payload));
+  };
+
+  const applyBlocked = (conversationId: string, blockedAt: string | null) => {
+    setConversations((prev) => prev.map((c) => (c._id === conversationId ? { ...c, blockedAt } : c)));
+    setSelectedChat((prev) => (prev?._id === conversationId ? { ...prev, blockedAt } : prev));
+  };
+
+  const [blockBusy, setBlockBusy] = useState(false);
+  const toggleBlock = async () => {
+    if (!selectedChat) return;
+    const blocking = !selectedChat.blockedAt;
+    const name = selectedChat.customerName || selectedChat.customerPhone;
+    if (blocking && !window.confirm(`حظر ${name}؟\n\nلن تصلك رسائله ولن يرد عليه البوت، ولن تصله الحملات، وستُغلق محادثته. يمكنك إلغاء الحظر لاحقًا.`)) return;
+    setBlockBusy(true);
+    try {
+      const { data } = await api.post<{ blockedAt: string | null; metaBlocked: boolean; metaError: string | null }>(`/conversations/${selectedChat._id}/block`, { blocked: blocking });
+      applyBlocked(selectedChat._id, data.blockedAt);
+      if (blocking) {
+        showToast(data.metaBlocked
+          ? 'حُظر العميل في المنصة وفي واتساب.'
+          : `حُظر العميل في المنصة: رسائله تُتجاهل. لم يحظره واتساب نفسه${data.metaError ? ` (${data.metaError})` : ''}؛ Meta تسمح بالحظر خلال 24 ساعة من آخر رسالة للعميل.`, data.metaBlocked ? 'success' : 'info');
+      } else {
+        showToast('أُلغي حظر العميل.', 'success');
+      }
+    } catch (error) {
+      const failure = error as { response?: { data?: { message?: string } } };
+      showToast(failure.response?.data?.message || 'تعذر تنفيذ الحظر.', 'error');
+    } finally {
+      setBlockBusy(false);
+    }
   };
 
   const handleConversationStatus = (payload: { conversationId?: string; status?: string; snoozedUntil?: string | null } | null) => {
@@ -810,11 +865,13 @@ export default function ConversationsPage() {
       };
     });
 
-    setConversations((prev) => prev.map((conversation) => ({
+    // Campaigns bring delivery/read receipts by the thousand; most are for rows not on screen, so leave state as is.
+    const matches = (messages: Message[] = []) => messages.some((message) => message.metadata?.whatsappMessageId === payload.whatsappMessageId);
+    setConversations((prev) => (prev.some((conversation) => matches(conversation.messages)) ? prev.map((conversation) => ({
       ...conversation,
       messages: updateMessages(conversation.messages || []),
-    })));
-    setMessages(updateMessages);
+    })) : prev));
+    setMessages((prev) => (matches(prev) ? updateMessages(prev) : prev));
   };
 
   const handleIncomingRealtimeMessage = (payload: any) => {
@@ -842,7 +899,9 @@ export default function ConversationsPage() {
     const isCurrentlyOpen = isTarget(selectedChatRef.current);
     // Mirrors the server: a customer message reopens a snoozed/closed conversation, except a tap on the closing rating message.
     const ratingTap = (payload.metadata?.rating || null) as Rating | null;
-    const reopen = !isOwnOrSystem && !ratingTap ? { status: 'open', snoozedUntil: null } : {};
+    // Like a rating tap, an emoji reaction asks nothing: no reopening, unread count or waiting for a reply.
+    const quiet = Boolean(ratingTap) || payload.type === 'reaction';
+    const reopen = !isOwnOrSystem && !quiet ? { status: 'open', snoozedUntil: null } : {};
 
     // Only rows already loaded are patched; a conversation outside the loaded pages comes back
     // through a first-page refetch, so it shows up only if it matches the current filters.
@@ -861,15 +920,20 @@ export default function ConversationsPage() {
           customerName: current.customerName || payload.customerName,
           tags: Array.from(new Set([...(current.tags || []), ...(payload.tags || [])])),
           messages: [newMessage],
-          awaitingReply: !ratingTap && isCustomerMessage(newMessage),
-          unreadCount: (!isOwnOrSystem && !ratingTap && !isCurrentlyOpen) ? (current.unreadCount || 0) + 1 : (current.unreadCount || 0),
+          awaitingReply: !quiet && isCustomerMessage(newMessage),
+          unreadCount: (!isOwnOrSystem && !quiet && !isCurrentlyOpen) ? (current.unreadCount || 0) + 1 : (current.unreadCount || 0),
           ...(ratingTap ? { rating: ratingTap, lastSentiment: ratingTap } : {}),
           ...reopen,
         };
         return [updatedConv, ...prev.slice(0, idx), ...prev.slice(idx + 1)];
       });
     }
-    scheduleRealtimeSync(!known);
+    // The socket is in every branch room of the organization, so it also hears branches (and platforms) this
+    // view filters out; those change neither the list nor the counts shown here.
+    const view = listParamsRef.current;
+    const outsideView = (view.storeId && targetStoreId && targetStoreId !== view.storeId)
+      || (view.platform && payload.platform && payload.platform !== view.platform);
+    if (!outsideView) scheduleRealtimeSync(!known);
 
     if (isCurrentlyOpen) {
       if (newMessage.from === 'me' || isNearBottom()) scrollIntentRef.current = { kind: 'bottom', smooth: true };
@@ -882,6 +946,10 @@ export default function ConversationsPage() {
     message: handleIncomingRealtimeMessage,
     status: handleMessageStatus,
     convStatus: (payload) => handleConversationStatus(payload as Parameters<typeof handleConversationStatus>[0]),
+    blocked: (payload) => {
+      const event = payload as { conversationId?: string; blockedAt?: string | null } | null;
+      if (event?.conversationId) applyBlocked(event.conversationId, event.blockedAt || null);
+    },
   };
 
   const selectConversation = async (conv: Conversation) => {
@@ -962,6 +1030,21 @@ export default function ConversationsPage() {
     }
   };
 
+  // Rethrows on failure so the composer keeps the file and caption.
+  const sendFile = async (file: File, caption: string) => {
+    if (!selectedChat) return;
+    const form = new FormData();
+    form.append('file', file);
+    if (caption) form.append('caption', caption);
+    try {
+      await api.post(`/conversations/${selectedChat._id}/attachments`, form);
+    } catch (error) {
+      const failure = error as { message?: string; response?: { data?: { message?: string } } };
+      showToast(failure.response?.data?.message || failure.message || 'فشل إرسال المرفق', 'error');
+      throw error;
+    }
+  };
+
   const [resendingId, setResendingId] = useState<string | null>(null);
   // A failed agent message can be resent until a later message of ours carries the same text.
   const canResend = (idx: number) => {
@@ -1025,7 +1108,13 @@ export default function ConversationsPage() {
     const s = normalizeStatus(c, now);
     return s === 'snoozed' ? 'snoozed' : s === 'closed' ? 'closed' : 'active';
   };
-  const needsReply = (c: Conversation) => c.awaitingReply ?? isCustomerMessage(c.messages?.[c.messages.length - 1]);
+  // Mirrors the server's "needs a reply": unanswered, still inside the 24h reply window, and either the bot had
+  // its two minutes to answer or automatic replies are off for this conversation.
+  const needsReply = (c: Conversation) => {
+    const waiting = c.awaitingReply ?? isCustomerMessage(c.messages?.[c.messages.length - 1]);
+    const age = now - new Date(c.lastMessageAt).getTime();
+    return waiting && age < REPLY_WINDOW_MS && (age >= BOT_GRACE_MS || c.aiEnabled === false);
+  };
   // The server already filtered every loaded row; this only drops rows that local changes
   // (status change, read, realtime update) moved out of the current view. Search stays server-side.
   const filteredConversations = conversations.filter((c) =>
@@ -1035,7 +1124,8 @@ export default function ConversationsPage() {
     && (!selectedRating || c.rating === selectedRating)
     && (selectedStoreId === 'all' || c.storeId === selectedStoreId)
     && (listTab !== 'unread' || Number(c.unreadCount) > 0)
-    && (listTab !== 'needs_reply' || needsReply(c)));
+    && (listTab !== 'needs_reply' || needsReply(c))
+    && (listTab !== 'pending' || normalizeStatus(c, now) === 'pending'));
   const statusCounts: Record<StatusView, number> = { active: counts.active, snoozed: counts.snoozed, closed: counts.closed };
   const unreadTotal = counts.unread;
   const needsReplyTotal = counts.needsReply;
@@ -1044,6 +1134,9 @@ export default function ConversationsPage() {
 
   const hasActiveFilters = Boolean(selectedTag || selectedPlatform || selectedRating || selectedStoreId !== 'all');
   const aiOn = selectedChat?.aiEnabled !== false;
+  // WhatsApp accepts a free-form reply only within 24h of the customer's last message in the loaded thread.
+  const lastCustomerAt = messages.reduce((latest, m) => (isCustomerMessage(m) ? Math.max(latest, new Date(m.timestamp || 0).getTime()) : latest), 0);
+  const replyWindowClosed = selectedChat?.platform === 'whatsapp' && !messagesLoading && messages.length > 0 && now - lastCustomerAt > REPLY_WINDOW_MS;
   const filterOption = (active: boolean) =>
     `w-full flex items-center justify-between gap-2 h-9 px-3 rounded-lg text-sm font-bold transition-colors cursor-pointer ${active ? 'bg-labbaik-blue text-labbaik-on-accent' : 'text-neutral-700 dark:text-neutral-200 hover:bg-labbaik-blue/10'}`;
   const filterHeading = 'text-xs font-black text-labbaik-text-muted flex items-center gap-2 mb-2';
@@ -1152,7 +1245,7 @@ export default function ConversationsPage() {
                 role="tab"
                 aria-selected={statusView === key}
                 key={key}
-                onClick={() => setStatusView(key)}
+                onClick={() => { setStatusView(key); if (key !== 'active' && listTab === 'pending') setListTab('all'); }}
                 className={`py-1.5 rounded-md flex flex-col items-center justify-center leading-tight transition-colors cursor-pointer ${statusView === key ? 'bg-labbaik-surface text-labbaik-blue dark:text-purple-200 shadow-sm' : 'text-labbaik-text-muted hover:text-neutral-900 dark:hover:text-white'}`}
               >
                 <span className="tabular-nums text-sm font-black">{formatNumber(statusCounts[key])}</span>
@@ -1160,8 +1253,14 @@ export default function ConversationsPage() {
               </button>
             ))}
           </div>
-          <div className="grid grid-cols-3 gap-1.5" role="tablist" aria-label="عرض المحادثات">
-            {([['all', 'الكل', statusCounts[statusView]], ['unread', 'غير مقروءة', unreadTotal], ['needs_reply', 'تحتاج رداً', needsReplyTotal]] as const).map(([key, label, count]) => (
+          <div className={`grid ${statusView === 'active' ? 'grid-cols-4' : 'grid-cols-3'} gap-1.5`} role="tablist" aria-label="عرض المحادثات">
+            {([
+              ['all', 'الكل', statusCounts[statusView]],
+              ['unread', 'غير مقروءة', unreadTotal],
+              ['needs_reply', 'تحتاج رداً', needsReplyTotal],
+              // Parked conversations are part of the open tab; this brings them back in one click.
+              ...(statusView === 'active' ? [['pending', 'معلّقة', counts.pending || 0] as const] : []),
+            ] as const).map(([key, label, count]) => (
               <button
                 type="button"
                 role="tab"
@@ -1187,7 +1286,7 @@ export default function ConversationsPage() {
             <div className="p-10 text-center space-y-3">
               <MessageCircle size={32} className="mx-auto text-labbaik-text-muted" />
               <p className="text-labbaik-text-muted font-bold text-sm">
-                {statusView === 'snoozed' && listTab === 'all' ? 'لا توجد محادثات مؤجلة.' : statusView === 'closed' && listTab === 'all' ? 'لا توجد محادثات مغلقة.' : listTab === 'unread' ? 'لا توجد محادثات غير مقروءة.' : listTab === 'needs_reply' ? 'لا توجد محادثات تنتظر رداً.' : searchText || hasActiveFilters ? 'لا توجد محادثات تطابق البحث أو التصفية.' : 'لا توجد محادثات بعد.'}
+                {statusView === 'snoozed' && listTab === 'all' ? 'لا توجد محادثات مؤجلة.' : statusView === 'closed' && listTab === 'all' ? 'لا توجد محادثات مغلقة.' : listTab === 'unread' ? 'لا توجد محادثات غير مقروءة.' : listTab === 'needs_reply' ? 'لا توجد محادثات تنتظر رداً.' : listTab === 'pending' ? 'لا توجد محادثات معلّقة.' : searchText || hasActiveFilters ? 'لا توجد محادثات تطابق البحث أو التصفية.' : 'لا توجد محادثات بعد.'}
               </p>
             </div>
           ) : filteredConversations.map((conv) => {
@@ -1241,6 +1340,7 @@ export default function ConversationsPage() {
                           {formatWait(lastMsg?.timestamp || conv.lastMessageAt, now)}
                         </span>
                       )}
+                      {conv.blockedAt && <span title="العميل محظور" className="inline-flex items-center gap-0.5 h-5 px-1.5 rounded-md bg-red-500/15 text-red-800 dark:text-red-300 text-[11px] font-black"><Ban size={11} /> محظور</span>}
                       {(() => {
                         const r = RATINGS.find((item) => item.id === conv.rating);
                         return r
@@ -1351,6 +1451,19 @@ export default function ConversationsPage() {
                   <span className={`h-2 w-2 rounded-full ${aiOn ? 'bg-labbaik-blue dark:bg-purple-300' : 'bg-red-500'}`} />
                   <span className="hidden sm:inline">{aiOn ? 'الرد الآلي يعمل' : 'الرد الآلي متوقف'}</span>
                 </button>
+                {selectedChat.platform === 'whatsapp' && (
+                  <button
+                    type="button"
+                    onClick={() => void toggleBlock()}
+                    disabled={blockBusy}
+                    aria-pressed={Boolean(selectedChat.blockedAt)}
+                    title={selectedChat.blockedAt ? 'إلغاء حظر العميل' : 'حظر العميل: تتجاهل المنصة رسائله ولا تصله الحملات'}
+                    className={`inline-flex items-center gap-1.5 h-10 px-3 rounded-lg border text-xs font-black transition-colors cursor-pointer disabled:opacity-50 ${selectedChat.blockedAt ? 'bg-red-500 border-red-500 text-white hover:bg-red-600' : 'border-labbaik-border text-neutral-600 dark:text-neutral-300 hover:text-red-600 hover:border-red-500/40 hover:bg-red-500/10'}`}
+                  >
+                    {blockBusy ? <Loader2 size={16} className="animate-spin" /> : <Ban size={16} />}
+                    <span className="hidden sm:inline">{selectedChat.blockedAt ? 'محظور · إلغاء' : 'حظر'}</span>
+                  </button>
+                )}
                 {selectedChat.customerId && (
                   <button
                     type="button"
@@ -1387,7 +1500,14 @@ export default function ConversationsPage() {
                 <div className="py-10 text-center text-sm font-bold text-labbaik-text-muted">تعذر تحميل الرسائل. أعد فتح المحادثة للمحاولة مجددًا.</div>
               )}
               {messages.map((msg, idx) => (
-                msg.type === 'system_error' ? (
+                msg.type === 'reaction' ? (
+                  <div key={msg._id || `live-${msg.timestamp}-${idx}`} className="flex justify-start">
+                    <span className="inline-flex items-center gap-1.5 h-7 px-3 rounded-full bg-labbaik-surface text-xs font-bold text-labbaik-text-muted">
+                      {msg.text}
+                      <span className="tabular-nums font-medium">{safeFormatDate(msg.timestamp || Date.now(), 'HH:mm')}</span>
+                    </span>
+                  </div>
+                ) : msg.type === 'system_error' ? (
                   <div key={msg._id || `live-${msg.timestamp}-${idx}`} className="flex justify-center py-1">
                     <div role="alert" className="max-w-[90%] rounded-xl border border-red-500/30 bg-red-50 dark:bg-red-500/10 px-4 py-3 text-red-800 dark:text-red-200">
                       <div className="flex items-start gap-2.5">
@@ -1434,7 +1554,23 @@ export default function ConversationsPage() {
               ))}
             </div>
             <div className="px-4 lg:px-6 py-3 border-t border-labbaik-border bg-labbaik-surface">
-              <Composer key={selectedChat._id} onSend={sendText} />
+              {selectedChat.blockedAt ? (
+                <div className="flex items-center justify-between gap-3 rounded-xl border border-red-500/30 bg-red-50 dark:bg-red-500/10 px-4 py-3 text-sm text-red-800 dark:text-red-200">
+                  <span className="flex items-center gap-2 font-bold"><Ban size={16} /> هذا العميل محظور: رسائله تُتجاهل ولا يمكن مراسلته.</span>
+                  <button type="button" onClick={() => void toggleBlock()} disabled={blockBusy} className="shrink-0 text-xs font-black underline cursor-pointer disabled:opacity-50">إلغاء الحظر</button>
+                </div>
+              ) : (
+                <>
+                  {replyWindowClosed && (
+                    <div className="mb-2 flex items-center justify-between gap-3 rounded-xl border border-amber-500/40 bg-amber-50 dark:bg-amber-500/10 px-4 py-2.5 text-sm text-amber-900 dark:text-amber-200">
+                      <span className="flex items-center gap-2 font-bold"><AlertTriangle size={16} className="shrink-0" /> نافذة الـ24 ساعة مُغلقة: لا يمكن إرسال رسالة حرة حتى يراسلك العميل، أرسل له قالبًا.</span>
+                      <button type="button" onClick={() => navigate(`/dashboard/whatsapp-templates?to=${encodeURIComponent(selectedChat.customerPhone)}`)}
+                        className="shrink-0 h-8 px-3 rounded-lg border border-amber-600/40 text-xs font-black hover:bg-amber-500/15 cursor-pointer">أرسل قالبًا</button>
+                    </div>
+                  )}
+                  <Composer key={selectedChat._id} disabled={replyWindowClosed} onSend={sendText} onSendFile={selectedChat.platform === 'whatsapp' ? sendFile : undefined} />
+                </>
+              )}
             </div>
           </>
         ) : (
