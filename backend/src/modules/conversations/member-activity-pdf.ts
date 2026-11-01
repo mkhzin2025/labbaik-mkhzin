@@ -77,7 +77,7 @@ export function writeMemberActivityPdf(response: Response, report: MemberActivit
     { label: 'الردود', value: format(t.replies), note: 'رسالة كتبها للعملاء', color: C.brand },
     { label: 'المحادثات', value: format(t.conversations), note: 'رد فيها', color: C.lilac },
     { label: 'أغلقها', value: format(t.closed), note: 'إغلاق محادثة', color: C.teal },
-    { label: 'زمن الرد', value: duration(activity.responseTime.medianSeconds), note: activity.responseTime.samples ? `الوسيط · ${percent(Math.round((activity.responseTime.within5MinShare || 0) * activity.responseTime.samples), activity.responseTime.samples)} خلال 5 دقائق` : 'لا توجد ردود بعد رسالة عميل', color: C.orange },
+    { label: 'زمن الرد', value: duration(activity.responseTime.medianSeconds), note: activity.responseTime.samples ? `الوسيط، ${percent(Math.round((activity.responseTime.within5MinShare || 0) * activity.responseTime.samples), activity.responseTime.samples)} خلال 5 دقائق` : 'لا توجد ردود بعد رسالة عميل', color: C.orange },
   ], 158, 84);
 
   const panelY = 260;
@@ -116,7 +116,9 @@ export function writeMemberActivityPdf(response: Response, report: MemberActivit
       const rowY = y + 22 + index * 40;
       doc.circle(legendX + legendWidth - 4, rowY + 6, 3.5).fill(RATING_COLORS[key]);
       text(RATING_NAMES[key], legendX + legendWidth - 66, rowY, 56, { size: 9.5, color: C.ink, bold: true });
-      text(`${format(t[key])}  ·  ${percent(t[key], t.rated)}`, legendX, rowY, legendWidth - 70, { size: 9, color: C.ink, bold: true, align: 'left' });
+      // The report fonts have no "·": the count and its share are drawn side by side instead.
+      text(format(t[key]), legendX + 34, rowY, 40, { size: 9.5, color: C.ink, bold: true, align: 'left' });
+      text(percent(t[key], t.rated), legendX, rowY + 1, 30, { size: 8, color: C.muted, align: 'left' });
       doc.roundedRect(legendX, rowY + 17, legendWidth, 5, 2.5).fill(C.soft);
       const filled = (t[key] / t.rated) * legendWidth;
       if (filled > 0) doc.roundedRect(legendX + legendWidth - filled, rowY + 17, Math.max(filled, 3), 5, 2.5).fill(RATING_COLORS[key]);
@@ -148,10 +150,14 @@ export function writeMemberActivityPdf(response: Response, report: MemberActivit
     if (index % labelEvery === 0) text(day(d.date.slice(5)), center - 20, plotBottom + 5, 40, { size: 6.5, color: C.muted, align: 'center' });
   });
   if (!t.replies && !t.closed) text('لا يوجد نشاط في هذه الفترة.', plotLeft, (plotTop + plotBottom) / 2 - 6, plotWidth, { size: 9, color: C.muted, align: 'center' });
-  doc.rect(chartX + 16, panelY + 18, 8, 8).fill(C.brand);
-  text('ردود', chartX + 28, panelY + 17, 40, { size: 7.5, color: C.muted });
-  doc.rect(chartX + 62, panelY + 18, 8, 8).fill(C.teal);
-  text('إغلاق', chartX + 74, panelY + 17, 40, { size: 7.5, color: C.muted });
+  // Legend, read right to left like the bars (replies on the right of each day): a swatch, then its label to its left.
+  const legend: [string, string][] = [['ردود', C.brand], ['إغلاق', C.teal]];
+  let legendRight = chartX + 16 + 120;
+  for (const [label, color] of legend) {
+    doc.roundedRect(legendRight - 8, panelY + 19, 8, 8, 2).fill(color);
+    text(label, legendRight - 8 - 4 - 36, panelY + 17, 36, { size: 7.5, color: C.muted, align: 'right' });
+    legendRight -= 8 + 4 + 36 + 12;
+  }
 
   // ---------- Tables ----------
   const headerHeight = 34;
@@ -232,7 +238,7 @@ export function writeMemberActivityPdf(response: Response, report: MemberActivit
   const notes = [
     'الردود = الرسائل التي كتبها العضو بنفسه، لا تشمل ردود البوت والتدفقات.',
     'زمن الرد = من أول رسالة للعميل لم يُرد عليها حتى رد العضو (الوسيط، ضمن 24 ساعة).',
-    'يبدأ احتساب النشاط من تاريخ تفعيل تتبّع الفريق؛ الرسائل الأقدم لا تحمل اسم من كتبها.',
+    'يبدأ احتساب النشاط من تاريخ تفعيل تتبّع الفريق، والرسائل الأقدم لا تحمل اسم من كتبها.',
   ];
   const notesHeight = 16 + notes.length * 13;
   if (end + 12 + notesHeight > height - 36) end = startPage('ملاحظات') - 12;

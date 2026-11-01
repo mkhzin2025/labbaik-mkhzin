@@ -55,9 +55,10 @@ export function createTaelReport(response: Response, filename: string) {
   const C = REPORT_COLORS;
 
   // Long labels shrink to fit (down to 6pt) instead of being cut: the Arabic fonts have no ellipsis glyph.
-  // The fonts have no underscore or emoji either, so those are dropped ("offers_26_10" reads "offers 26 10").
+  // The fonts have no underscore or emoji either, so those are dropped ("offers_26_10" reads "offers 26 10"),
+  // nor a middle dot or an Arabic semicolon, which would print as empty boxes: they become "|" and "،".
   const text: ReportText = (raw, x, y, boxWidth, options) => {
-    const value = raw.replace(/_/g, ' ').replace(/[\p{Extended_Pictographic}️‍]/gu, '').replace(/\s+/g, ' ').trim();
+    const value = raw.replace(/_/g, ' ').replace(/\s*·\s*/g, ' | ').replace(/؛/g, '،').replace(/[\p{Extended_Pictographic}️‍]/gu, '').replace(/\s+/g, ' ').trim();
     doc.font(options.bold ? 'ArabicBold' : 'ArabicRegular').fillColor(options.color);
     let size = options.size;
     while (size > 6 && doc.fontSize(size).widthOfString(value, { features: [] }) > boxWidth) size -= 0.5;

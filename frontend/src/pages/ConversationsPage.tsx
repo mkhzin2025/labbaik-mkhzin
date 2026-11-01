@@ -205,6 +205,43 @@ const formatSnoozeUntil = (iso?: string | null) => {
   return toEnglishDigits(format(d, sameDay ? 'HH:mm' : 'EEEE HH:mm', { locale: ar }));
 };
 
+/** Asks before a conversation a teammate is handling moves to the current user (by taking it or replying in it). */
+function TakeoverDialog({ mode, agentName, since, now, onAnswer }: { mode: 'take' | 'reply'; agentName: string; since: string | null; now: number; onAnswer: (ok: boolean) => void }) {
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    // The safe choice has the focus: Enter on a stray dialog does not take the conversation.
+    cancelRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onAnswer(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onAnswer]);
+  return createPortal(
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) onAnswer(false); }}>
+      <div role="alertdialog" aria-modal="true" aria-labelledby="takeover-title" aria-describedby="takeover-body" dir="rtl" className="w-full max-w-md rounded-2xl border border-labbaik-border bg-labbaik-surface p-5 shadow-2xl">
+        <div className="flex items-start gap-3">
+          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-sky-500/12 text-sky-700 dark:text-sky-300"><UserRound size={20} /></span>
+          <div className="min-w-0 space-y-1.5">
+            <h2 id="takeover-title" className="text-base font-black text-neutral-900 dark:text-white">تحويل المحادثة إليك؟</h2>
+            <p id="takeover-body" className="text-sm leading-relaxed text-labbaik-text-muted">
+              يتابع هذه المحادثة <span className="font-black text-neutral-900 dark:text-white">{agentName}</span>
+              {since && <> منذ {formatRelativeTime(since, now)}</>}.
+              {' '}{mode === 'reply' ? 'إذا أرسلت ردك ستنتقل متابعتها إليك.' : 'إذا استلمتها ستظهر باسمك.'} سيرى الفريق التغيير فورًا.
+            </p>
+            <p className="text-xs text-labbaik-text-muted">تأكد أولًا أنه لا يرد عليها الآن، حتى لا يصل العميل ردّان.</p>
+          </div>
+        </div>
+        <div className="mt-5 flex justify-end gap-2">
+          <button ref={cancelRef} type="button" onClick={() => onAnswer(false)} className="h-10 rounded-lg border border-labbaik-border px-4 text-sm font-bold text-neutral-800 hover:bg-labbaik-page dark:text-neutral-100 cursor-pointer">إلغاء</button>
+          <button type="button" onClick={() => onAnswer(true)} className="inline-flex h-10 items-center gap-1.5 rounded-lg bg-labbaik-blue px-4 text-sm font-black text-labbaik-on-accent hover:bg-[#553174] cursor-pointer">
+            <UserCheck size={16} /> {mode === 'reply' ? 'نعم، أرسل وحوّلها إليّ' : 'نعم، حوّلها إليّ'}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 function StatusMenu({ status, snoozedUntil, busy, onChange }: { status: ConvStatus; snoozedUntil?: string | null; busy: boolean; onChange: (status: ConvStatus, until?: Date) => void }) {
   const [open, setOpen] = useState(false);
   const [showSnooze, setShowSnooze] = useState(false);
@@ -811,6 +848,8 @@ export default function ConversationsPage() {
   const [agentBusy, setAgentBusy] = useState(false);
   const setAgent = async (take: boolean) => {
     if (!selectedChat) return;
+    // Taking a conversation a teammate is handling needs a confirmation: nobody takes over someone else's by a stray click.
+    if (take && !(await confirmTakeover('take'))) return;
     setAgentBusy(true);
     try {
       const { data } = await api.patch<AgentPatch & { conversationId: string }>(`/conversations/${selectedChat._id}/agent`, { take });
@@ -823,11 +862,19 @@ export default function ConversationsPage() {
       setAgentBusy(false);
     }
   };
-  /** Before answering a conversation a teammate is handling: asks, so two people don't reply to the same customer. */
-  const confirmTakeover = () => {
+  /**
+   * Before taking or answering a conversation a teammate is handling: asks in a dialog, so two people don't reply
+   * to the same customer. Resolves true right away when nobody else handles it.
+   */
+  const [takeover, setTakeover] = useState<{ mode: 'take' | 'reply'; agentName: string; since: string | null; resolve: (ok: boolean) => void } | null>(null);
+  const confirmTakeover = (mode: 'take' | 'reply') => {
     const chat = selectedChatRef.current;
-    if (!chat?.agentId || chat.agentId === me) return true;
-    return window.confirm(`يتابع هذه المحادثة ${chat.agentName || 'عضو آخر في الفريق'}.\n\nهل تريد الرد عليها؟ ستنتقل متابعتها إليك.`);
+    if (!chat?.agentId || chat.agentId === me) return Promise.resolve(true);
+    return new Promise<boolean>((resolve) => setTakeover({ mode, agentName: chat.agentName || 'عضو آخر في الفريق', since: chat.agentAssignedAt || null, resolve }));
+  };
+  const answerTakeover = (ok: boolean) => {
+    takeover?.resolve(ok);
+    setTakeover(null);
   };
 
   const applyBlocked = (conversationId: string, blockedAt: string | null) => {
@@ -1072,7 +1119,7 @@ export default function ConversationsPage() {
   // Rethrows on failure so the composer can put the unsent text back.
   const sendText = async (text: string) => {
     if (!selectedChat) return;
-    if (!confirmTakeover()) throw new Error('cancelled');
+    if (!(await confirmTakeover('reply'))) throw new Error('cancelled');
     try {
       await api.post(`/conversations/${selectedChat._id}/messages`, { text });
     } catch (error: any) {
@@ -1084,7 +1131,7 @@ export default function ConversationsPage() {
   // Rethrows on failure so the composer keeps the file and caption.
   const sendFile = async (file: File, caption: string) => {
     if (!selectedChat) return;
-    if (!confirmTakeover()) throw new Error('cancelled');
+    if (!(await confirmTakeover('reply'))) throw new Error('cancelled');
     const form = new FormData();
     form.append('file', file);
     if (caption) form.append('caption', caption);
@@ -1653,6 +1700,8 @@ export default function ConversationsPage() {
           </div>
         )}
       </div>
+
+      {takeover && <TakeoverDialog mode={takeover.mode} agentName={takeover.agentName} since={takeover.since} now={now} onAnswer={answerTakeover} />}
 
       {selectedChat && showProfile && selectedChat.customerId && (
         <CustomerProfile

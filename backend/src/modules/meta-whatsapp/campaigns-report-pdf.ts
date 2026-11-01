@@ -305,7 +305,7 @@ export function writeCampaignsReportPdf(response: Response, report: CampaignsRep
     // Meta's clicks are a rate of delivered messages; our own button replies are a share of everyone who replied.
     const buttonBase = fromMeta ? s.delivered : s.replied;
     inner = fromMeta
-      ? r.panel(rightX, bottom, columnW, half, 'النقرات على الأزرار', `${format(c.metaButtons!.total)} نقرة · حسب ميتا`)
+      ? r.panel(rightX, bottom, columnW, half, 'النقرات على الأزرار', `${format(c.metaButtons!.total)} نقرة، حسب ميتا`)
       : r.panel(rightX, bottom, columnW, half, 'الأزرار الأكثر استخدامًا', `${format(s.interactions)} تفاعل`);
     const buttons = (fromMeta ? c.metaButtons!.buttons : c.buttons).slice(0, 5);
     if (!buttons.length) text('لا توجد ضغطات أزرار مسجّلة.', rightX + 16, inner + 20, columnW - 32, { size: 9, color: C.muted, align: 'center' });
