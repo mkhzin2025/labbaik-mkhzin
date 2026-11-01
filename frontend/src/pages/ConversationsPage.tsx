@@ -39,7 +39,9 @@ import {
   Building2,
   FolderOpen,
   RotateCcw,
-  Ban
+  Ban,
+  UserCheck,
+  UserRound
 } from 'lucide-react';
 import { 
   FaWhatsapp, 
@@ -53,12 +55,16 @@ import { formatNumber, toEnglishDigits } from '@/lib/utils';
 import { CountUp } from '@/components/ui';
 import { createSyncScheduler, type SyncScheduler } from '@/lib/sync-scheduler';
 import Composer from '../components/conversations/Composer';
+import { currentUser } from '../lib/team';
 
 interface Message {
   _id?: string;
   from: string;
   text: string;
   type: string;
+  // The team member who wrote a manual message.
+  agentId?: string;
+  agentName?: string;
   attachments?: Attachment[];
   metadata?: Record<string, any>;
   sentiment?: string;
@@ -101,6 +107,10 @@ interface Conversation {
   // Set while the team has blocked this customer (their messages are dropped).
   blockedAt?: string | null;
   tags?: string[];
+  // The team member handling the conversation (took it or replied last), so two people don't answer the same customer.
+  agentId?: string | null;
+  agentName?: string | null;
+  agentAssignedAt?: string | null;
 }
 
 type Rating = 'positive' | 'neutral' | 'negative';
@@ -772,7 +782,7 @@ export default function ConversationsPage() {
   };
 
   // Socket listeners are bound once; they call through this ref so they always see the current render.
-  const socketHandlersRef = useRef<Record<'message' | 'status' | 'convStatus' | 'blocked' | 'reconnect', (payload: unknown) => void>>(null!);
+  const socketHandlersRef = useRef<Record<'message' | 'status' | 'convStatus' | 'blocked' | 'agent' | 'reconnect', (payload: unknown) => void>>(null!);
 
   const setupSocket = () => {
     const token = localStorage.getItem('access_token');
@@ -786,8 +796,38 @@ export default function ConversationsPage() {
     // Another teammate (or another tab) changed a conversation's status.
     socketRef.current.on('conversation_status', (payload) => socketHandlersRef.current.convStatus(payload));
     socketRef.current.on('conversation_blocked', (payload) => socketHandlersRef.current.blocked(payload));
+    // A teammate took, released or replied in a conversation.
+    socketRef.current.on('conversation_agent', (payload) => socketHandlersRef.current.agent(payload));
     // Events sent while the connection was down are not replayed: catch up once it is back (not on the first connect).
     socketRef.current.io.on('reconnect', () => socketHandlersRef.current.reconnect(null));
+  };
+
+  const me = useMemo(() => currentUser().id || '', []);
+  type AgentPatch = Pick<Conversation, 'agentId' | 'agentName' | 'agentAssignedAt'>;
+  const applyAgent = (conversationId: string, patch: AgentPatch) => {
+    setConversations((prev) => prev.map((c) => (c._id === conversationId ? { ...c, ...patch } : c)));
+    setSelectedChat((prev) => (prev?._id === conversationId ? { ...prev, ...patch } : prev));
+  };
+  const [agentBusy, setAgentBusy] = useState(false);
+  const setAgent = async (take: boolean) => {
+    if (!selectedChat) return;
+    setAgentBusy(true);
+    try {
+      const { data } = await api.patch<AgentPatch & { conversationId: string }>(`/conversations/${selectedChat._id}/agent`, { take });
+      applyAgent(selectedChat._id, { agentId: data.agentId, agentName: data.agentName, agentAssignedAt: data.agentAssignedAt });
+      showToast(take ? 'استلمت المحادثة: يرى الفريق أنك تتابعها.' : 'تركت المحادثة لأي عضو في الفريق.', 'success');
+    } catch (error) {
+      const failure = error as { response?: { data?: { message?: string } } };
+      showToast(failure.response?.data?.message || 'تعذر تغيير متابع المحادثة.', 'error');
+    } finally {
+      setAgentBusy(false);
+    }
+  };
+  /** Before answering a conversation a teammate is handling: asks, so two people don't reply to the same customer. */
+  const confirmTakeover = () => {
+    const chat = selectedChatRef.current;
+    if (!chat?.agentId || chat.agentId === me) return true;
+    return window.confirm(`يتابع هذه المحادثة ${chat.agentName || 'عضو آخر في الفريق'}.\n\nهل تريد الرد عليها؟ ستنتقل متابعتها إليك.`);
   };
 
   const applyBlocked = (conversationId: string, blockedAt: string | null) => {
@@ -886,6 +926,8 @@ export default function ConversationsPage() {
 
     const newMessage: Message = {
       from: payload.from,
+      agentId: payload.agentId,
+      agentName: payload.agentName,
       text: payload.text || '',
       type: payload.type || 'text',
       attachments: payload.attachments || [],
@@ -952,6 +994,10 @@ export default function ConversationsPage() {
     blocked: (payload) => {
       const event = payload as { conversationId?: string; blockedAt?: string | null } | null;
       if (event?.conversationId) applyBlocked(event.conversationId, event.blockedAt || null);
+    },
+    agent: (payload) => {
+      const event = payload as ({ conversationId?: string } & AgentPatch) | null;
+      if (event?.conversationId) applyAgent(event.conversationId, { agentId: event.agentId || null, agentName: event.agentName || null, agentAssignedAt: event.agentAssignedAt || null });
     },
     reconnect: () => scheduleRealtimeSync(true),
   };
@@ -1026,6 +1072,7 @@ export default function ConversationsPage() {
   // Rethrows on failure so the composer can put the unsent text back.
   const sendText = async (text: string) => {
     if (!selectedChat) return;
+    if (!confirmTakeover()) throw new Error('cancelled');
     try {
       await api.post(`/conversations/${selectedChat._id}/messages`, { text });
     } catch (error: any) {
@@ -1037,6 +1084,7 @@ export default function ConversationsPage() {
   // Rethrows on failure so the composer keeps the file and caption.
   const sendFile = async (file: File, caption: string) => {
     if (!selectedChat) return;
+    if (!confirmTakeover()) throw new Error('cancelled');
     const form = new FormData();
     form.append('file', file);
     if (caption) form.append('caption', caption);
@@ -1344,6 +1392,12 @@ export default function ConversationsPage() {
                           {formatWait(lastMsg?.timestamp || conv.lastMessageAt, now)}
                         </span>
                       )}
+                      {conv.agentId && (
+                        <span title={conv.agentId === me ? 'أنت تتابع هذه المحادثة' : `يتابعها ${conv.agentName || 'عضو آخر'}`}
+                          className={`inline-flex items-center gap-0.5 h-5 max-w-24 px-1.5 rounded-md text-[11px] font-bold ${conv.agentId === me ? 'bg-labbaik-blue/12 text-labbaik-blue dark:text-purple-200' : 'bg-sky-500/12 text-sky-800 dark:text-sky-300'}`}>
+                          <UserRound size={11} className="shrink-0" /><span className="truncate">{conv.agentId === me ? 'أنت' : conv.agentName}</span>
+                        </span>
+                      )}
                       {conv.blockedAt && <span title="العميل محظور" className="inline-flex items-center gap-0.5 h-5 px-1.5 rounded-md bg-red-500/15 text-red-800 dark:text-red-300 text-[11px] font-black"><Ban size={11} /> محظور</span>}
                       {(() => {
                         const r = RATINGS.find((item) => item.id === conv.rating);
@@ -1444,6 +1498,20 @@ export default function ConversationsPage() {
                 </div>
               </div>
               <div className="flex items-center gap-2 shrink-0">
+                {selectedChat.agentId === me ? (
+                  <button type="button" onClick={() => void setAgent(false)} disabled={agentBusy} title="ترك المحادثة لأي عضو في الفريق"
+                    className="inline-flex items-center gap-1.5 h-10 px-3 rounded-lg border border-labbaik-blue/30 bg-labbaik-blue/10 text-xs font-black text-labbaik-blue dark:text-purple-200 hover:bg-labbaik-blue/15 disabled:opacity-50 cursor-pointer">
+                    {agentBusy ? <Loader2 size={16} className="animate-spin" /> : <UserCheck size={16} />}
+                    <span className="hidden sm:inline">تتابعها أنت · ترك</span>
+                  </button>
+                ) : (
+                  <button type="button" onClick={() => void setAgent(true)} disabled={agentBusy}
+                    title={selectedChat.agentId ? `يتابعها ${selectedChat.agentName || 'عضو آخر'}. استلمها لتتابعها أنت.` : 'استلم المحادثة ليعرف الفريق أنك تتابعها'}
+                    className={`inline-flex items-center gap-1.5 h-10 px-3 rounded-lg border text-xs font-black transition-colors disabled:opacity-50 cursor-pointer ${selectedChat.agentId ? 'border-sky-500/30 bg-sky-500/10 text-sky-800 dark:text-sky-300 hover:bg-sky-500/15' : 'border-labbaik-border text-neutral-700 dark:text-neutral-200 hover:border-labbaik-blue/40 hover:text-labbaik-blue'}`}>
+                    {agentBusy ? <Loader2 size={16} className="animate-spin" /> : <UserRound size={16} />}
+                    <span className="hidden sm:inline">{selectedChat.agentId ? `يتابعها ${selectedChat.agentName || 'عضو آخر'} · استلام` : 'استلام المحادثة'}</span>
+                  </button>
+                )}
                 <StatusMenu status={normalizeStatus(selectedChat, now)} snoozedUntil={selectedChat.snoozedUntil} busy={statusBusy} onChange={(next, until) => void changeStatus(next, until)} />
                 <button
                   type="button"
@@ -1549,6 +1617,7 @@ export default function ConversationsPage() {
                     )}
                     <MessageExtras msg={msg} />
                     <div className={`flex items-center gap-2 mt-1 ${msg.from === 'me' ? 'justify-end text-white/80' : 'justify-start text-labbaik-text-muted'}`}>
+                      {msg.from === 'me' && msg.agentName && <span className="text-[11px] font-bold truncate max-w-32" title="كتبها">{msg.agentId === me ? 'أنت' : msg.agentName}</span>}
                       <span className="text-[11px] font-bold tabular-nums">{safeFormatDate(msg.timestamp || Date.now(), 'HH:mm')}</span>
                       {renderMessageStatus(msg)}
                     </div>

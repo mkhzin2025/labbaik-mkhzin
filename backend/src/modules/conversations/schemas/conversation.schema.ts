@@ -30,6 +30,13 @@ export class Message extends Document {
   // true = typed by a team member, false = automatic (AI/flow). Older messages predate the field and leave it unset.
   @Prop()
   isManual?: boolean;
+
+  // The team member who sent a manual message (for the team's activity reports).
+  @Prop()
+  agentId?: string;
+
+  @Prop()
+  agentName?: string;
 }
 
 export const MessageSchema = SchemaFactory.createForClass(Message);
@@ -94,6 +101,34 @@ export class Conversation extends Document {
   @Prop({ type: Date, default: null })
   ratingRequestedAt: Date | null;
 
+  // Who the rating counts for: the team member who closed the conversation (else the one handling it).
+  @Prop({ type: String, default: null })
+  ratedAgentId: string | null;
+
+  @Prop({ type: String, default: null })
+  ratedAgentName: string | null;
+
+  // The team member handling the conversation, so two people don't answer the same customer. Set by
+  // taking the conversation or by replying in it; kept after closing (the same person picks it up again).
+  @Prop({ type: String, default: null })
+  agentId: string | null;
+
+  @Prop({ type: String, default: null })
+  agentName: string | null;
+
+  @Prop({ type: Date, default: null })
+  agentAssignedAt: Date | null;
+
+  // Last close, plus a short log of every close (a conversation can be closed, reopened and closed again).
+  @Prop({ type: String, default: null })
+  closedById: string | null;
+
+  @Prop({ type: String, default: null })
+  closedByName: string | null;
+
+  @Prop({ type: [Object], default: [] })
+  closures: { by: string; name: string; at: Date }[];
+
   // Mirrors the customer's block (kept in the customers table) so the inbox can show it without a lookup.
   @Prop({ type: Date, default: null })
   blockedAt: Date | null;
@@ -129,7 +164,11 @@ ConversationSchema.index({ storeId: 1, lastMessageAt: -1, _id: -1 });
 // addMessage / getAutoReplyPause look up a customer's thread on every incoming message.
 ConversationSchema.index({ customerPhone: 1, storeId: 1, platform: 1, lastMessageAt: -1 });
 // Webhook dedupe and delivery-status updates (sent/delivered/read) match by message id.
-ConversationSchema.index({ 'messages.metadata.whatsappMessageId': 1 }, { sparse: true });
+ConversationSchema.index({ 'messages.metadata.whatsappMessageId': 1 });
 ConversationSchema.index({ storeId: 1, status: 1, lastMessageAt: -1, _id: -1 });
 // Inbox filter by the customer's rating.
 ConversationSchema.index({ storeId: 1, rating: 1, lastMessageAt: -1 });
+// A team member's activity report and satisfaction score.
+ConversationSchema.index({ 'messages.agentId': 1, lastMessageAt: -1 });
+ConversationSchema.index({ 'closures.by': 1, 'closures.at': -1 });
+ConversationSchema.index({ ratedAgentId: 1, ratedAt: -1 });

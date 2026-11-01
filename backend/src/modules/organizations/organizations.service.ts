@@ -91,6 +91,20 @@ export class OrganizationsService {
     return { organization, membership };
   }
 
+  /** The signed-in member as they are credited on conversations (name as set on the team page). */
+  async agentFor(userId: string) {
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+    return { id: userId, name: user?.fullName || user?.email || 'عضو الفريق' };
+  }
+
+  /** A member of the caller's organization, for their activity report. */
+  async memberSummary(actorUserId: string, organizationId: string | undefined, targetUserId: string) {
+    const organization = await this.getForUser(actorUserId, organizationId);
+    const member = await this.memberRepository.findOne({ where: { userId: targetUserId, organizationId: organization.id }, relations: ['user'] });
+    if (!member) throw new NotFoundException('العضو غير موجود في فريقك.');
+    return { organization, userId: member.userId, fullName: member.user?.fullName || '', email: member.user?.email || '', role: memberRoleOf(member.role) };
+  }
+
   async assertCanManageIntegrations(userId: string, organizationId?: string) {
     const { organization, membership } = await this.getMembership(userId, organizationId);
     if (![OrganizationRole.OWNER, OrganizationRole.ADMIN].includes(membership.role)) {

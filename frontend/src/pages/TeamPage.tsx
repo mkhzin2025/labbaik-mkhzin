@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
-import { Check, Copy, Eye, EyeOff, KeyRound, Loader2, Pencil, Plus, RefreshCw, Trash2, UserCog, X } from 'lucide-react';
+import { BarChart3, Check, Copy, Eye, EyeOff, KeyRound, Loader2, Pencil, Plus, RefreshCw, Trash2, UserCog, X } from 'lucide-react';
 import api from '../api/client';
 import { useToast } from '../components/Toast';
 import CustomerAvatar from '../components/CustomerAvatar';
+import MemberActivityDialog from '../components/team/MemberActivityDialog';
 import { ROLE_LABELS } from '../lib/access';
 import type { MemberRole } from '../lib/access';
 
@@ -214,18 +215,24 @@ function AddMemberForm({ branches, onAdded, onCancel }: { branches: Branch[]; on
 
 function EditMember({ member, branches, onSaved, onCancel }: { member: Member; branches: Branch[]; onSaved: (member: Member) => void; onCancel: () => void }) {
   const { showToast } = useToast();
+  const [fullName, setFullName] = useState(member.fullName);
   const [role, setRole] = useState<AssignableRole>(member.role === 'owner' ? 'admin' : member.role);
   const [storeIds, setStoreIds] = useState<string[]>(member.storeIds && member.storeIds.length < branches.length ? member.storeIds : []);
   const [password, setPassword] = useState('');
   const [saving, setSaving] = useState(false);
 
   const save = async () => {
+    if (!fullName.trim()) { showToast('اكتب اسم العضو.', 'error'); return; }
     setSaving(true);
     try {
       const body: Record<string, unknown> = { storeIds: role === 'admin' ? [] : storeIds };
+      if (fullName.trim() !== member.fullName) body.fullName = fullName.trim();
       if (!member.isYou) body.role = role;
       if (password) body.password = password;
       const { data } = await api.patch<Member>(`/organizations/members/${member.userId}`, body);
+      if (member.isYou && body.fullName) {
+        try { localStorage.setItem('user', JSON.stringify({ ...JSON.parse(localStorage.getItem('user') || '{}'), fullName: data.fullName })); } catch { /* storage unavailable */ }
+      }
       showToast(password ? 'حُفظت التعديلات وكلمة المرور الجديدة.' : 'حُفظت التعديلات.', 'success');
       onSaved(data);
     } catch (error) {
@@ -237,6 +244,11 @@ function EditMember({ member, branches, onSaved, onCancel }: { member: Member; b
 
   return (
     <div className="space-y-4 border-t border-labbaik-border bg-labbaik-page/60 px-4 py-4">
+      <label className="block max-w-md space-y-1.5">
+        <span className="text-[13px] font-bold text-neutral-800 dark:text-neutral-100">الاسم</span>
+        <input value={fullName} onChange={(e) => setFullName(e.target.value)} required placeholder="مثال: سارة محمد" className={inputClass} />
+        <span className="block text-xs text-labbaik-text-muted">يظهر للفريق على المحادثات التي يتابعها، وفي تقارير الأداء.</span>
+      </label>
       {member.isYou
         ? <p className="text-sm text-labbaik-text-muted">لا يمكنك تغيير صلاحيتك بنفسك.</p>
         : <RolePicker value={role} onChange={setRole} />}
@@ -264,6 +276,7 @@ export default function TeamPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [activityOf, setActivityOf] = useState<Member | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -365,6 +378,9 @@ export default function TeamPage() {
                         </>
                       ) : (
                         <>
+                          <button type="button" onClick={() => setActivityOf(member)} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-labbaik-border px-2.5 text-xs font-bold text-neutral-800 hover:border-labbaik-blue/40 hover:text-labbaik-blue dark:text-neutral-100 cursor-pointer">
+                            <BarChart3 size={13} /> النشاط
+                          </button>
                           <button type="button" onClick={() => setEditingId(editingId === member.userId ? null : member.userId)} aria-expanded={editingId === member.userId} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-labbaik-border px-2.5 text-xs font-bold text-neutral-800 hover:border-labbaik-blue/40 hover:text-labbaik-blue dark:text-neutral-100 cursor-pointer">
                             <Pencil size={13} /> تعديل
                           </button>
@@ -377,7 +393,14 @@ export default function TeamPage() {
                       )}
                     </div>
                   )}
-                  {!editable && <span className="inline-flex items-center gap-1 text-xs text-labbaik-text-muted"><KeyRound size={13} /> صاحب الحساب</span>}
+                  {!editable && (
+                    <div className="flex items-center gap-2">
+                      <span className="inline-flex items-center gap-1 text-xs text-labbaik-text-muted"><KeyRound size={13} /> صاحب الحساب</span>
+                      <button type="button" onClick={() => setActivityOf(member)} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-labbaik-border px-2.5 text-xs font-bold text-neutral-800 hover:border-labbaik-blue/40 hover:text-labbaik-blue dark:text-neutral-100 cursor-pointer">
+                        <BarChart3 size={13} /> النشاط
+                      </button>
+                    </div>
+                  )}
                 </div>
                 {editingId === member.userId && (
                   <EditMember
@@ -399,6 +422,8 @@ export default function TeamPage() {
           )}
         </ul>
       )}
+
+      {activityOf && <MemberActivityDialog member={activityOf} branches={branches} onClose={() => setActivityOf(null)} />}
     </div>
   );
 }

@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
 import api from '../api/client';
+import { readCachedAccess } from '../lib/access';
+import { currentUser, formatDuration, localDay, type MemberActivity } from '../lib/team';
 import {
   MessageSquare,
   Users,
@@ -10,7 +12,10 @@ import {
   BarChart3,
   Activity,
   Zap,
-  Timer
+  Timer,
+  MessageSquareReply,
+  CheckCircle2,
+  Clock
 } from 'lucide-react';
 import {
   AreaChart,
@@ -140,7 +145,38 @@ interface DashboardStats {
   timelineData: { date: string; messages: number }[];
 }
 
+type Satisfaction = Pick<DashboardStats, 'sentimentStats' | 'unratedConversations'>;
+
+/** "صباح الخير" until noon, then "مساء الخير". */
+const greeting = () => (new Date().getHours() < 12 ? 'صباح الخير' : 'مساء الخير');
+
 export default function DashboardHome() {
+  const access = readCachedAccess();
+  // Owners and admins see everyone's ratings (and can pick one member); others only the ratings credited to them.
+  const managesTeam = Boolean(access?.sections.includes('team'));
+  const user = currentUser();
+  const firstName = (user.fullName || '').trim().split(/\s+/)[0];
+  const [satisfaction, setSatisfaction] = useState<Satisfaction | null>(null);
+  const [agentFilter, setAgentFilter] = useState('');
+  const [members, setMembers] = useState<{ userId: string; fullName: string; email: string }[]>([]);
+  const [myDay, setMyDay] = useState<MemberActivity | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    api.get<Satisfaction>('/conversations/team/satisfaction', { params: agentFilter ? { agentId: agentFilter } : {} })
+      .then(({ data }) => { if (live) setSatisfaction(data); })
+      .catch(() => { if (live) setSatisfaction(null); });
+    return () => { live = false; };
+  }, [agentFilter]);
+
+  useEffect(() => {
+    if (managesTeam) api.get('/organizations/members').then(({ data }) => setMembers(Array.isArray(data) ? data : [])).catch(() => undefined);
+    const today = localDay(new Date());
+    api.get<MemberActivity>('/conversations/team/me/activity', { params: { from: today, to: today, tz: -new Date().getTimezoneOffset() } })
+      .then(({ data }) => setMyDay(data))
+      .catch(() => undefined);
+  }, [managesTeam]);
+
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -216,7 +252,7 @@ export default function DashboardHome() {
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
         <div>
           <h1 className="text-3xl lg:text-4xl font-black text-neutral-900 dark:text-white tracking-tight">
-            لوحة القيادة الذكية
+            {firstName ? `${greeting()}، ${firstName}` : 'لوحة القيادة الذكية'}
           </h1>
           <p className="text-neutral-600 dark:text-neutral-400 mt-2 font-medium text-base leading-relaxed">
             نظرة عامة على أداء "تيل بوت" ونجاعة الذكاء الاصطناعي في متجرك.
@@ -229,6 +265,27 @@ export default function DashboardHome() {
           </div>
         </div>
       </div>
+
+      {/* The signed-in member's own day: what they answered, closed and how customers rated them. */}
+      {myDay && (myDay.totals.replies > 0 || myDay.totals.closed > 0 || myDay.totals.rated > 0 || !managesTeam) && (
+        <div className="rounded-2xl border border-purple-100/70 bg-labbaik-surface p-4 shadow-sm dark:border-white/10 dark:shadow-none sm:p-5">
+          <h2 className="mb-3 text-sm font-black text-neutral-900 dark:text-white">يومك حتى الآن</h2>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            {[
+              { label: 'ردودك', value: formatNumber(myDay.totals.replies), note: `في ${formatNumber(myDay.totals.conversations)} محادثة`, icon: <MessageSquareReply size={16} /> },
+              { label: 'أغلقت', value: formatNumber(myDay.totals.closed), note: 'محادثة', icon: <CheckCircle2 size={16} /> },
+              { label: 'رضا عملائك', value: myDay.totals.rated ? `${Math.round((myDay.totals.positive / myDay.totals.rated) * 100)}%` : '—', note: myDay.totals.rated ? `${formatNumber(myDay.totals.rated)} تقييم اليوم` : 'لا تقييمات اليوم', icon: <Smile size={16} /> },
+              { label: 'زمن ردك', value: formatDuration(myDay.responseTime.medianSeconds), note: 'الوسيط اليوم', icon: <Clock size={16} /> },
+            ].map((card) => (
+              <div key={card.label} className="rounded-xl bg-labbaik-page/70 p-3">
+                <p className="flex items-center gap-1.5 text-xs font-bold text-labbaik-text-muted">{card.icon}{card.label}</p>
+                <p className="mt-1 text-2xl font-black tabular-nums text-neutral-900 dark:text-white">{card.value}</p>
+                <p className="text-[11px] text-labbaik-text-muted">{card.note}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Primary Stats Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-5">
@@ -358,15 +415,24 @@ export default function DashboardHome() {
         {/* Sentiment Pie Chart */}
         <Card variant="default" padding="none" className="min-w-0 rounded-2xl">
           <CardBody className="space-y-6 p-5 sm:p-6">
-            <h2 className="text-lg font-bold text-neutral-900 dark:text-white flex items-center gap-3">
-              <Smile className="text-success-500" size={20} />
-              مؤشر سعادة العملاء
-            </h2>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h2 className="text-lg font-bold text-neutral-900 dark:text-white flex items-center gap-3">
+                <Smile className="text-success-500" size={20} />
+                {managesTeam ? 'مؤشر سعادة العملاء' : 'رضا عملائك عنك'}
+              </h2>
+              {managesTeam && members.length > 1 && (
+                <select value={agentFilter} onChange={(e) => setAgentFilter(e.target.value)} aria-label="تقييمات عضو معيّن"
+                  className="h-8 max-w-40 rounded-lg border border-labbaik-border bg-labbaik-page px-2 text-xs font-bold text-neutral-800 dark:text-neutral-100 cursor-pointer">
+                  <option value="">كل الفريق</option>
+                  {members.map((m) => <option key={m.userId} value={m.userId}>{m.fullName || m.email}</option>)}
+                </select>
+              )}
+            </div>
             <div className="h-48 md:h-64 w-full relative">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
-                    data={stats?.sentimentStats}
+                    data={satisfaction?.sentimentStats}
                     cx="50%"
                     cy="50%"
                     innerRadius={60}
@@ -374,7 +440,7 @@ export default function DashboardHome() {
                     paddingAngle={6}
                     dataKey="value"
                   >
-                    {stats?.sentimentStats?.map((entry, index) => (
+                    {satisfaction?.sentimentStats?.map((entry, index) => (
                       <Cell key={`cell-${index}`} fill={entry.color} stroke="none" />
                     ))}
                   </Pie>
@@ -394,8 +460,8 @@ export default function DashboardHome() {
               {/* Center Summary */}
               <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
                 {(() => {
-                  const rated = (stats?.sentimentStats || []).reduce((sum, s) => sum + s.value, 0);
-                  const satisfied = stats?.sentimentStats?.find(s => s.key === 'positive')?.value || 0;
+                  const rated = (satisfaction?.sentimentStats || []).reduce((sum, s) => sum + s.value, 0);
+                  const satisfied = satisfaction?.sentimentStats?.find(s => s.key === 'positive')?.value || 0;
                   return (
                     <>
                       <span className="text-2xl font-bold text-neutral-900 dark:text-white">{rated ? <CountUp value={`${Math.round((satisfied / rated) * 100)}%`} /> : '—'}</span>
@@ -406,7 +472,7 @@ export default function DashboardHome() {
               </div>
             </div>
             <div className="space-y-3">
-              {stats?.sentimentStats?.map((s, i) => (
+              {satisfaction?.sentimentStats?.map((s, i) => (
                 <div key={i} className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: s.color }}></div>
@@ -416,7 +482,7 @@ export default function DashboardHome() {
                 </div>
               ))}
               <p className="pt-1 text-xs text-neutral-500 dark:text-neutral-400">
-                من تقييم العملاء بعد إغلاق المحادثة{stats?.unratedConversations ? ` · ${toEnglishDigits(stats.unratedConversations)} محادثة بلا تقييم` : ''}
+                من تقييم العملاء بعد إغلاق المحادثة{satisfaction?.unratedConversations ? ` · ${toEnglishDigits(satisfaction.unratedConversations)} محادثة مغلقة بلا تقييم` : ''}
               </p>
             </div>
           </CardBody>

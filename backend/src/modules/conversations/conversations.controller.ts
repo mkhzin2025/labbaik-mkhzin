@@ -9,12 +9,13 @@ import { createReadStream, existsSync } from 'fs';
 import { basename, join } from 'path';
 import { OrganizationsService } from '../organizations/organizations.service';
 import { CustomersService } from '../customers/customers.service';
-import { IsIn, IsInt, IsISO8601, IsOptional, IsString, IsUUID, Max, MaxLength, Min } from 'class-validator';
+import { IsBoolean, IsIn, IsInt, IsISO8601, IsOptional, IsString, IsUUID, Matches, Max, MaxLength, Min } from 'class-validator';
 import { Type } from 'class-transformer';
 import { CONVERSATION_RATINGS, CONVERSATION_STATUSES } from './schemas/conversation.schema';
 import type { ConversationRating, ConversationStatus } from './schemas/conversation.schema';
 import type { InboxFilters, InboxTab, InboxView, UploadedChatFile } from './conversations.service';
-import { Access } from '../organizations/access';
+import { Access, sectionsFor } from '../organizations/access';
+import { writeMemberActivityPdf } from './member-activity-pdf';
 
 export class InboxFilterQueryDto {
   @IsOptional() @IsIn(['organization', 'store'])
@@ -67,6 +68,36 @@ export class UpdateConversationStatusDto {
   snoozedUntil?: string;
 }
 
+export class MemberActivityQueryDto {
+  /** Local calendar days, both included. */
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  from: string;
+
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  to: string;
+
+  /** Viewer's offset from UTC in minutes (east positive). */
+  @IsOptional() @Type(() => Number) @IsInt() @Min(-840) @Max(840)
+  tz?: number;
+
+  @IsOptional() @IsString()
+  storeId?: string;
+}
+
+export class SatisfactionQueryDto {
+  @IsOptional() @IsString()
+  agentId?: string;
+
+  @IsOptional() @IsString()
+  storeId?: string;
+}
+
+export class AssignAgentDto {
+  /** true: the caller takes the conversation; false: it is released. */
+  @IsBoolean()
+  take: boolean;
+}
+
 export class TransferCustomerDto {
   @IsUUID()
   storeId: string;
@@ -103,6 +134,45 @@ export class ConversationsController {
   async getStats(@Request() req: any, @Query('storeId') storeId?: string) {
     // Every branch the user can see (as the inbox counts), or just the one asked for.
     return this.conversationsService.getStats(await this.resolveStoreIds(req, 'organization', storeId));
+  }
+
+  /**
+   * Customers' ratings for the home page chart. A support member only ever sees the ratings credited to them;
+   * owners and admins see every rating, or one member's with `agentId`.
+   */
+  @Get('team/satisfaction')
+  @Access('home', 'team')
+  async getSatisfaction(@Request() req: any, @Query() query: SatisfactionQueryDto) {
+    const storeIds = await this.resolveStoreIds(req, 'organization', query.storeId);
+    const agentId = this.managesTeam(req) ? query.agentId || undefined : req.user.id;
+    return this.conversationsService.getSatisfaction(storeIds, agentId);
+  }
+
+  /** A team member's work over a date range (`me` for the caller); other members need access to the team page. */
+  @Get('team/:userId/activity')
+  @Access('home', 'team')
+  async getMemberActivity(@Request() req: any, @Param('userId') userId: string, @Query() query: MemberActivityQueryDto) {
+    const { member, storeIds, from, to, tz } = await this.activityScope(req, userId, query);
+    const activity = await this.conversationsService.getMemberActivity(storeIds, member.userId, from, to, tz);
+    return { member: { userId: member.userId, fullName: member.fullName, email: member.email, role: member.role }, ...activity };
+  }
+
+  @Get('team/:userId/activity/pdf')
+  @Access('home', 'team')
+  async getMemberActivityPdf(@Request() req: any, @Param('userId') userId: string, @Query() query: MemberActivityQueryDto, @Res() res: any) {
+    const { member, storeIds, from, to, tz } = await this.activityScope(req, userId, query);
+    const activity = await this.conversationsService.getMemberActivity(storeIds, member.userId, from, to, tz);
+    const { stores } = await this.organizationsService.listStoresForUser(req.user.id, req.user.organizationId);
+    writeMemberActivityPdf(res, {
+      organizationName: member.organization.name,
+      member: { fullName: member.fullName || member.email, email: member.email, role: member.role },
+      from: query.from,
+      to: query.to,
+      generatedAt: new Date(),
+      tzOffsetMinutes: tz,
+      storeNames: Object.fromEntries(stores.map((store) => [store.id, store.name])),
+      activity,
+    });
   }
 
   @Get('analytics')
@@ -160,6 +230,17 @@ export class ConversationsController {
     return this.conversationsService.toggleAi(id, enabled);
   }
 
+  /** Takes the conversation (so teammates see who is answering) or releases it. */
+  @Patch(':id/agent')
+  async assignAgent(@Param('id') id: string, @Body() dto: AssignAgentDto, @Request() req: any) {
+    const conversation: any = await this.requireOwnedConversation(id, req);
+    if (dto.take) return this.conversationsService.assignAgent(id, await this.organizationsService.agentFor(req.user.id));
+    if (conversation.agentId && conversation.agentId !== req.user.id && !await this.canManageTeam(req)) {
+      throw new ForbiddenException('يتابع هذه المحادثة عضو آخر. استلمها بدلًا من ذلك.');
+    }
+    return this.conversationsService.assignAgent(id, null);
+  }
+
   @Patch(':id/status')
   async updateStatus(@Param('id') id: string, @Body() dto: UpdateConversationStatusDto, @Request() req: any) {
     await this.requireOwnedConversation(id, req);
@@ -171,7 +252,7 @@ export class ConversationsController {
         throw new BadRequestException('snoozedUntil must be a future date within 90 days');
       }
     }
-    return this.conversationsService.setStatus(id, dto.status, snoozedUntil);
+    return this.conversationsService.setStatus(id, dto.status, snoozedUntil, await this.organizationsService.agentFor(req.user.id));
   }
 
   @Patch(':id/tags')
@@ -183,7 +264,7 @@ export class ConversationsController {
   @Post(':id/messages')
   async sendMessage(@Param('id') id: string, @Body('text') text: string, @Request() req: any) {
     const conversation: any = await this.requireOwnedConversation(id, req);
-    return this.conversationsService.sendMessage(id, conversation.storeId, text);
+    return this.conversationsService.sendMessage(id, conversation.storeId, text, await this.organizationsService.agentFor(req.user.id));
   }
 
   /** Blocks (or unblocks) the conversation's customer across the organization: their messages are dropped and campaigns skip them. */
@@ -199,7 +280,7 @@ export class ConversationsController {
   @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 16 * 1024 * 1024 } }))
   async sendAttachment(@Param('id') id: string, @UploadedFile() file: UploadedChatFile, @Body('caption') caption: string | undefined, @Request() req: any) {
     const conversation: any = await this.requireOwnedConversation(id, req);
-    return this.conversationsService.sendAttachment(id, conversation.storeId, file, typeof caption === 'string' ? caption.slice(0, 1024) : undefined);
+    return this.conversationsService.sendAttachment(id, conversation.storeId, file, typeof caption === 'string' ? caption.slice(0, 1024) : undefined, await this.organizationsService.agentFor(req.user.id));
   }
 
   private toFilters(query: InboxFilterQueryDto): InboxFilters {
@@ -218,6 +299,34 @@ export class ConversationsController {
     }
     const { store } = await this.organizationsService.getStoreForUser(req.user.id, organization.id, storeId);
     return [store.id];
+  }
+
+  /** Set by the Access guard: whether the caller's role opens the team page (owners and admins). */
+  private managesTeam(req: any) {
+    return Array.isArray(req.orgSections) && req.orgSections.includes('team');
+  }
+
+  private async canManageTeam(req: any) {
+    const { membership } = await this.organizationsService.getMembership(req.user.id, req.user.organizationId);
+    return sectionsFor(membership.role).includes('team');
+  }
+
+  /** Whose activity, over which branches and local days. Members without the team page only see their own. */
+  private async activityScope(req: any, userId: string, query: MemberActivityQueryDto) {
+    const targetId = userId === 'me' ? req.user.id : userId;
+    if (targetId !== req.user.id && !this.managesTeam(req)) throw new ForbiddenException('يمكنك عرض نشاطك أنت فقط.');
+    const member = await this.organizationsService.memberSummary(req.user.id, req.user.organizationId, targetId);
+    const tz = query.tz ?? 0;
+    const toInstant = (day: string, next = false) => {
+      const [y, m, d] = day.split('-').map(Number);
+      return new Date(Date.UTC(y, m - 1, d + (next ? 1 : 0)) - tz * 60_000);
+    };
+    const from = toInstant(query.from);
+    const to = toInstant(query.to, true);
+    if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || from >= to) throw new BadRequestException('تاريخ البداية يجب أن يسبق تاريخ النهاية.');
+    if (to.getTime() - from.getTime() > 370 * 86_400_000) throw new BadRequestException('اختر فترة لا تزيد على سنة.');
+    const storeIds = await this.resolveStoreIds(req, 'organization', query.storeId);
+    return { member, storeIds, from, to, tz };
   }
 
   private async requireOwnedConversation(id: string, req: any) {

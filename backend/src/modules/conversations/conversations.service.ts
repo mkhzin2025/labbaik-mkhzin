@@ -30,6 +30,10 @@ export interface InboxFilters {
   rating?: ConversationRating;
 }
 export interface InboxCounts { active: number; snoozed: number; closed: number; unread: number; needsReply: number; pending: number }
+/** The signed-in team member acting on a conversation. */
+export type Agent = { id: string; name: string };
+/** Closes kept per conversation for the activity reports. */
+const CLOSURES_KEPT = 50;
 
 /** Sent when the team closes a WhatsApp conversation; the reply button ids carry the rating. */
 const RATING_PROMPT = 'قيّم تجربتك معنا 🙏';
@@ -392,15 +396,23 @@ export class ConversationsService implements OnModuleInit {
   }
 
   /** Sets the workflow status of a conversation (open / pending / snoozed / closed). */
-  async setStatus(id: string, status: ConversationStatus, snoozedUntil?: Date | null) {
+  async setStatus(id: string, status: ConversationStatus, snoozedUntil?: Date | null, agent?: Agent) {
+    const now = new Date();
     const update: Record<string, unknown> = {
       status,
-      statusUpdatedAt: new Date(),
+      statusUpdatedAt: now,
       snoozedUntil: status === 'snoozed' ? snoozedUntil : null,
     };
     if (status === 'closed') update.unreadCount = 0;
     const before = await this.conversationModel.findByIdAndUpdate(id, { $set: update }, { returnDocument: 'before', projection: { status: 1, platform: 1 } }).lean().exec();
     if (!before) throw new NotFoundException('Conversation not found');
+    // Closing an open conversation is credited to whoever closed it (closing it again changes nothing).
+    if (status === 'closed' && agent && before.status !== 'closed') {
+      await this.conversationModel.updateOne({ _id: id }, {
+        $set: { closedById: agent.id, closedByName: agent.name },
+        $push: { closures: { $each: [{ by: agent.id, name: agent.name, at: now }], $slice: -CLOSURES_KEPT } },
+      } as any);
+    }
     if (status === 'closed' && before.status !== 'closed' && before.platform === 'whatsapp') {
       void this.sendRatingRequest(id).catch((error) => this.logger.warn(`Rating request for ${id} failed: ${error?.message}`));
     }
@@ -502,6 +514,23 @@ export class ConversationsService implements OnModuleInit {
     return conversation;
   }
 
+  /**
+   * Marks who handles the conversation (null releases it), and tells every open inbox so a teammate sees it
+   * before answering the same customer.
+   */
+  async assignAgent(id: string, agent: Agent | null) {
+    const projection = { storeId: 1, agentId: 1, agentName: 1, agentAssignedAt: 1 };
+    const conversation = await this.conversationModel.findOneAndUpdate(
+      { _id: id, agentId: { $ne: agent?.id ?? null } },
+      { $set: { agentId: agent?.id ?? null, agentName: agent?.name ?? null, agentAssignedAt: agent ? new Date() : null } },
+      { returnDocument: 'after', projection },
+    ).lean().exec() ?? await this.conversationModel.findById(id, projection).lean().exec();
+    if (!conversation) throw new NotFoundException('Conversation not found');
+    const event = { conversationId: String(conversation._id), agentId: conversation.agentId || null, agentName: conversation.agentName || null, agentAssignedAt: conversation.agentAssignedAt || null };
+    this.eventsGateway.server.to(`store_${conversation.storeId}`).emit('conversation_agent', event);
+    return event;
+  }
+
   /** Team actions show in the badges at once; incoming messages show within INBOX_COUNTS_TTL_MS. */
   private invalidateCounts(...storeIds: (string | null | undefined)[]) {
     for (const id of storeIds) if (id) this.countsCache.invalidate(id);
@@ -520,7 +549,7 @@ export class ConversationsService implements OnModuleInit {
     if (options.cursor) (query.$and ||= []).push(afterCursor(decodeCursor(options.cursor)));
 
     const rows = await this.conversationModel
-      .find(query, { messages: { $slice: -1 } })
+      .find(query, { messages: { $slice: -1 }, closures: 0 })
       .sort({ lastMessageAt: -1, _id: -1 })
       .limit(limit + 1)
       .lean()
@@ -809,6 +838,134 @@ export class ConversationsService implements OnModuleInit {
     result.platforms = [...platformCount.entries()].map(([platform, conversations]) => ({ platform, conversations })).sort((a, b) => b.conversations - a.conversations);
     result.manualTrackingSince = firstManualAt ? new Date(firstManualAt).toISOString() : null;
     return result;
+  }
+
+  /**
+   * One team member's work between `from` and `to` (exclusive): replies they sent, conversations they answered and
+   * closed, the ratings credited to them and how fast they answered. Days are local to `tzOffsetMinutes`.
+   * Only actions recorded since team attribution exists count; older messages carry no member.
+   */
+  async getMemberActivity(storeIds: string[], agentId: string, from: Date, to: Date, tzOffsetMinutes: number) {
+    const DAY = 86_400_000;
+    const shift = tzOffsetMinutes * 60_000;
+    const fromMs = from.getTime();
+    const toMs = to.getTime();
+    const dayKey = (t: number) => new Date(Math.floor((t + shift) / DAY) * DAY).toISOString().slice(0, 10);
+    const daily = new Map<string, { date: string; replies: number; closed: number; positive: number; neutral: number; negative: number }>();
+    for (let t = fromMs; t < toMs && daily.size < 400; t += DAY) {
+      const key = dayKey(t);
+      daily.set(key, { date: key, replies: 0, closed: 0, positive: 0, neutral: 0, negative: 0 });
+    }
+    const totals = { replies: 0, conversations: 0, closed: 0, positive: 0, neutral: 0, negative: 0 };
+    const responseSeconds: number[] = [];
+    const conversations: { id: string; customerName: string | null; customerPhone: string; storeId: string; platform: string; status: string; replies: number; closed: number; rating: string | null; lastActivityAt: number }[] = [];
+    if (!storeIds.length) return this.activityResult(from, to, totals, responseSeconds, daily, conversations);
+
+    const inRange = (t: number) => t >= fromMs && t < toMs;
+    const time = (value: unknown) => (typeof value === 'number' ? value : new Date(value as any).getTime());
+    const cursor = this.conversationModel.find(
+      {
+        storeId: { $in: storeIds },
+        $or: [
+          { 'messages.agentId': agentId, lastMessageAt: { $gte: from } },
+          { closures: { $elemMatch: { by: agentId, at: { $gte: from, $lt: to } } } },
+          { ratedAgentId: agentId, ratedAt: { $gte: from, $lt: to } },
+        ],
+      },
+      { customerName: 1, customerPhone: 1, storeId: 1, platform: 1, status: 1, rating: 1, ratedAt: 1, ratedAgentId: 1, closures: 1, 'messages.from': 1, 'messages.type': 1, 'messages.agentId': 1, 'messages.timestamp': 1 },
+    ).lean().cursor({ batchSize: 200 });
+
+    for await (const conv of cursor as AsyncIterable<any>) {
+      const messages = conv.messages || [];
+      let replies = 0;
+      let last = 0;
+      for (let i = 0; i < messages.length; i++) {
+        const m = messages[i];
+        if (m.agentId !== agentId) continue;
+        const t = time(m.timestamp);
+        if (!inRange(t)) continue;
+        replies++;
+        last = Math.max(last, t);
+        daily.get(dayKey(t))!.replies++;
+        // Response time: from the first message of the customer's unanswered run to this reply.
+        let start = i;
+        while (start > 0 && ConversationsService.isCustomerMessage(messages[start - 1])) start--;
+        if (start < i) {
+          const seconds = (t - time(messages[start].timestamp)) / 1000;
+          if (seconds >= 0 && seconds < 86_400) responseSeconds.push(seconds);
+        }
+      }
+      let closed = 0;
+      for (const c of conv.closures || []) {
+        const t = time(c.at);
+        if (c.by !== agentId || !inRange(t)) continue;
+        closed++;
+        last = Math.max(last, t);
+        daily.get(dayKey(t))!.closed++;
+      }
+      let rating: string | null = null;
+      if (conv.ratedAgentId === agentId && conv.rating && conv.ratedAt && inRange(time(conv.ratedAt))) {
+        rating = conv.rating;
+        const r = conv.rating as 'positive' | 'neutral' | 'negative';
+        totals[r]++;
+        daily.get(dayKey(time(conv.ratedAt)))![r]++;
+        last = Math.max(last, time(conv.ratedAt));
+      }
+      if (!replies && !closed && !rating) continue;
+      totals.replies += replies;
+      totals.closed += closed;
+      if (replies) totals.conversations++;
+      conversations.push({
+        id: String(conv._id), customerName: conv.customerName || null, customerPhone: conv.customerPhone, storeId: conv.storeId,
+        platform: conv.platform, status: conv.status, replies, closed, rating, lastActivityAt: last,
+      });
+    }
+    conversations.sort((a, b) => b.lastActivityAt - a.lastActivityAt);
+    return this.activityResult(from, to, totals, responseSeconds, daily, conversations);
+  }
+
+  private activityResult(from: Date, to: Date, totals: any, responseSeconds: number[], daily: Map<string, any>, conversations: any[]) {
+    responseSeconds.sort((a, b) => a - b);
+    const mid = Math.floor(responseSeconds.length / 2);
+    const median = responseSeconds.length ? Math.round(responseSeconds.length % 2 ? responseSeconds[mid] : (responseSeconds[mid - 1] + responseSeconds[mid]) / 2) : null;
+    const rated = totals.positive + totals.neutral + totals.negative;
+    return {
+      period: { from: from.toISOString(), to: to.toISOString() },
+      totals: { ...totals, rated, satisfaction: rated ? totals.positive / rated : null },
+      responseTime: { medianSeconds: median, within5MinShare: responseSeconds.length ? responseSeconds.filter((s) => s <= 300).length / responseSeconds.length : null, samples: responseSeconds.length },
+      daily: [...daily.values()],
+      conversations: conversations.slice(0, 500).map((c) => ({ ...c, lastActivityAt: c.lastActivityAt ? new Date(c.lastActivityAt).toISOString() : null })),
+      conversationsTotal: conversations.length,
+    };
+  }
+
+  /**
+   * Customers' ratings for the satisfaction chart: every rating in these branches, or only those credited to one
+   * team member. `unrated` = closed conversations without a rating (closed by that member, when given).
+   */
+  async getSatisfaction(storeIds: string[], agentId?: string) {
+    const counts = { positive: 0, neutral: 0, negative: 0 };
+    let unrated = 0;
+    if (storeIds.length) {
+      const scope = { storeId: { $in: storeIds } };
+      const [rows, open] = await Promise.all([
+        this.conversationModel.aggregate<{ _id: string; count: number }>([
+          { $match: agentId ? { ...scope, ratedAgentId: agentId, rating: { $ne: null } } : { ...scope, rating: { $ne: null } } },
+          { $group: { _id: '$rating', count: { $sum: 1 } } },
+        ]),
+        this.conversationModel.countDocuments(agentId ? { ...scope, closedById: agentId, rating: null } : { ...scope, status: 'closed', rating: null }),
+      ]);
+      for (const row of rows) if (row._id in counts) counts[row._id as keyof typeof counts] = row.count;
+      unrated = open;
+    }
+    return {
+      sentimentStats: [
+        { key: 'positive', name: 'راضٍ', value: counts.positive, color: '#22c55e' },
+        { key: 'neutral', name: 'عادي', value: counts.neutral, color: '#94a3b8' },
+        { key: 'negative', name: 'غير راضٍ', value: counts.negative, color: '#ef4444' },
+      ],
+      unratedConversations: unrated,
+    };
   }
 
   async getStats(storeIds: string[]) {
@@ -1123,6 +1280,10 @@ export class ConversationsService implements OnModuleInit {
       { returnDocument: 'after', sort: { lastMessageAt: -1 }, projection: { _id: 1 } },
     ).lean().exec();
     if (!conversation) return;
+    // Credited to whoever closed the conversation (the request goes out on closing), else to whoever handles it.
+    await this.conversationModel.updateOne({ _id: conversation._id }, [
+      { $set: { ratedAgentId: { $ifNull: ['$closedById', '$agentId'] }, ratedAgentName: { $ifNull: ['$closedByName', '$agentName'] } } },
+    ], { updatePipeline: true });
     this.eventsGateway.server.to(`store_${storeId}`).emit('conversation_rating', { conversationId: String(conversation._id), rating, ratedAt: at });
   }
 
@@ -1176,7 +1337,7 @@ export class ConversationsService implements OnModuleInit {
    * Sends an image, video, audio or document from the inbox (WhatsApp only). The file is kept next to received
    * media so the thread shows it the same way, uploaded to Meta, and sent with the optional caption.
    */
-  async sendAttachment(conversationId: string, storeId: string, file: UploadedChatFile, caption?: string) {
+  async sendAttachment(conversationId: string, storeId: string, file: UploadedChatFile, caption?: string, agent?: Agent) {
     if (!file?.buffer?.length) throw new BadRequestException('اختر ملفًا لإرساله.');
     const spec = WHATSAPP_MEDIA_TYPES[file.mimetype];
     if (!spec) throw new BadRequestException(WHATSAPP_MEDIA_UNSUPPORTED);
@@ -1225,17 +1386,19 @@ export class ConversationsService implements OnModuleInit {
       type: spec.type,
       attachments: [{ id: mediaId, type: spec.type, mimeType: file.mimetype, filename, originalFilename, caption: text || undefined, url: `/conversations/attachments/${filename}` }],
       isManual: true,
+      ...(agent ? { agentId: agent.id, agentName: agent.name } : {}),
       timestamp: Date.now(),
       metadata: whatsappMessageId ? { whatsappMessageId, status: 'accepted', walletTransactionId: walletCharge?.id || null, metaConnectionId: channel.credentials?.metaConnectionId || conversation.metaConnectionId || null } : {},
     };
     await this.addMessage(conversation.customerPhone, storeId, conversation.platform, messageData);
     // Same as a typed reply: the team has taken over, so automatic replies pause for a while.
     await this.conversationModel.findByIdAndUpdate(conversationId, { aiEnabled: false, aiDisabledUntil: new Date(Date.now() + 30 * 60 * 1000), aiPausedReason: 'agent_reply' });
+    if (agent) await this.assignAgent(conversationId, agent);
     this.eventsGateway.server.to(`store_${storeId}`).emit('new_message', { ...messageData, customerPhone: conversation.customerPhone, platform: conversation.platform, storeId });
     return { status: 'sent', message: messageData };
   }
 
-  async sendMessage(conversationId: string, storeId: string, text: string) {
+  async sendMessage(conversationId: string, storeId: string, text: string, agent?: Agent) {
     const conversation = await this.conversationModel.findOne({ _id: conversationId, storeId }).select('-messages');
     if (!conversation) throw new NotFoundException('Conversation not found');
     if (conversation.blockedAt) throw new BadRequestException('هذا العميل محظور. ألغِ الحظر أولًا لمراسلته.');
@@ -1273,12 +1436,14 @@ export class ConversationsService implements OnModuleInit {
       text,
       type: 'text',
       isManual: true,
+      ...(agent ? { agentId: agent.id, agentName: agent.name } : {}),
       timestamp: Date.now(),
       metadata: whatsappMessageId ? { whatsappMessageId, status: 'accepted', walletTransactionId: walletCharge?.id || null, metaConnectionId: channel.credentials?.metaConnectionId || conversation.metaConnectionId || null } : {},
     };
     await this.addMessage(conversation.customerPhone, storeId, conversation.platform, messageData);
     const thirtyMinutesFromNow = new Date(Date.now() + 30 * 60 * 1000);
     await this.conversationModel.findByIdAndUpdate(conversationId, { aiEnabled: false, aiDisabledUntil: thirtyMinutesFromNow, aiPausedReason: 'agent_reply' });
+    if (agent) await this.assignAgent(conversationId, agent);
     const store = await this.channelsService.getStoreContext(storeId);
     const ownerId = store.owner?.id || (typeof store.owner === 'string' ? store.owner : null);
     if (ownerId) this.eventsGateway.server.to(`store_${storeId}`).emit('new_message', { ...messageData, customerPhone: conversation.customerPhone, platform: conversation.platform, storeId });
