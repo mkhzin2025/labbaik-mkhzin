@@ -12,6 +12,7 @@ import { normalizePhoneNumber } from '../../common/utils/phone.util';
 import { WHATSAPP_MEDIA_TYPES, WHATSAPP_MEDIA_UNSUPPORTED } from '../../common/utils/whatsapp-media-types';
 import { WhatsAppMediaService } from '../channels/whatsapp-media.service';
 import { TtlCache, concurrencyLimit } from '../../common/utils/ttl-cache';
+import { dashboardStatsPipeline, type DashboardStatsRow } from './dashboard-stats.pipeline';
 import { randomBytes } from 'crypto';
 import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
@@ -88,6 +89,17 @@ const SNOOZE_WAKE_INTERVAL_MS = 10_000;
 const STARTUP_MAINTENANCE_DELAY_MS = 30_000;
 /** Marks one-off data repairs as done, so a restart does not scan the whole collection again. */
 const MAINTENANCE_COLLECTION = 'maintenance_tasks';
+/** Each branch's home page totals, saved so visits (and restarts) never wait for a recount. */
+const STORE_STATS_COLLECTION = 'dashboard_store_stats';
+/** A branch's totals older than this are recounted in the background (the visit still gets them at once). */
+const STORE_STATS_TTL_MS = 5 * 60_000;
+
+/** One branch's home page totals, as saved in STORE_STATS_COLLECTION. */
+type StoreStats = {
+  platforms: { platform: string; conversations: number; messages: number; aiReplies: number; aiChars: number; humanMs: number; humanCount: number; positive: number; neutral: number; negative: number }[];
+  /** Messages per UTC day (yyyy-mm-dd) over the last week. */
+  days: Record<string, number>;
+};
 
 const clampLimit = (value: number | undefined, fallback: number, max: number) =>
   Number.isFinite(value) && (value as number) > 0 ? Math.min(Math.floor(value as number), max) : fallback;
@@ -119,7 +131,8 @@ const afterCursor = ({ t, id }: { t: Date | null; id: Types.ObjectId }) =>
 export class ConversationsService implements OnModuleInit {
   private readonly logger = new Logger(ConversationsService.name);
   private readonly countsCache = new TtlCache<InboxCounts>(INBOX_COUNTS_TTL_MS);
-  private readonly statsCache = new TtlCache<any>(REPORT_CACHE_TTL_MS, 200, REPORT_SERVE_STALE_MS);
+  private readonly storeStatsMemo = new Map<string, { at: number; value: StoreStats }>();
+  private readonly storeStatsRunning = new Map<string, Promise<StoreStats>>();
   private readonly analyticsCache = new TtlCache<any>(REPORT_CACHE_TTL_MS, 200, REPORT_SERVE_STALE_MS);
   private readonly reportSlot = concurrencyLimit(REPORT_MAX_CONCURRENT);
   private readonly snoozeWakes = new Map<string, { at: number; done: Promise<void> }>();
@@ -968,101 +981,82 @@ export class ConversationsService implements OnModuleInit {
     };
   }
 
+  /**
+   * Home page totals for these branches, added up from each branch's saved snapshot. A visit never waits for the
+   * count (a full pass over a branch's threads takes seconds once campaigns have run): a snapshot older than
+   * STORE_STATS_TTL_MS is answered as is and recounted in the background. Only a branch that was never counted
+   * makes its first visitor wait. Snapshots live in MongoDB, so a restart or deploy starts warm.
+   */
   async getStats(storeIds: string[]) {
     const stores = [...new Set(storeIds)].sort();
-    return this.statsCache.get(JSON.stringify(stores), stores, () => this.reportSlot(() => this.computeStats(stores)));
+    const [snapshots, connectedChannels] = await Promise.all([
+      Promise.all(stores.map((id) => this.storeStats(id))),
+      Promise.all(stores.map((id) => this.channelsService.findAllByStore(id))).then((lists) => lists.flat()),
+    ]);
+    return this.statsResult(snapshots, connectedChannels.length);
   }
 
-  /**
-   * Dashboard totals over every message of the branch. Only the fields the totals use leave MongoDB (no message
-   * text, attachments or metadata), and threads are streamed instead of all being held in memory at once.
-   * Text length is counted in code points ($strLenCP); JavaScript counted UTF-16 units, so an emoji now counts as
-   * 1 character instead of 2 in the "hours saved" estimate.
-   */
-  private async computeStats(storeIds: string[]) {
-    const cursor = this.conversationModel.aggregate<{ platform: string; rating?: string | null; messages: { from: string; isManual?: boolean; timestamp: any; textLength: number }[] }>([
-      { $match: { storeId: { $in: storeIds } } },
-      {
-        $project: {
-          _id: 0,
-          platform: 1,
-          rating: 1,
-          messages: {
-            $map: {
-              input: { $ifNull: ['$messages', []] },
-              as: 'm',
-              in: {
-                from: '$$m.from',
-                isManual: '$$m.isManual',
-                timestamp: '$$m.timestamp',
-                textLength: { $cond: [{ $eq: [{ $type: '$$m.text' }, 'string'] }, { $strLenCP: '$$m.text' }, 0] },
-              },
-            },
-          },
-        },
-      },
-    ]).cursor({ batchSize: 500 });
-    const connectedChannels = (await Promise.all(storeIds.map((id) => this.channelsService.findAllByStore(id)))).flat();
-
-    let totalConversations = 0;
-    let totalMessages = 0;
-    let aiReplies = 0;
-    let totalAiChars = 0;
-    let totalHumanResponseTime = 0;
-    let humanResponseCount = 0;
-    const platformCount: any = { whatsapp: 0, instagram: 0, facebook: 0, google_maps: 0 };
-    const sentiments: any = { positive: 0, neutral: 0, negative: 0 };
-    let unrated = 0;
-
-    const last7Days: string[] = [];
-    const timelineData: any = {};
-    for (let i = 6; i >= 0; i--) {
-      const date = new Date();
-      date.setDate(date.getDate() - i);
-      const dateStr = date.toISOString().split('T')[0];
-      last7Days.push(dateStr);
-      timelineData[dateStr] = 0;
-    }
-
-    for await (const conv of cursor) {
-      totalConversations++;
-      totalMessages += conv.messages.length;
-      const convMessages = conv.messages;
-      for (let i = 0; i < convMessages.length; i++) {
-        const msg = convMessages[i];
-        if (msg.from === 'me' && msg.isManual !== true) {
-          aiReplies++;
-          totalAiChars += msg.textLength;
-        }
-        if (msg.from !== 'me' && i < convMessages.length - 1) {
-          const nextMsg = convMessages[i+1];
-          if (nextMsg.from === 'me' && nextMsg.isManual === true) {
-            const diff = (new Date(nextMsg.timestamp).getTime() - new Date(msg.timestamp).getTime()) / 1000;
-            if (diff > 0 && diff < 86400) { totalHumanResponseTime += diff; humanResponseCount++; }
-          }
-        }
-        // A malformed timestamp used to throw (toISOString of an invalid date) and fail the whole dashboard.
-        const time = new Date(msg.timestamp).getTime();
-        if (!Number.isFinite(time)) continue;
-        const mDate = new Date(time).toISOString().split('T')[0];
-        if (timelineData.hasOwnProperty(mDate)) timelineData[mDate]++;
+  private async storeStats(storeId: string): Promise<StoreStats> {
+    let entry = this.storeStatsMemo.get(storeId);
+    if (!entry) {
+      const saved = await this.conversationModel.db.collection<{ _id: string; computedAt: Date; value: StoreStats }>(STORE_STATS_COLLECTION).findOne({ _id: storeId });
+      if (saved?.value) {
+        entry = { at: new Date(saved.computedAt).getTime(), value: saved.value };
+        this.storeStatsMemo.set(storeId, entry);
       }
-      if (platformCount.hasOwnProperty(conv.platform)) platformCount[conv.platform]++;
-      // Satisfaction comes from the customers' own ratings, not from guessing at their messages.
-      if (conv.rating && sentiments.hasOwnProperty(conv.rating)) sentiments[conv.rating]++;
-      else unrated++;
     }
+    if (!entry) return this.recountStoreStats(storeId);
+    if (Date.now() - entry.at > STORE_STATS_TTL_MS) void this.recountStoreStats(storeId).catch((error) => this.logger.warn(`Dashboard totals for ${storeId} failed: ${error?.message}`));
+    return entry.value;
+  }
+
+  /** One recount per branch at a time; saved for the next visits (and the next start). */
+  private recountStoreStats(storeId: string): Promise<StoreStats> {
+    const running = this.storeStatsRunning.get(storeId);
+    if (running) return running;
+    const task = this.reportSlot(async () => {
+      const startedAt = new Date();
+      const since = new Date(startedAt);
+      since.setUTCHours(0, 0, 0, 0);
+      since.setUTCDate(since.getUTCDate() - 7);
+      const [row] = await this.conversationModel.aggregate<DashboardStatsRow>(dashboardStatsPipeline([storeId], since)).allowDiskUse(true);
+      const value: StoreStats = {
+        platforms: (row?.platforms || []).map(({ _id, ...rest }) => ({ platform: _id, ...rest })),
+        days: Object.fromEntries((row?.days || []).map((d) => [d._id, d.count])),
+      };
+      await this.conversationModel.db.collection<{ _id: string; computedAt: Date; value: StoreStats }>(STORE_STATS_COLLECTION)
+        .updateOne({ _id: storeId }, { $set: { computedAt: startedAt, value } }, { upsert: true });
+      this.storeStatsMemo.set(storeId, { at: startedAt.getTime(), value });
+      return value;
+    }).finally(() => this.storeStatsRunning.delete(storeId));
+    this.storeStatsRunning.set(storeId, task);
+    return task;
+  }
+
+  /** The home page payload from the branches' snapshots. Text length is in code points ($strLenCP). */
+  private statsResult(snapshots: StoreStats[], activeChannels: number) {
+    const rows = snapshots.flatMap((s) => s.platforms);
+    const sum = (key: Exclude<keyof StoreStats['platforms'][number], 'platform'>) => rows.reduce((total, row) => total + (Number(row[key]) || 0), 0);
+    const totalConversations = sum('conversations');
+    const platformCount: Record<string, number> = { whatsapp: 0, instagram: 0, facebook: 0, google_maps: 0 };
+    for (const row of rows) if (row.platform in platformCount) platformCount[row.platform] += row.conversations;
+    const sentiments = { positive: sum('positive'), neutral: sum('neutral'), negative: sum('negative') };
+    const humanCount = sum('humanCount');
+
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
+    const last7Days = Array.from({ length: 7 }, (_, i) => new Date(today.getTime() - (6 - i) * 86_400_000).toISOString().slice(0, 10));
 
     const wordsPerMinute = 40;
     const charsPerWord = 5;
-    const estimatedMinutesSaved = (totalAiChars / charsPerWord) / wordsPerMinute;
-    const avgHumanSpeedSeconds = humanResponseCount > 0 ? totalHumanResponseTime / humanResponseCount : 600;
+    const estimatedMinutesSaved = (sum('aiChars') / charsPerWord) / wordsPerMinute;
+    const avgHumanSpeedSeconds = humanCount > 0 ? sum('humanMs') / 1000 / humanCount : 600;
 
     return {
       totalConversations,
-      totalMessages,
-      aiReplies,
-      activeChannels: connectedChannels.length,
+      totalMessages: sum('messages'),
+      aiReplies: sum('aiReplies'),
+      activeChannels,
       hoursSaved: Math.round((estimatedMinutesSaved / 60) * 10) / 10,
       avgHumanSpeed: Math.round(avgHumanSpeedSeconds / 60),
       aiSpeed: 0.05,
@@ -1072,8 +1066,8 @@ export class ConversationsService implements OnModuleInit {
         { key: 'neutral', name: 'عادي', value: sentiments.neutral, color: '#94a3b8' },
         { key: 'negative', name: 'غير راضٍ', value: sentiments.negative, color: '#ef4444' }
       ],
-      unratedConversations: unrated,
-      timelineData: last7Days.map(date => ({ date: date.split('-').slice(1).join('/'), messages: timelineData[date] }))
+      unratedConversations: totalConversations - sentiments.positive - sentiments.neutral - sentiments.negative,
+      timelineData: last7Days.map((date) => ({ date: date.split('-').slice(1).join('/'), messages: snapshots.reduce((total, s) => total + (s.days[date] || 0), 0) })),
     };
   }
 
