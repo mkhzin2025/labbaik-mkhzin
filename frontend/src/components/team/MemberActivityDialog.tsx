@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Clock, FileDown, Loader2, MessageSquareReply, MessagesSquare, CheckCircle2, Smile, X } from 'lucide-react';
 import api from '../../api/client';
+import MemberSatisfaction from './MemberSatisfaction';
 import { downloadPdf, formatDuration, localDay, RATING_LABELS, type MemberActivity } from '../../lib/team';
 
 const STATUS_LABELS: Record<string, string> = { open: 'مفتوحة', pending: 'معلّقة', snoozed: 'مؤجلة', closed: 'مغلقة' };
@@ -134,15 +135,7 @@ export default function MemberActivityDialog({ member, branches, onClose }: {
                 ))}
               </div>
 
-              {t.rated > 0 && (
-                <div className="flex flex-wrap gap-2">
-                  {(['positive', 'neutral', 'negative'] as const).map((r) => (
-                    <span key={r} className={`inline-flex h-7 items-center gap-1 rounded-md px-2 text-xs font-bold ${RATING_LABELS[r].cls}`}>
-                      {RATING_LABELS[r].emoji} {RATING_LABELS[r].label} · <span className="tabular-nums">{num(t[r])}</span>
-                    </span>
-                  ))}
-                </div>
-              )}
+              <MemberSatisfaction activity={activity} />
 
               {activity.daily.length > 1 && (
                 <section>

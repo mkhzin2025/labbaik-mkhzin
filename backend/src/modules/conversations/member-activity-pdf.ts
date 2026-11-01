@@ -26,6 +26,17 @@ const ROLE_NAMES: Record<string, string> = { owner: 'المالك', admin: 'مد
 const RATING_NAMES: Record<Rating, string> = { positive: 'راضٍ', neutral: 'عادي', negative: 'غير راضٍ' };
 const STATUS_NAMES: Record<string, string> = { open: 'مفتوحة', pending: 'معلّقة', snoozed: 'مؤجلة', closed: 'مغلقة' };
 
+/** The home page satisfaction chart's colors. */
+const RATING_COLORS: Record<Rating, string> = { positive: '#22C55E', neutral: '#94A3B8', negative: '#EF4444' };
+
+/** One slice of a donut, clockwise from angle a0 to a1 (radians, 0 = 3 o'clock). */
+function ringSegment(doc: PDFKit.PDFDocument, cx: number, cy: number, outer: number, inner: number, a0: number, a1: number, color: string) {
+  if (a1 <= a0) return;
+  const point = (radius: number, angle: number) => `${(cx + radius * Math.cos(angle)).toFixed(2)} ${(cy + radius * Math.sin(angle)).toFixed(2)}`;
+  const large = a1 - a0 > Math.PI ? 1 : 0;
+  doc.path(`M ${point(outer, a0)} A ${outer} ${outer} 0 ${large} 1 ${point(outer, a1)} L ${point(inner, a1)} A ${inner} ${inner} 0 ${large} 0 ${point(inner, a0)} Z`).fill(color);
+}
+
 /** "45 ث"، "12 د"، "2.5 س". */
 const duration = (seconds: number | null) => {
   if (seconds === null) return '—';
@@ -75,20 +86,42 @@ export function writeMemberActivityPdf(response: Response, report: MemberActivit
   // Ratings (right panel).
   const ratingWidth = 330;
   const ratingX = right - ratingWidth;
-  let y = r.panel(ratingX, panelY, ratingWidth, panelHeight, 'تقييمات العملاء', t.rated ? `${format(t.rated)} تقييم` : undefined);
-  const ratingColors: Record<Rating, string> = { positive: C.teal, neutral: C.lilac, negative: C.red };
+  let y = r.panel(ratingX, panelY, ratingWidth, panelHeight, 'رضا العملاء', t.rated ? `${format(t.rated)} تقييم` : undefined);
   if (!t.rated) text('لا توجد تقييمات في هذه الفترة.', ratingX + 16, y + 30, ratingWidth - 32, { size: 9, color: C.muted, align: 'center' });
-  else (['positive', 'neutral', 'negative'] as Rating[]).forEach((key, index) => {
-    const rowY = y + 8 + index * 46;
-    const barX = ratingX + 16 + 70;
-    const barWidth = ratingWidth - 32 - 70 - 70;
-    text(RATING_NAMES[key], ratingX + ratingWidth - 16 - 64, rowY, 64, { size: 10, color: C.ink, bold: true });
-    doc.roundedRect(barX, rowY + 2, barWidth, 12, 3).fill(C.soft);
-    const filled = (t[key] / t.rated) * barWidth;
-    if (filled > 0) doc.roundedRect(barX + barWidth - filled, rowY + 2, Math.max(filled, 2), 12, 3).fill(ratingColors[key]);
-    text(format(t[key]), ratingX + 16 + 30, rowY, 36, { size: 10, color: C.ink, bold: true, align: 'left' });
-    text(percent(t[key], t.rated), ratingX + 16, rowY + 1, 28, { size: 8, color: C.muted, align: 'left' });
-  });
+  else {
+    // Donut as on the home page (same colors), the satisfied share in the middle; one row per rating beside it.
+    const cx = ratingX + ratingWidth - 16 - 66;
+    const cy = y + 76;
+    const outer = 62;
+    const inner = 42;
+    const slices = (['positive', 'neutral', 'negative'] as Rating[]).filter((key) => t[key] > 0);
+    if (slices.length === 1) {
+      doc.circle(cx, cy, outer).fill(RATING_COLORS[slices[0]]);
+      doc.circle(cx, cy, inner).fill(C.white);
+    } else {
+      const gap = 0.035;
+      let angle = -Math.PI / 2;
+      for (const key of slices) {
+        const sweep = (t[key] / t.rated) * Math.PI * 2;
+        ringSegment(doc, cx, cy, outer, inner, angle + gap, angle + sweep - gap, RATING_COLORS[key]);
+        angle += sweep;
+      }
+    }
+    text(percent(t.positive, t.rated), cx - inner, cy - 13, inner * 2, { size: 17, color: C.ink, bold: true, align: 'center' });
+    text('راضون', cx - inner, cy + 7, inner * 2, { size: 7.5, color: C.muted, align: 'center' });
+
+    const legendX = ratingX + 16;
+    const legendWidth = ratingWidth - 32 - outer * 2 - 22;
+    (['positive', 'neutral', 'negative'] as Rating[]).forEach((key, index) => {
+      const rowY = y + 22 + index * 40;
+      doc.circle(legendX + legendWidth - 4, rowY + 6, 3.5).fill(RATING_COLORS[key]);
+      text(RATING_NAMES[key], legendX + legendWidth - 66, rowY, 56, { size: 9.5, color: C.ink, bold: true });
+      text(`${format(t[key])}  ·  ${percent(t[key], t.rated)}`, legendX, rowY, legendWidth - 70, { size: 9, color: C.ink, bold: true, align: 'left' });
+      doc.roundedRect(legendX, rowY + 17, legendWidth, 5, 2.5).fill(C.soft);
+      const filled = (t[key] / t.rated) * legendWidth;
+      if (filled > 0) doc.roundedRect(legendX + legendWidth - filled, rowY + 17, Math.max(filled, 3), 5, 2.5).fill(RATING_COLORS[key]);
+    });
+  }
   text('يُنسب التقييم لمن أغلق المحادثة، فرسالة التقييم تُرسل عند الإغلاق.', ratingX + 16, panelY + panelHeight - 22, ratingWidth - 32, { size: 7, color: C.muted });
 
   // Replies per day (left panel).
