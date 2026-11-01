@@ -56,6 +56,7 @@ import { CountUp } from '@/components/ui';
 import { createSyncScheduler, type SyncScheduler } from '@/lib/sync-scheduler';
 import Composer from '../components/conversations/Composer';
 import { currentUser } from '../lib/team';
+import { readCachedAccess } from '../lib/access';
 
 interface Message {
   _id?: string;
@@ -122,7 +123,7 @@ const RATINGS: { id: Rating; label: string; emoji: string; cls: string }[] = [
 
 interface CustomerLabel { id: string; name: string; color: string }
 
-interface InboxCounts { active: number; snoozed: number; closed: number; unread: number; needsReply: number; pending?: number }
+interface InboxCounts { active: number; mine: number; closed: number; unread: number; needsReply: number; pending?: number }
 interface InboxPage { items: Conversation[]; nextCursor: string | null }
 interface MessagesPage { messages: Message[]; total: number; start: number; hasMore: boolean }
 
@@ -145,7 +146,7 @@ const COUNTS_MIN_INTERVAL_MS = 5_000;
 const HEAD_SYNC_DELAY_MS = 400;
 /** ...and the first page is fetched again at most this often during a steady stream. */
 const HEAD_SYNC_MIN_INTERVAL_MS = 2_000;
-const EMPTY_COUNTS: InboxCounts = { active: 0, snoozed: 0, closed: 0, unread: 0, needsReply: 0 };
+const EMPTY_COUNTS: InboxCounts = { active: 0, mine: 0, closed: 0, unread: 0, needsReply: 0 };
 
 const fetchListPage = (params: Record<string, string | undefined>, cursor?: string) =>
   api.get<InboxPage>('/conversations', { params: { ...params, limit: LIST_PAGE_SIZE, cursor } }).then(({ data }) => data);
@@ -171,7 +172,8 @@ function CustomerLabelChip({ label, kind, size = 'sm' }: { label: CustomerLabel;
 }
 
 type ConvStatus = 'open' | 'pending' | 'snoozed' | 'closed';
-type StatusView = 'active' | 'snoozed' | 'closed';
+// active: open conversations nobody has taken yet; mine: the ones I handle (snoozed included); closed: closed ones I handled.
+type StatusView = 'active' | 'mine' | 'closed';
 
 // open/pending stay in the main inbox; snoozed hides until snoozedUntil; closed is done. A new customer message reopens either.
 const STATUS_META: Record<ConvStatus, { label: string; dot: string; chip: string; hint: string }> = {
@@ -545,7 +547,14 @@ export default function ConversationsPage() {
   const [selectedRating, setSelectedRating] = useState<Rating | null>(null);
   const [selectedStoreId, setSelectedStoreId] = useState<string>('all');
   const [stores, setStores] = useState<Array<{ id: string; name: string }>>([]);
-  
+  // Owners and admins can look at a teammate's conversations (or everyone's); others always see their own.
+  const managesTeam = useMemo(() => Boolean(readCachedAccess()?.sections.includes('team')), []);
+  const [agentFilter, setAgentFilter] = useState<string>('');
+  const [members, setMembers] = useState<Array<{ userId: string; fullName?: string; email?: string }>>([]);
+  useEffect(() => {
+    if (managesTeam) api.get('/organizations/members').then(({ data }) => setMembers(Array.isArray(data) ? data : [])).catch(() => undefined);
+  }, [managesTeam]);
+
   const [showTagEditor, setShowTagEditor] = useState(false);
   const [showFilterDropdown, setShowFilterDropdown] = useState(false);
   const [newTagInput, setNewTagInput] = useState('');
@@ -593,7 +602,8 @@ export default function ConversationsPage() {
     rating: selectedRating || undefined,
     storeId: selectedStoreId === 'all' ? undefined : selectedStoreId,
     search: debouncedSearch || undefined,
-  }), [statusView, listTab, selectedPlatform, selectedTag, selectedRating, selectedStoreId, debouncedSearch]);
+    agent: agentFilter || undefined,
+  }), [statusView, listTab, selectedPlatform, selectedTag, selectedRating, selectedStoreId, debouncedSearch, agentFilter]);
   const listParamsRef = useRef(listParams);
   listParamsRef.current = listParams;
   
@@ -1044,7 +1054,10 @@ export default function ConversationsPage() {
     },
     agent: (payload) => {
       const event = payload as ({ conversationId?: string } & AgentPatch) | null;
-      if (event?.conversationId) applyAgent(event.conversationId, { agentId: event.agentId || null, agentName: event.agentName || null, agentAssignedAt: event.agentAssignedAt || null });
+      if (!event?.conversationId) return;
+      applyAgent(event.conversationId, { agentId: event.agentId || null, agentName: event.agentName || null, agentAssignedAt: event.agentAssignedAt || null });
+      // Taking a conversation moves it between open and someone's list: refresh the badges, and pull it in if it is new here.
+      scheduleRealtimeSync(!conversationsRef.current.some((c) => c._id === event.conversationId));
     },
     reconnect: () => scheduleRealtimeSync(true),
   };
@@ -1203,9 +1216,14 @@ export default function ConversationsPage() {
     return map[tag] || 'bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 border-indigo-500/20';
   };
 
-  const viewOf = (c: Conversation): StatusView => {
+  // Mirrors the server's views. A search finds a conversation whoever handles it.
+  const inView = (c: Conversation) => {
     const s = normalizeStatus(c, now);
-    return s === 'snoozed' ? 'snoozed' : s === 'closed' ? 'closed' : 'active';
+    const owner = agentFilter === 'all' ? Boolean(c.agentId) : c.agentId === (agentFilter || me);
+    const searching = Boolean(debouncedSearch);
+    if (statusView === 'active') return s !== 'snoozed' && s !== 'closed' && (searching || !c.agentId);
+    if (statusView === 'mine') return s !== 'closed' && (searching || owner);
+    return s === 'closed' && (searching || owner);
   };
   // Mirrors the server's "needs a reply": unanswered, still inside the 24h reply window, and either the bot had
   // its two minutes to answer or automatic replies are off for this conversation.
@@ -1217,7 +1235,7 @@ export default function ConversationsPage() {
   // The server already filtered every loaded row; this only drops rows that local changes
   // (status change, read, realtime update) moved out of the current view. Search stays server-side.
   const filteredConversations = conversations.filter((c) =>
-    viewOf(c) === statusView
+    inView(c)
     && (!selectedTag || Boolean(c.tags?.includes(selectedTag)))
     && (!selectedPlatform || c.platform === selectedPlatform)
     && (!selectedRating || c.rating === selectedRating)
@@ -1225,13 +1243,13 @@ export default function ConversationsPage() {
     && (listTab !== 'unread' || Number(c.unreadCount) > 0)
     && (listTab !== 'needs_reply' || needsReply(c))
     && (listTab !== 'pending' || normalizeStatus(c, now) === 'pending'));
-  const statusCounts: Record<StatusView, number> = { active: counts.active, snoozed: counts.snoozed, closed: counts.closed };
+  const statusCounts: Record<StatusView, number> = { active: counts.active, mine: counts.mine, closed: counts.closed };
   const unreadTotal = counts.unread;
   const needsReplyTotal = counts.needsReply;
 
   const allTags = Array.from(new Set([...defaultTags, ...customTags]));
 
-  const hasActiveFilters = Boolean(selectedTag || selectedPlatform || selectedRating || selectedStoreId !== 'all');
+  const hasActiveFilters = Boolean(selectedTag || selectedPlatform || selectedRating || selectedStoreId !== 'all' || agentFilter);
   const aiOn = selectedChat?.aiEnabled !== false;
   // WhatsApp accepts a free-form reply only within 24h of the customer's last message in the loaded thread.
   const lastCustomerAt = messages.reduce((latest, m) => (isCustomerMessage(m) ? Math.max(latest, new Date(m.timestamp || 0).getTime()) : latest), 0);
@@ -1267,7 +1285,7 @@ export default function ConversationsPage() {
                   <div className="px-4 py-3 border-b border-labbaik-border flex justify-between items-center">
                     <span className="text-sm font-black text-neutral-800 dark:text-neutral-100">تصفية النتائج</span>
                     {hasActiveFilters && (
-                      <button type="button" onClick={() => { setSelectedTag(null); setSelectedPlatform(null); setSelectedRating(null); setSelectedStoreId('all'); setShowFilterDropdown(false); }} className="text-xs font-black text-labbaik-blue dark:text-purple-300 hover:underline cursor-pointer">مسح الكل</button>
+                      <button type="button" onClick={() => { setSelectedTag(null); setSelectedPlatform(null); setSelectedRating(null); setSelectedStoreId('all'); setAgentFilter(''); setShowFilterDropdown(false); }} className="text-xs font-black text-labbaik-blue dark:text-purple-300 hover:underline cursor-pointer">مسح الكل</button>
                     )}
                   </div>
                   <div className="max-h-[400px] overflow-y-auto custom-scrollbar p-3 space-y-4">
@@ -1306,6 +1324,18 @@ export default function ConversationsPage() {
                         ))}
                       </div>
                     </div>
+                    {managesTeam && (
+                      <div>
+                        <span className={filterHeading}><UserRound size={13} /> الموظف (محادثاتي والمغلقة)</span>
+                        <div className="space-y-0.5">
+                          {[{ id: '', label: 'أنا' }, { id: 'all', label: 'كل الموظفين' }, ...members.filter((m) => m.userId !== me).map((m) => ({ id: m.userId, label: m.fullName || m.email || 'عضو' }))].map((option) => (
+                            <button type="button" key={option.id || 'me'} onClick={() => setAgentFilter(option.id)} aria-pressed={agentFilter === option.id} className={filterOption(agentFilter === option.id)}>
+                              {option.label}{agentFilter === option.id && <Check size={14} />}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                     <div>
                       <span className={filterHeading}><Tag size={13} /> الوسوم</span>
                       <div className="space-y-0.5">
@@ -1338,7 +1368,7 @@ export default function ConversationsPage() {
             )}
           </div>
           <div className="grid grid-cols-3 gap-1 rounded-lg border border-labbaik-border bg-labbaik-page p-0.5" role="tablist" aria-label="حالة المحادثات">
-            {([['active', 'المفتوحة'], ['snoozed', 'المؤجلة'], ['closed', 'المغلقة']] as const).map(([key, label]) => (
+            {([['active', 'المفتوحة'], ['mine', 'محادثاتي'], ['closed', 'المغلقة']] as const).map(([key, label]) => (
               <button
                 type="button"
                 role="tab"
@@ -1385,7 +1415,7 @@ export default function ConversationsPage() {
             <div className="p-10 text-center space-y-3">
               <MessageCircle size={32} className="mx-auto text-labbaik-text-muted" />
               <p className="text-labbaik-text-muted font-bold text-sm">
-                {statusView === 'snoozed' && listTab === 'all' ? 'لا توجد محادثات مؤجلة.' : statusView === 'closed' && listTab === 'all' ? 'لا توجد محادثات مغلقة.' : listTab === 'unread' ? 'لا توجد محادثات غير مقروءة.' : listTab === 'needs_reply' ? 'لا توجد محادثات تنتظر رداً.' : listTab === 'pending' ? 'لا توجد محادثات معلّقة.' : searchText || hasActiveFilters ? 'لا توجد محادثات تطابق البحث أو التصفية.' : 'لا توجد محادثات بعد.'}
+                {statusView === 'mine' && listTab === 'all' && !searchText ? (agentFilter && agentFilter !== me ? 'لا توجد محادثات مستلمة.' : 'لا توجد محادثات مستلمة باسمك.') : statusView === 'closed' && listTab === 'all' ? 'لا توجد محادثات مغلقة.' : listTab === 'unread' ? 'لا توجد محادثات غير مقروءة.' : listTab === 'needs_reply' ? 'لا توجد محادثات تنتظر رداً.' : listTab === 'pending' ? 'لا توجد محادثات معلّقة.' : searchText || hasActiveFilters ? 'لا توجد محادثات تطابق البحث أو التصفية.' : 'لا توجد محادثات بعد.'}
               </p>
             </div>
           ) : filteredConversations.map((conv) => {

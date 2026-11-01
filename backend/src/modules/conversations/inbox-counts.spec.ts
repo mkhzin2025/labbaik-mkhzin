@@ -35,16 +35,38 @@ describe('ConversationsService.countInbox', () => {
   beforeEach(() => { now = 1_700_000_000_000; jest.spyOn(Date, 'now').mockImplementation(() => now); });
   afterEach(() => jest.restoreAllMocks());
 
-  it('derives the status tabs from one grouped pass; threads with no status count as active, like $nin', async () => {
+  it('derives the view tabs from one grouped pass; open is the unassigned queue, threads with no status count as open', async () => {
     const { service, calls } = setup({
-      s1: [{ _id: 'open', n: 5 }, { _id: null, n: 2 }, { _id: 'legacy', n: 1 }, { _id: 'pending', n: 4 }, { _id: 'closed', n: 3 }, { _id: 'snoozed', n: 6 }],
+      s1: [
+        { _id: { status: 'open', owner: 'none' }, n: 5 }, { _id: { owner: 'none' }, n: 2 }, { _id: { status: 'pending', owner: 'none' }, n: 4 },
+        { _id: { status: 'open', owner: 'match' }, n: 8 }, { _id: { status: 'snoozed', owner: 'match' }, n: 6 }, { _id: { status: 'open', owner: 'other' }, n: 9 },
+        { _id: { status: 'closed', owner: 'match' }, n: 3 }, { _id: { status: 'closed', owner: 'none' }, n: 1 }, { _id: { status: 'snoozed', owner: 'none' }, n: 2 },
+      ],
     });
-    const counts = await service.countInbox(['s1'], { view: 'active', tab: 'unread', platform: 'whatsapp' });
-    expect(counts).toEqual({ active: 12, snoozed: 6, closed: 3, pending: 4, unread: 7, needsReply: 3 });
-    // The grouped pass keeps every filter except the status; unread / needs-reply stay inside the active view.
+    const counts = await service.countInbox(['s1'], { view: 'active', tab: 'unread', platform: 'whatsapp', agentId: 'u1' });
+    expect(counts).toEqual({ active: 11, mine: 14, closed: 3, pending: 4, unread: 7, needsReply: 3 });
+    // The grouped pass keeps every filter except the view; unread / needs-reply stay inside the open view.
     expect(calls.aggregate[0][0].$match).toEqual({ storeId: 's1', platform: 'whatsapp' });
     expect(calls.count).toHaveLength(2);
-    for (const query of calls.count) expect(query).toMatchObject({ storeId: 's1', platform: 'whatsapp', status: { $nin: ['snoozed', 'closed'] } });
+    for (const query of calls.count) expect(query).toMatchObject({ storeId: 's1', platform: 'whatsapp', status: { $nin: ['snoozed', 'closed'] }, agentId: null });
+  });
+
+  it('scopes mine and closed to the member, and a search to nobody', async () => {
+    const { service, calls } = setup();
+    await service.countInbox(['s1'], { view: 'mine', agentId: 'u1' });
+    expect(calls.count[0]).toMatchObject({ status: { $ne: 'closed' }, agentId: 'u1' });
+    await service.countInbox(['s1'], { view: 'closed' });
+    expect(calls.count[2]).toMatchObject({ status: 'closed', agentId: { $ne: null } });
+    await service.countInbox(['s1'], { view: 'active', search: 'ali', agentId: 'u1' });
+    expect(calls.count[4]).not.toHaveProperty('agentId');
+  });
+
+  it('never shares counts between members', async () => {
+    const { service, model } = setup();
+    await service.countInbox(['s1'], { agentId: 'u1' });
+    await service.countInbox(['s1'], { agentId: 'u2' });
+    await service.countInbox(['s1'], {});
+    expect(model.aggregate).toHaveBeenCalledTimes(3);
   });
 
   it('answers concurrent identical requests with a single computation', async () => {
@@ -115,7 +137,7 @@ describe('ConversationsService.countInbox', () => {
 
   it('returns zeros without querying when no branch is accessible', async () => {
     const { service, model } = setup();
-    expect(await service.countInbox([], {})).toEqual({ active: 0, snoozed: 0, closed: 0, unread: 0, needsReply: 0, pending: 0 });
+    expect(await service.countInbox([], {})).toEqual({ active: 0, mine: 0, closed: 0, unread: 0, needsReply: 0, pending: 0 });
     expect(model.aggregate).not.toHaveBeenCalled();
     expect(model.updateMany).not.toHaveBeenCalled();
   });

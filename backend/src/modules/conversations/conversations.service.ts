@@ -20,7 +20,11 @@ import { join } from 'path';
 /** Multer's in-memory file, typed locally because @types/multer is not installed. */
 export type UploadedChatFile = { buffer: Buffer; mimetype: string; originalname: string; size: number };
 
-export type InboxView = 'active' | 'snoozed' | 'closed';
+/**
+ * active: open conversations nobody has taken yet. mine: the ones `agentId` handles (not closed, snoozed included).
+ * closed: closed ones `agentId` handled. A search ignores who handles a conversation, so any customer can be found.
+ */
+export type InboxView = 'active' | 'mine' | 'closed';
 export type InboxTab = 'all' | 'unread' | 'needs_reply' | 'pending';
 export interface InboxFilters {
   view?: InboxView;
@@ -29,8 +33,10 @@ export interface InboxFilters {
   tag?: string;
   search?: string;
   rating?: ConversationRating;
+  /** Whose conversations "mine" and "closed" show; unset means every member's. */
+  agentId?: string;
 }
-export interface InboxCounts { active: number; snoozed: number; closed: number; unread: number; needsReply: number; pending: number }
+export interface InboxCounts { active: number; mine: number; closed: number; unread: number; needsReply: number; pending: number }
 /** The signed-in team member acting on a conversation. */
 export type Agent = { id: string; name: string };
 /** Closes kept per conversation for the activity reports. */
@@ -540,6 +546,7 @@ export class ConversationsService implements OnModuleInit {
     ).lean().exec() ?? await this.conversationModel.findById(id, projection).lean().exec();
     if (!conversation) throw new NotFoundException('Conversation not found');
     const event = { conversationId: String(conversation._id), agentId: conversation.agentId || null, agentName: conversation.agentName || null, agentAssignedAt: conversation.agentAssignedAt || null };
+    this.invalidateCounts(conversation.storeId);
     this.eventsGateway.server.to(`store_${conversation.storeId}`).emit('conversation_agent', event);
     return event;
   }
@@ -595,14 +602,15 @@ export class ConversationsService implements OnModuleInit {
 
   /**
    * Badge counts for the status tabs, plus unread / needs-reply inside the selected status tab.
-   * The result depends only on the branches and the filters (not on who asks), so that is the cache key: two
-   * users with the same branch access share it, and a user never gets counts for branches outside their list.
+   * The result depends only on the branches, the filters and whose conversations are counted, so that is the
+   * cache key: a user never gets counts for branches outside their list.
    */
   async countInbox(storeIds: string[], filters: InboxFilters): Promise<InboxCounts> {
-    if (!storeIds.length) return { active: 0, snoozed: 0, closed: 0, unread: 0, needsReply: 0, pending: 0 };
+    if (!storeIds.length) return { active: 0, mine: 0, closed: 0, unread: 0, needsReply: 0, pending: 0 };
     const stores = [...new Set(storeIds)].sort();
     const key = JSON.stringify([
       stores, filters.view || 'active', filters.platform || null, filters.tag || null, filters.rating || null, filters.search?.trim() || null,
+      filters.agentId || null,
     ]);
     return this.countsCache.get(key, stores, () => this.computeInboxCounts(storeIds, filters));
   }
@@ -613,7 +621,7 @@ export class ConversationsService implements OnModuleInit {
     const count = (query: Record<string, any>) => this.conversationModel.countDocuments(query).exec();
     const current = this.inboxQuery(storeIds, { ...base, view: filters.view || 'active' });
     const [byStatus, unread, needsReply] = await Promise.all([
-      this.countByStatus(this.inboxQuery(storeIds, { ...base, view: undefined })),
+      this.countByStatus(this.inboxQuery(storeIds, { ...base, view: undefined }), filters),
       count({ ...current, unreadCount: { $gt: 0 } }),
       count({ ...current, ...ConversationsService.needsTeamReplyQuery() }),
     ]);
@@ -621,19 +629,31 @@ export class ConversationsService implements OnModuleInit {
   }
 
   /**
-   * The four status-tab counts in one pass, grouped by status. Separate counts walked the branch once each, and
-   * the planner sometimes answered the "active" one ($nin) by reading every document instead of the status
-   * index. Active is everything not snoozed or closed, including threads stored without a status (as $nin was).
-   * Pending ignores the status view, as before (the pending tab replaces the view's status filter).
+   * The view-tab counts in one pass, grouped by status and by who handles the conversation. Separate counts
+   * walked the branch once each, and the planner sometimes answered the "active" one ($nin) by reading every
+   * document instead of the status index. Threads stored without a status count as open (as $nin did).
+   * Pending is the pending tab inside the open view.
    */
-  private async countByStatus(match: Record<string, any>) {
-    const rows = await this.conversationModel.aggregate<{ _id: unknown; n: number }>([
+  private async countByStatus(match: Record<string, any>, filters: InboxFilters) {
+    const unassigned = { $eq: [{ $ifNull: ['$agentId', null] }, null] };
+    const owner = {
+      $cond: [unassigned, 'none', filters.agentId ? { $cond: [{ $eq: ['$agentId', filters.agentId] }, 'match', 'other'] } : 'match'],
+    };
+    const rows = await this.conversationModel.aggregate<{ _id: { status?: unknown; owner?: string } | null; n: number }>([
       { $match: match },
-      { $group: { _id: '$status', n: { $sum: 1 } } },
+      { $group: { _id: { status: '$status', owner }, n: { $sum: 1 } } },
     ]).exec();
-    const of = (status: ConversationStatus) => rows.find((row) => row._id === status)?.n || 0;
-    const total = rows.reduce((sum, row) => sum + row.n, 0);
-    return { active: total - of('snoozed') - of('closed'), snoozed: of('snoozed'), closed: of('closed'), pending: of('pending') };
+    // A search finds a conversation whoever handles it.
+    const anyOwner = Boolean(filters.search?.trim());
+    const sum = (keep: (status: unknown, owner: string) => boolean) =>
+      rows.reduce((total, row) => total + (keep(row._id?.status, row._id?.owner || 'none') ? row.n : 0), 0);
+    const open = (status: unknown) => status !== 'snoozed' && status !== 'closed';
+    return {
+      active: sum((status, who) => open(status) && (anyOwner || who === 'none')),
+      mine: sum((status, who) => status !== 'closed' && (anyOwner || who === 'match')),
+      closed: sum((status, who) => status === 'closed' && (anyOwner || who === 'match')),
+      pending: sum((status, who) => status === 'pending' && (anyOwner || who === 'none')),
+    };
   }
 
   /**
@@ -662,13 +682,16 @@ export class ConversationsService implements OnModuleInit {
     if (filters.platform) query.platform = filters.platform;
     if (filters.tag) query.tags = filters.tag;
     if (filters.rating) query.rating = filters.rating;
+    const search = filters.search?.trim();
     if (filters.view === 'active') query.status = { $nin: ['snoozed', 'closed'] };
-    else if (filters.view) query.status = filters.view;
+    else if (filters.view === 'mine') query.status = { $ne: 'closed' };
+    else if (filters.view === 'closed') query.status = 'closed';
+    // A search finds a conversation whoever handles it; otherwise open is the unassigned queue.
+    if (filters.view && !search) query.agentId = filters.view === 'active' ? null : filters.agentId || { $ne: null };
     if (filters.tab === 'unread') query.unreadCount = { $gt: 0 };
     else if (filters.tab === 'needs_reply') Object.assign(query, ConversationsService.needsTeamReplyQuery());
     // Pending conversations the team parked (waiting on the customer or someone else), to come back to.
     else if (filters.tab === 'pending') query.status = 'pending';
-    const search = filters.search?.trim();
     if (search) {
       const pattern = new RegExp(escapeRegex(search), 'i');
       query.$and = [{ $or: [{ customerName: pattern }, { customerPhone: pattern }, { lastMessage: pattern }] }];

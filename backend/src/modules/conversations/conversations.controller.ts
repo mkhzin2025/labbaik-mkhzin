@@ -24,8 +24,12 @@ export class InboxFilterQueryDto {
   @IsOptional() @IsString()
   storeId?: string;
 
-  @IsOptional() @IsIn(['active', 'snoozed', 'closed'])
+  @IsOptional() @IsIn(['active', 'mine', 'closed'])
   view?: InboxView;
+
+  /** Owners and admins: whose conversations "mine" and "closed" show (a member id, or `all`). Others always see their own. */
+  @IsOptional() @IsString() @MaxLength(100)
+  agent?: string;
 
   @IsOptional() @IsIn(['all', 'unread', 'needs_reply', 'pending'])
   tab?: InboxTab;
@@ -120,13 +124,13 @@ export class ConversationsController {
   @Get()
   async findAll(@Request() req: any, @Query() query: InboxPageQueryDto) {
     const storeIds = await this.resolveStoreIds(req, query.scope, query.storeId);
-    return this.conversationsService.findPage(storeIds, this.toFilters(query), { limit: query.limit, cursor: query.cursor });
+    return this.conversationsService.findPage(storeIds, this.toFilters(query, req), { limit: query.limit, cursor: query.cursor });
   }
 
   @Get('counts')
   async getCounts(@Request() req: any, @Query() query: InboxFilterQueryDto) {
     const storeIds = await this.resolveStoreIds(req, query.scope, query.storeId);
-    return this.conversationsService.countInbox(storeIds, this.toFilters(query));
+    return this.conversationsService.countInbox(storeIds, this.toFilters(query, req));
   }
 
   @Get('stats')
@@ -283,8 +287,9 @@ export class ConversationsController {
     return this.conversationsService.sendAttachment(id, conversation.storeId, file, typeof caption === 'string' ? caption.slice(0, 1024) : undefined, await this.organizationsService.agentFor(req.user.id));
   }
 
-  private toFilters(query: InboxFilterQueryDto): InboxFilters {
-    return { view: query.view, tab: query.tab, platform: query.platform, tag: query.tag, search: query.search, rating: query.rating };
+  private toFilters(query: InboxFilterQueryDto, req: any): InboxFilters {
+    const agentId = !this.managesTeam(req) ? req.user.id : query.agent === 'all' ? undefined : query.agent || req.user.id;
+    return { view: query.view, tab: query.tab, platform: query.platform, tag: query.tag, search: query.search, rating: query.rating, agentId };
   }
 
   // scope=organization covers every branch the user can access, narrowed to `storeId` when given.
