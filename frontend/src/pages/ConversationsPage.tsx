@@ -549,7 +549,9 @@ export default function ConversationsPage() {
   const [stores, setStores] = useState<Array<{ id: string; name: string }>>([]);
   // Owners and admins can look at a teammate's conversations (or everyone's); others always see their own.
   const managesTeam = useMemo(() => Boolean(readCachedAccess()?.sections.includes('team')), []);
-  const [agentFilter, setAgentFilter] = useState<string>('');
+  // '' = mine, 'all' = everyone's, or a member id. Owners and admins start on everyone's, to oversee the team.
+  const defaultAgentFilter = managesTeam ? 'all' : '';
+  const [agentFilter, setAgentFilter] = useState<string>(defaultAgentFilter);
   const [members, setMembers] = useState<Array<{ userId: string; fullName?: string; email?: string }>>([]);
   useEffect(() => {
     if (managesTeam) api.get('/organizations/members').then(({ data }) => setMembers(Array.isArray(data) ? data : [])).catch(() => undefined);
@@ -1249,7 +1251,7 @@ export default function ConversationsPage() {
 
   const allTags = Array.from(new Set([...defaultTags, ...customTags]));
 
-  const hasActiveFilters = Boolean(selectedTag || selectedPlatform || selectedRating || selectedStoreId !== 'all' || agentFilter);
+  const hasActiveFilters = Boolean(selectedTag || selectedPlatform || selectedRating || selectedStoreId !== 'all' || agentFilter !== defaultAgentFilter);
   const aiOn = selectedChat?.aiEnabled !== false;
   // WhatsApp accepts a free-form reply only within 24h of the customer's last message in the loaded thread.
   const lastCustomerAt = messages.reduce((latest, m) => (isCustomerMessage(m) ? Math.max(latest, new Date(m.timestamp || 0).getTime()) : latest), 0);
@@ -1285,7 +1287,7 @@ export default function ConversationsPage() {
                   <div className="px-4 py-3 border-b border-labbaik-border flex justify-between items-center">
                     <span className="text-sm font-black text-neutral-800 dark:text-neutral-100">تصفية النتائج</span>
                     {hasActiveFilters && (
-                      <button type="button" onClick={() => { setSelectedTag(null); setSelectedPlatform(null); setSelectedRating(null); setSelectedStoreId('all'); setAgentFilter(''); setShowFilterDropdown(false); }} className="text-xs font-black text-labbaik-blue dark:text-purple-300 hover:underline cursor-pointer">مسح الكل</button>
+                      <button type="button" onClick={() => { setSelectedTag(null); setSelectedPlatform(null); setSelectedRating(null); setSelectedStoreId('all'); setAgentFilter(defaultAgentFilter); setShowFilterDropdown(false); }} className="text-xs font-black text-labbaik-blue dark:text-purple-300 hover:underline cursor-pointer">مسح الكل</button>
                     )}
                   </div>
                   <div className="max-h-[400px] overflow-y-auto custom-scrollbar p-3 space-y-4">
@@ -1328,7 +1330,7 @@ export default function ConversationsPage() {
                       <div>
                         <span className={filterHeading}><UserRound size={13} /> الموظف (محادثاتي والمغلقة)</span>
                         <div className="space-y-0.5">
-                          {[{ id: '', label: 'أنا' }, { id: 'all', label: 'كل الموظفين' }, ...members.filter((m) => m.userId !== me).map((m) => ({ id: m.userId, label: m.fullName || m.email || 'عضو' }))].map((option) => (
+                          {[{ id: 'all', label: 'كل الموظفين' }, { id: '', label: 'أنا' }, ...members.filter((m) => m.userId !== me).map((m) => ({ id: m.userId, label: m.fullName || m.email || 'عضو' }))].map((option) => (
                             <button type="button" key={option.id || 'me'} onClick={() => setAgentFilter(option.id)} aria-pressed={agentFilter === option.id} className={filterOption(agentFilter === option.id)}>
                               {option.label}{agentFilter === option.id && <Check size={14} />}
                             </button>
@@ -1374,7 +1376,7 @@ export default function ConversationsPage() {
                 role="tab"
                 aria-selected={statusView === key}
                 key={key}
-                onClick={() => { setStatusView(key); if (key !== 'active' && listTab === 'pending') setListTab('all'); }}
+                onClick={() => { setStatusView(key); if (key === 'closed' && listTab === 'pending') setListTab('all'); }}
                 className={`py-1.5 rounded-md flex flex-col items-center justify-center leading-tight transition-colors cursor-pointer ${statusView === key ? 'bg-labbaik-surface text-labbaik-blue dark:text-purple-200 shadow-sm' : 'text-labbaik-text-muted hover:text-neutral-900 dark:hover:text-white'}`}
               >
                 <CountUp className="tabular-nums text-sm font-black" value={statusCounts[key]} />
@@ -1382,13 +1384,13 @@ export default function ConversationsPage() {
               </button>
             ))}
           </div>
-          <div className={`grid ${statusView === 'active' ? 'grid-cols-4' : 'grid-cols-3'} gap-1.5`} role="tablist" aria-label="عرض المحادثات">
+          <div className={`grid ${statusView !== 'closed' ? 'grid-cols-4' : 'grid-cols-3'} gap-1.5`} role="tablist" aria-label="عرض المحادثات">
             {([
               ['all', 'الكل', statusCounts[statusView]],
               ['unread', 'غير مقروءة', unreadTotal],
               ['needs_reply', 'تحتاج رداً', needsReplyTotal],
-              // Parked conversations are part of the open tab; this brings them back in one click.
-              ...(statusView === 'active' ? [['pending', 'معلّقة', counts.pending || 0] as const] : []),
+              // Parked conversations stay in the open and mine tabs; this brings them back in one click.
+              ...(statusView !== 'closed' ? [['pending', 'معلّقة', counts.pending || 0] as const] : []),
             ] as const).map(([key, label, count]) => (
               <button
                 type="button"
@@ -1460,7 +1462,7 @@ export default function ConversationsPage() {
                     <div className="flex items-center gap-1.5 shrink-0">
                       {normalizeStatus(conv, now) === 'pending' && <span className={`h-5 px-1.5 rounded-md text-[11px] font-bold leading-5 ${STATUS_META.pending.chip}`}>معلّقة</span>}
                       {normalizeStatus(conv, now) === 'snoozed' && <span title={`مؤجلة حتى ${formatSnoozeUntil(conv.snoozedUntil)}`} className={`inline-flex items-center gap-0.5 h-5 px-1.5 rounded-md text-[11px] font-bold tabular-nums ${STATUS_META.snoozed.chip}`}><Clock size={11} />{formatSnoozeUntil(conv.snoozedUntil)}</span>}
-                      {waiting && statusView === 'active' && (
+                      {waiting && statusView !== 'closed' && (
                         <span
                           title={`العميل ينتظر الرد ${formatRelativeTime(lastMsg?.timestamp || conv.lastMessageAt, now)}`}
                           className="inline-flex items-center gap-0.5 h-5 px-1.5 rounded-md bg-amber-500/15 text-amber-800 dark:text-amber-300 text-[11px] font-black tabular-nums"

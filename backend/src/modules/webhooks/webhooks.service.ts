@@ -102,6 +102,8 @@ export class WebhooksService {
         if (ownerId) {
           this.eventsGateway.server.to(`store_${storeId}`).emit('new_message', {
             platform, from, text, type: 'text', timestamp: Date.now(), storeId, unreadCount: (savedConv as any).unreadCount, sentiment, tags, customerId: customer.id,
+            // Who handles the conversation: only they (or anyone, when nobody does) get the browser notification.
+            conversationAgentId: (savedConv as any)?.agentId || null,
           });
         }
 
@@ -365,6 +367,8 @@ export class WebhooksService {
         tags,
         customerId: customer.id,
         customerName,
+        // Who handles the conversation: only they (or anyone, when nobody does) get the browser notification.
+        conversationAgentId: (savedConv as any)?.agentId || null,
       });
     }
 

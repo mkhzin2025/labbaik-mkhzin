@@ -14,6 +14,7 @@ import {
 import { formatDistanceToNow } from 'date-fns';
 import { ar } from 'date-fns/locale';
 import { toEnglishDigits } from '@/lib/utils';
+import { currentUser } from '../lib/team';
 import { Link, useNavigate } from 'react-router-dom';
 
 const SOUND_PREF_KEY = 'labbaik_notification_sound';
@@ -137,6 +138,8 @@ export default function NotificationCenter({ socket }: { socket: any }) {
     // Incoming customer messages (outgoing ones have from 'me', system notes have from 'system').
     const onNewMessage = (payload: any) => {
       if (!payload || payload.from === 'me' || payload.from === 'system' || payload.isManual) return;
+      // A conversation a teammate handles is theirs to answer; unassigned ones notify everyone.
+      if (payload.conversationAgentId && payload.conversationAgentId !== currentUser().id) return;
       const sender = payload.customerName || payload.from || payload.customerPhone || 'عميل';
       const body = payload.text || 'رسالة جديدة';
       showBrowserNotification(`رسالة جديدة من ${sender}`, body, `msg_${payload.from}_${payload.timestamp || Date.now()}`, '/dashboard/conversations');

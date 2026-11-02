@@ -632,7 +632,7 @@ export class ConversationsService implements OnModuleInit {
    * The view-tab counts in one pass, grouped by status and by who handles the conversation. Separate counts
    * walked the branch once each, and the planner sometimes answered the "active" one ($nin) by reading every
    * document instead of the status index. Threads stored without a status count as open (as $nin did).
-   * Pending is the pending tab inside the open view.
+   * Pending is the pending tab inside the current view (open or mine).
    */
   private async countByStatus(match: Record<string, any>, filters: InboxFilters) {
     const unassigned = { $eq: [{ $ifNull: ['$agentId', null] }, null] };
@@ -652,7 +652,7 @@ export class ConversationsService implements OnModuleInit {
       active: sum((status, who) => open(status) && (anyOwner || who === 'none')),
       mine: sum((status, who) => status !== 'closed' && (anyOwner || who === 'match')),
       closed: sum((status, who) => status === 'closed' && (anyOwner || who === 'match')),
-      pending: sum((status, who) => status === 'pending' && (anyOwner || who === 'none')),
+      pending: sum((status, who) => status === 'pending' && (anyOwner || who === (filters.view === 'mine' ? 'match' : 'none'))),
     };
   }
 
@@ -989,7 +989,8 @@ export class ConversationsService implements OnModuleInit {
           { $match: agentId ? { ...scope, ratedAgentId: agentId, rating: { $ne: null } } : { ...scope, rating: { $ne: null } } },
           { $group: { _id: '$rating', count: { $sum: 1 } } },
         ]),
-        this.conversationModel.countDocuments(agentId ? { ...scope, closedById: agentId, rating: null } : { ...scope, status: 'closed', rating: null }),
+        // Only closes by the team ask for a rating: blocked customers and old threads closed in bulk don't count.
+        this.conversationModel.countDocuments({ ...scope, status: 'closed', closedById: agentId || { $ne: null }, rating: null }),
       ]);
       for (const row of rows) if (row._id in counts) counts[row._id as keyof typeof counts] = row.count;
       unrated = open;
