@@ -18,7 +18,7 @@ export function memberRoleOf(role: OrganizationRole): MemberRole | 'owner' {
 const ROLE_SECTIONS: Record<MemberRole | 'owner', readonly Section[]> = {
   owner: SECTIONS,
   admin: SECTIONS,
-  support: ['home', 'conversations', 'reviews'],
+  support: ['home', 'conversations', 'reviews', 'flows'],
   marketing: ['flows', 'whatsapp'],
 };
 

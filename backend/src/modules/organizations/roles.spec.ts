@@ -8,8 +8,8 @@ describe('team roles', () => {
     expect(seesAllBranches(OrganizationRole.ADMIN)).toBe(true);
   });
 
-  it('limits support staff to home, conversations and reviews', () => {
-    expect([...sectionsFor(OrganizationRole.AGENT)]).toEqual(['home', 'conversations', 'reviews']);
+  it('limits support staff to home, conversations, reviews and flows', () => {
+    expect([...sectionsFor(OrganizationRole.AGENT)]).toEqual(['home', 'conversations', 'reviews', 'flows']);
     expect(memberRoleOf(OrganizationRole.SUPERVISOR)).toBe('support');
     expect(seesAllBranches(OrganizationRole.AGENT)).toBe(false);
   });

@@ -26,7 +26,7 @@ interface Branch {
 
 const ROLE_OPTIONS: { value: AssignableRole; sees: string }[] = [
   { value: 'admin', sees: 'كل الأقسام والفروع، بما فيها الإعدادات والفوترة وإدارة الفريق.' },
-  { value: 'support', sees: 'الرئيسية، المحادثات، والتقييمات.' },
+  { value: 'support', sees: 'الرئيسية، المحادثات، التقييمات، والتدفقات.' },
   { value: 'marketing', sees: 'التدفقات، وقوالب وحملات واتساب.' },
 ];
 
