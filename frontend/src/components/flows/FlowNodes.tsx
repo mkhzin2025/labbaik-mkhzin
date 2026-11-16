@@ -1,9 +1,9 @@
-import { memo } from 'react';
+import { memo, useContext } from 'react';
 import { Handle, Position } from '@xyflow/react';
 import type { NodeProps } from '@xyflow/react';
 import { AlertTriangle, CornerDownLeft, ExternalLink, FileText, Music, Video } from 'lucide-react';
 import { useAuthedObjectUrl } from '../whatsapp/media';
-import { FALLBACK_HANDLE, MEDIA_KIND_LABELS, NODE_KINDS, triggerSummary } from './flowModel';
+import { FALLBACK_HANDLE, FlowLayoutContext, MEDIA_KIND_LABELS, NODE_KINDS, triggerSummary } from './flowModel';
 import type { FlowIssue, FlowMedia, FlowNode, FlowNodeType } from './flowModel';
 
 const handleBase = 'h-3! w-3! rounded-full! border-2! border-labbaik-surface! bg-labbaik-blue! transition-transform hover:scale-125!';
@@ -46,6 +46,8 @@ function FlowNodeCard(props: NodeProps<FlowNode>) {
   const text = (data.text || '').trim().replace(/\{\{\s*name\s*\}\}/gi, '‹اسم العميل›').replace(/\{\{\s*phone\s*\}\}/gi, '‹رقم الجوال›');
   const hasInput = type !== 'start';
   const hasSingleOutput = type === 'start' || type === 'message' || type === 'link';
+  // A vertical flow reads right to left, so a step is entered from its right and continues from its left.
+  const sideways = useContext(FlowLayoutContext) === 'vertical';
 
   return (
     <div
@@ -55,7 +57,7 @@ function FlowNodeCard(props: NodeProps<FlowNode>) {
         ${selected ? 'ring-2 ring-labbaik-blue' : hasError ? 'ring-1 ring-red-500/60' : 'ring-1 ring-[color:var(--color-labbaik-border)] hover:ring-labbaik-blue/40'}`}
     >
       <IssueBadge issues={issues} />
-      {hasInput && <Handle type="target" position={Position.Top} className={handleBase} />}
+      {hasInput && <Handle type="target" position={sideways ? Position.Right : Position.Top} className={handleBase} />}
 
       <div className="flex items-center gap-2.5 px-3.5 pt-3 pb-2.5">
         <span className={`grid h-7 w-7 shrink-0 place-items-center rounded-lg ${kind.tone}`}><Icon size={15} /></span>
@@ -98,7 +100,7 @@ function FlowNodeCard(props: NodeProps<FlowNode>) {
         </div>
       )}
 
-      {hasSingleOutput && <Handle type="source" position={Position.Bottom} className={handleBase} />}
+      {hasSingleOutput && <Handle type="source" position={sideways ? Position.Left : Position.Bottom} className={handleBase} />}
     </div>
   );
 }

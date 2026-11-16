@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { DragEvent } from 'react';
+import type { CSSProperties, DragEvent, PointerEvent as ReactPointerEvent } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   addEdge,
@@ -16,10 +16,15 @@ import {
   ReactFlow,
   ReactFlowProvider,
   useReactFlow,
+  useUpdateNodeInternals,
 } from '@xyflow/react';
 import type { Connection, EdgeChange, EdgeProps, NodeChange } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { AlertTriangle, ArrowRight, CheckCircle2, FlaskConical, LayoutGrid, Loader2, Save, X } from 'lucide-react';
+import {
+  AlertTriangle, ArrowRight, Check, CheckCircle2, ChevronDown, Columns3, FlaskConical, LayoutGrid, Loader2, Maximize2, Minimize2,
+  PanelRightClose, PanelRightOpen, Rows3, Save, X,
+} from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import api from '../api/client';
 import { useToast } from '../components/Toast';
 import { useTheme } from '../context/ThemeContext';
@@ -27,9 +32,10 @@ import FlowNodeCard from '../components/flows/FlowNodes';
 import NodeSettings from '../components/flows/NodeSettings';
 import FlowTester from '../components/flows/FlowTester';
 import {
-  autoLayout, defaultData, errorMessage, FALLBACK_HANDLE, NODE_KINDS, normalizeNodes, serializeGraph, uid,
+  autoLayout, countSharedOptions, defaultData, errorMessage, FALLBACK_HANDLE, FlowLayoutContext, NODE_KINDS, NODE_WIDTH, normalizeNodes,
+  serializeGraph, splitSharedTargets, uid,
 } from '../components/flows/flowModel';
-import type { FlowEdge, FlowIssue, FlowNode, FlowNodeData, FlowNodeType } from '../components/flows/flowModel';
+import type { FlowEdge, FlowIssue, FlowLayout, FlowNode, FlowNodeData, FlowNodeType } from '../components/flows/flowModel';
 
 const EDGE_STYLE = { stroke: 'var(--color-labbaik-blue)', strokeWidth: 1.75 };
 const edgeDefaults = { type: 'flow', markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16, color: '#643B89' }, style: EDGE_STYLE };
@@ -62,12 +68,32 @@ function FlowEdgeView(props: EdgeProps) {
 const edgeTypes = { flow: FlowEdgeView };
 const nodeTypes = { start: FlowNodeCard, message: FlowNodeCard, buttons: FlowNodeCard, list: FlowNodeCard, link: FlowNodeCard, handoff: FlowNodeCard, end: FlowNodeCard };
 
-const PALETTE: { title: string; types: FlowNodeType[] }[] = [
+const STEP_GROUPS: { title: string; types: FlowNodeType[] }[] = [
   { title: 'رسائل', types: ['message', 'buttons', 'list', 'link'] },
   { title: 'إجراءات', types: ['handoff', 'end'] },
 ];
 
 const DRAG_TYPE = 'application/x-flow-node';
+
+const LAYOUTS: { value: FlowLayout; label: string; hint: string; icon: LucideIcon }[] = [
+  { value: 'vertical', label: 'عمودي', hint: 'الخيارات تحت بعضها، والخطوات من اليمين لليسار', icon: Rows3 },
+  { value: 'horizontal', label: 'أفقي', hint: 'الخيارات جنب بعضها، والخطوات من الأعلى للأسفل', icon: Columns3 },
+];
+
+// The steps palette can be dragged narrower down to icons only; below COMPACT it snaps to that.
+const PALETTE = { min: 64, max: 320, initial: 208, compact: 150 };
+const clampPalette = (width: number) => Math.min(PALETTE.max, Math.max(PALETTE.min, Math.round(width)));
+
+// Light theme only: the canvas can be the page tint or a slightly darker grey that sets the white cards apart.
+type CanvasTone = 'light' | 'dim';
+const DIM_CANVAS = { background: '#e7e2ee', dots: 'rgba(100, 59, 137, 0.32)' };
+
+function readStored(key: string) {
+  try { return localStorage.getItem(key); } catch { return null; }
+}
+function store(key: string, value: string) {
+  try { localStorage.setItem(key, value); } catch { /* storage unavailable: the choice lasts this visit only */ }
+}
 
 function Editor() {
   const { id } = useParams();
@@ -88,7 +114,12 @@ function Editor() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [panel, setPanel] = useState<'settings' | 'test' | null>(null);
   const [issuesOpen, setIssuesOpen] = useState(false);
+  const [arrangeOpen, setArrangeOpen] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
+  const [canvasTone, setCanvasTone] = useState<CanvasTone>(() => (readStored('flow-canvas-tone') === 'dim' ? 'dim' : 'light'));
+  const [paletteWidth, setPaletteWidth] = useState(() => clampPalette(Number(readStored('flow-palette-width')) || PALETTE.initial));
   const canvasRef = useRef<HTMLDivElement>(null);
+  const updateNodeInternals = useUpdateNodeInternals();
 
   useEffect(() => {
     let cancelled = false;
@@ -133,6 +164,37 @@ function Editor() {
   const errors = issues.filter((issue) => issue.level === 'error');
   const warnings = issues.filter((issue) => issue.level === 'warning');
   const startNode = nodes.find((node) => node.type === 'start');
+  const layout: FlowLayout = startNode?.data.layout || 'horizontal';
+
+  // Connectors move to other sides when the layout changes; React Flow must re-measure them to redraw the links.
+  const nodeIdsRef = useRef<string[]>([]);
+  nodeIdsRef.current = nodes.map((node) => node.id);
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => updateNodeInternals(nodeIdsRef.current));
+    return () => cancelAnimationFrame(frame);
+  }, [layout, updateNodeInternals]);
+
+  useEffect(() => { store('flow-canvas-tone', canvasTone); }, [canvasTone]);
+  useEffect(() => { store('flow-palette-width', String(paletteWidth)); }, [paletteWidth]);
+
+  // Full screen hides the dashboard around the editor, and asks the browser for full screen when it allows it.
+  useEffect(() => {
+    const onChange = () => { if (!document.fullscreenElement) setFullscreen(false); };
+    document.addEventListener('fullscreenchange', onChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', onChange);
+      if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined);
+    };
+  }, []);
+  const toggleFullscreen = () => {
+    if (fullscreen) {
+      setFullscreen(false);
+      if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined);
+    } else {
+      setFullscreen(true);
+      void document.documentElement.requestFullscreen?.().catch(() => undefined);
+    }
+  };
 
   const displayNodes = useMemo(() => {
     const byNode = new Map<string, FlowIssue[]>();
@@ -200,9 +262,12 @@ function Editor() {
     const center = rect ? screenToFlowPosition({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }) : { x: 0, y: 0 };
     const source = nodes.find((node) => node.id === selectedId);
     const chain = !at && source && ['start', 'message', 'link'].includes(source.type || '') && !edges.some((edge) => edge.source === source.id && !edge.sourceHandle);
-    const position = at || (chain && source
-      ? { x: source.position.x, y: source.position.y + (source.measured?.height || 120) + 70 }
-      : { x: center.x - 140 + (nodes.length % 4) * 24, y: center.y - 60 + (nodes.length % 4) * 24 });
+    const next = source && (layout === 'vertical'
+      ? { x: source.position.x - NODE_WIDTH - 120, y: source.position.y }
+      : { x: source.position.x, y: source.position.y + (source.measured?.height || 120) + 70 });
+    const position = at || (chain && next
+      ? next
+      :{ x: center.x - 140 + (nodes.length % 4) * 24, y: center.y - 60 + (nodes.length % 4) * 24 });
     const node: FlowNode = { id: uid(type), type, position, data: defaultData(type), deletable: true };
     setNodes((current) => [...current.map((item) => ({ ...item, selected: false })), { ...node, selected: true }]);
     // Adding a step while a step with a free output is selected links them, so a flow can be built top-down by clicking.
@@ -221,11 +286,47 @@ function Editor() {
     addNode(type, { x: point.x - 140, y: point.y - 30 });
   };
 
-  const arrange = () => {
-    setNodes((current) => autoLayout(current, edges));
+  /** Arranges the canvas and remembers the layout on the start step, so the flow opens the same way for everyone. */
+  const arrange = (next: FlowLayout = layout) => {
+    setArrangeOpen(false);
+    setNodes((current) => autoLayout(current.map((node) => (node.type === 'start' ? { ...node, data: { ...node.data, layout: next } } : node)), edges, next));
     setDirty(true);
     requestAnimationFrame(() => fitView({ padding: 0.2, duration: 300, maxZoom: 1 }));
   };
+
+  const sharedOptions = selectedNode && (selectedNode.type === 'buttons' || selectedNode.type === 'list') ? countSharedOptions(nodes, edges, selectedNode.id) : 0;
+
+  const splitShared = (nodeId: string) => {
+    const result = splitSharedTargets(nodes, edges, nodeId);
+    if (!result.copies) return;
+    setNodes(autoLayout(result.nodes, result.edges, layout));
+    setEdges(result.edges);
+    setDirty(true);
+    showToast(`صار لكل خيار خطوته (${result.copies === 1 ? 'نسخة جديدة' : `${result.copies} نسخ جديدة`}). عدّل رد كل خيار من خطوته.`, 'success');
+  };
+
+  const startPaletteResize = (event: ReactPointerEvent) => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = paletteWidth;
+    let width = startWidth;
+    // The palette is on the right, so dragging its edge left widens it.
+    const move = (e: PointerEvent) => { width = clampPalette(startWidth + startX - e.clientX); setPaletteWidth(width); };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      document.body.style.removeProperty('cursor');
+      document.body.style.removeProperty('user-select');
+      if (width < PALETTE.compact) setPaletteWidth(PALETTE.min);
+    };
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
+  const paletteCompact = paletteWidth < PALETTE.compact;
+  const togglePalette = () => setPaletteWidth(paletteCompact ? PALETTE.initial : PALETTE.min);
+  const dimCanvas = theme !== 'dark' && canvasTone === 'dim';
 
   const persist = async (extra: { isActive?: boolean } = {}) => {
     setSaving(true);
@@ -286,7 +387,7 @@ function Editor() {
       : { label: warnings.length ? `جاهز · ${warnings.length} تنبيه` : 'جاهز للتشغيل', tone: warnings.length ? 'bg-amber-500/12 text-amber-800 dark:text-amber-200' : 'bg-emerald-500/12 text-emerald-800 dark:text-emerald-300', icon: <CheckCircle2 size={14} /> };
 
   return (
-    <div className="flex h-full flex-col bg-labbaik-page" dir="rtl">
+    <div className={`flex flex-col bg-labbaik-page ${fullscreen ? 'fixed inset-0 z-[1000]' : 'h-full'}`} dir="rtl">
       {/* Top bar */}
       <header className="flex flex-wrap items-center gap-2 border-b border-labbaik-border bg-labbaik-surface px-3 py-2 sm:px-4">
         <button type="button" onClick={goBack} aria-label="العودة للتدفقات" className="grid h-9 w-9 place-items-center rounded-lg text-labbaik-text-muted hover:bg-labbaik-page hover:text-labbaik-text cursor-pointer"><ArrowRight size={18} /></button>
@@ -353,10 +454,13 @@ function Editor() {
 
       <div className="relative flex min-h-0 flex-1 flex-col lg:flex-row">
         {/* Palette */}
-        <aside className="flex shrink-0 gap-1 overflow-x-auto border-b border-labbaik-border bg-labbaik-surface p-2 lg:w-52 lg:flex-col lg:gap-0 lg:overflow-y-auto lg:border-b-0 lg:border-l lg:p-3 custom-scrollbar">
-          {PALETTE.map((group) => (
-            <div key={group.title} className="flex gap-1 lg:mb-4 lg:block lg:space-y-1">
-              <p className="hidden px-2 pb-1 text-[11px] font-bold text-labbaik-text-muted lg:block">{group.title}</p>
+        <aside
+          style={{ '--palette-w': `${paletteWidth}px` } as CSSProperties}
+          className={`flex shrink-0 gap-1 overflow-x-auto border-b border-labbaik-border bg-labbaik-surface p-2 lg:w-(--palette-w) lg:flex-col lg:gap-0 lg:overflow-x-hidden lg:overflow-y-auto lg:border-b-0 lg:border-l custom-scrollbar ${paletteCompact ? 'lg:px-2 lg:py-3' : 'lg:p-3'}`}
+        >
+          {STEP_GROUPS.map((group) => (
+            <div key={group.title} className={`flex gap-1 lg:block lg:space-y-1 ${paletteCompact ? 'lg:mb-2 lg:border-b lg:border-labbaik-border lg:pb-2 lg:last-of-type:border-b-0' : 'lg:mb-4'}`}>
+              <p className={`hidden px-2 pb-1 text-[11px] font-bold text-labbaik-text-muted ${paletteCompact ? '' : 'lg:block'}`}>{group.title}</p>
               {group.types.map((type) => {
                 const kind = NODE_KINDS[type];
                 const Icon = kind.icon;
@@ -368,10 +472,11 @@ function Editor() {
                     onDragStart={(event) => { event.dataTransfer.setData(DRAG_TYPE, type); event.dataTransfer.effectAllowed = 'move'; }}
                     onClick={() => addNode(type)}
                     title={`${kind.label}: ${kind.hint}`}
-                    className="flex shrink-0 items-center gap-2.5 rounded-lg px-2 py-1.5 text-start hover:bg-labbaik-page cursor-grab active:cursor-grabbing lg:w-full"
+                    aria-label={kind.label}
+                    className={`flex shrink-0 items-center gap-2.5 rounded-lg px-2 py-1.5 text-start hover:bg-labbaik-page cursor-grab active:cursor-grabbing lg:w-full ${paletteCompact ? 'lg:justify-center lg:px-0' : ''}`}
                   >
                     <span className={`grid h-7 w-7 shrink-0 place-items-center rounded-md ${kind.tone}`}><Icon size={14} /></span>
-                    <span className="min-w-0">
+                    <span className={`min-w-0 ${paletteCompact ? 'lg:hidden' : ''}`}>
                       <span className="block whitespace-nowrap text-[13px] font-bold text-labbaik-text">{kind.label}</span>
                       <span className="hidden truncate text-[11px] text-labbaik-text-muted lg:block">{kind.hint}</span>
                     </span>
@@ -380,13 +485,46 @@ function Editor() {
               })}
             </div>
           ))}
-          <p className="mt-auto hidden rounded-lg bg-labbaik-page p-2.5 text-[11px] leading-relaxed text-labbaik-text-muted lg:block">
-            اسحب خطوة إلى الكانفس، أو اختر خطوة ثم اضغط نوعًا هنا لإضافته بعدها مباشرة.
-          </p>
+          <div className="mt-auto hidden space-y-2 lg:block">
+            {!paletteCompact && (
+              <p className="rounded-lg bg-labbaik-page p-2.5 text-[11px] leading-relaxed text-labbaik-text-muted">
+                اسحب خطوة إلى الكانفس، أو اختر خطوة ثم اضغط نوعًا هنا لإضافته بعدها مباشرة.
+              </p>
+            )}
+            <button
+              type="button"
+              onClick={togglePalette}
+              title={paletteCompact ? 'توسيع الأدوات' : 'تصغير الأدوات إلى أيقونات'}
+              aria-label={paletteCompact ? 'توسيع الأدوات' : 'تصغير الأدوات إلى أيقونات'}
+              className={`flex h-8 items-center gap-1.5 rounded-lg px-2 text-xs font-bold text-labbaik-text-muted hover:bg-labbaik-page hover:text-labbaik-text cursor-pointer ${paletteCompact ? 'w-full justify-center' : ''}`}
+            >
+              {paletteCompact ? <PanelRightOpen size={16} /> : <><PanelRightClose size={16} /> تصغير</>}
+            </button>
+          </div>
         </aside>
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="عرض الأدوات"
+          aria-valuemin={PALETTE.min}
+          aria-valuemax={PALETTE.max}
+          aria-valuenow={paletteWidth}
+          tabIndex={0}
+          title="اسحب لتغيير العرض · نقرتان للتصغير أو التوسيع"
+          onPointerDown={startPaletteResize}
+          onDoubleClick={togglePalette}
+          onKeyDown={(event) => {
+            if (event.key === 'ArrowLeft') setPaletteWidth((width) => clampPalette(width + 16));
+            if (event.key === 'ArrowRight') setPaletteWidth((width) => clampPalette(width - 16));
+          }}
+          className="group relative z-10 -mx-1 hidden w-2 shrink-0 cursor-col-resize touch-none focus:outline-none lg:block"
+        >
+          <span className="mx-auto block h-full w-0.5 transition-colors group-hover:bg-labbaik-blue/50 group-focus-visible:bg-labbaik-blue/70 group-active:bg-labbaik-blue" />
+        </div>
 
         {/* Canvas */}
         <div ref={canvasRef} className="relative min-h-0 flex-1" dir="ltr" onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; }} onDrop={onDrop}>
+          <FlowLayoutContext.Provider value={layout}>
           <ReactFlow<FlowNode, FlowEdge>
             nodes={displayNodes}
             edges={edges}
@@ -397,7 +535,7 @@ function Editor() {
             onConnect={onConnect}
             isValidConnection={isValidConnection}
             onNodeClick={(_, node) => selectNode(node.id)}
-            onPaneClick={() => { setSelectedId(null); setIssuesOpen(false); if (panel === 'settings') setPanel(null); }}
+            onPaneClick={() => { setSelectedId(null); setIssuesOpen(false); setArrangeOpen(false); if (panel === 'settings') setPanel(null); }}
             deleteKeyCode={['Backspace', 'Delete']}
             colorMode={theme === 'dark' ? 'dark' : 'light'}
             defaultEdgeOptions={edgeDefaults}
@@ -406,15 +544,75 @@ function Editor() {
             minZoom={0.25}
             maxZoom={1.75}
             proOptions={{ hideAttribution: true }}
-            className="bg-labbaik-page!"
+            className={dimCanvas ? '' : 'bg-labbaik-page!'}
+            style={dimCanvas ? { background: DIM_CANVAS.background } : undefined}
           >
-            <Background variant={BackgroundVariant.Dots} gap={22} size={1.4} color="var(--color-input-border)" />
+            <Background variant={BackgroundVariant.Dots} gap={22} size={1.4} color={dimCanvas ? DIM_CANVAS.dots : 'var(--color-input-border)'} />
             <Controls showInteractive={false} position="bottom-left" className="overflow-hidden! rounded-lg! border! border-labbaik-border! shadow-none!" />
             <MiniMap position="top-left" pannable zoomable style={{ width: 150, height: 96 }} className="hidden! rounded-lg! border! border-labbaik-border! md:block!" nodeColor={(node) => (node.type === 'start' ? '#059669' : '#643B89')} maskColor="rgba(100,59,137,0.06)" />
           </ReactFlow>
-          <button type="button" onClick={arrange} className="absolute top-3 right-3 inline-flex h-8 items-center gap-1.5 rounded-lg border border-labbaik-border bg-labbaik-surface px-2.5 text-xs font-bold text-labbaik-text shadow-[0_1px_2px_rgba(15,10,30,0.06)] hover:border-labbaik-blue/40 cursor-pointer" dir="rtl">
-            <LayoutGrid size={14} /> ترتيب تلقائي
-          </button>
+          </FlowLayoutContext.Provider>
+
+          {/* Canvas view controls */}
+          <div className="absolute top-3 right-3 flex items-center gap-1.5" dir="rtl">
+            <div className="relative">
+              <div className="inline-flex h-8 overflow-hidden rounded-lg border border-labbaik-border bg-labbaik-surface shadow-[0_1px_2px_rgba(15,10,30,0.06)]">
+                <button type="button" onClick={() => arrange()} title={`ترتيب ${LAYOUTS.find((item) => item.value === layout)?.label}`} className="inline-flex items-center gap-1.5 px-2.5 text-xs font-bold text-labbaik-text hover:bg-labbaik-page cursor-pointer">
+                  <LayoutGrid size={14} /> ترتيب تلقائي
+                </button>
+                <button type="button" onClick={() => setArrangeOpen((open) => !open)} aria-expanded={arrangeOpen} aria-haspopup="menu" aria-label="اتجاه الترتيب" className="grid w-7 place-items-center border-r border-labbaik-border text-labbaik-text-muted hover:bg-labbaik-page hover:text-labbaik-text cursor-pointer">
+                  <ChevronDown size={14} />
+                </button>
+              </div>
+              {arrangeOpen && (
+                <div role="menu" className="absolute top-10 right-0 z-30 w-64 rounded-xl border border-labbaik-border bg-labbaik-surface p-1.5 shadow-[0_16px_40px_-12px_rgba(15,10,30,0.35)]">
+                  {LAYOUTS.map((item) => {
+                    const ItemIcon = item.icon;
+                    return (
+                      <button key={item.value} type="button" role="menuitemradio" aria-checked={layout === item.value} onClick={() => arrange(item.value)} className="flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-start hover:bg-labbaik-page cursor-pointer">
+                        <ItemIcon size={16} className="mt-0.5 shrink-0 text-labbaik-text-muted" />
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-[13px] font-bold text-labbaik-text">ترتيب {item.label}</span>
+                          <span className="block text-[11px] leading-relaxed text-labbaik-text-muted">{item.hint}</span>
+                        </span>
+                        {layout === item.value && <Check size={15} className="mt-0.5 shrink-0 text-labbaik-blue dark:text-purple-300" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {theme !== 'dark' && (
+              <div role="radiogroup" aria-label="لون خلفية الكانفس" className="inline-flex h-8 items-center gap-0.5 rounded-lg border border-labbaik-border bg-labbaik-surface p-0.5 shadow-[0_1px_2px_rgba(15,10,30,0.06)]">
+                {([['light', 'فاتح', '#f8f6fc'], ['dim', 'غامق قليلًا', DIM_CANVAS.background]] as const).map(([tone, label, swatch]) => (
+                  <button
+                    key={tone}
+                    type="button"
+                    role="radio"
+                    aria-checked={canvasTone === tone}
+                    onClick={() => setCanvasTone(tone)}
+                    title={`خلفية ${label}`}
+                    className={`inline-flex h-full items-center gap-1.5 rounded-md px-2 text-[11px] font-bold cursor-pointer ${canvasTone === tone ? 'bg-labbaik-blue/10 text-labbaik-blue' : 'text-labbaik-text-muted hover:text-labbaik-text'}`}
+                  >
+                    <span className="h-3.5 w-3.5 rounded-full ring-1 ring-black/15" style={{ background: swatch }} />
+                    <span className="hidden sm:inline">{label}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={toggleFullscreen}
+              aria-pressed={fullscreen}
+              title={fullscreen ? 'الخروج من ملء الشاشة' : 'ملء الشاشة'}
+              aria-label={fullscreen ? 'الخروج من ملء الشاشة' : 'ملء الشاشة'}
+              className="grid h-8 w-8 place-items-center rounded-lg border border-labbaik-border bg-labbaik-surface text-labbaik-text shadow-[0_1px_2px_rgba(15,10,30,0.06)] hover:border-labbaik-blue/40 cursor-pointer"
+            >
+              {fullscreen ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+            </button>
+          </div>
         </div>
 
         {/* Side panel */}
@@ -429,6 +627,8 @@ function Editor() {
                   onChange={(patch) => updateNodeData(selectedNode.id, patch)}
                   onDelete={() => deleteNode(selectedNode.id)}
                   onClose={() => { setPanel(null); setSelectedId(null); }}
+                  sharedOptions={sharedOptions}
+                  onSplitShared={() => splitShared(selectedNode.id)}
                 />
               )}
           </aside>

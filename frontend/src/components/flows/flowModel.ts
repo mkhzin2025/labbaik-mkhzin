@@ -1,3 +1,4 @@
+import { createContext } from 'react';
 import type { Edge, Node } from '@xyflow/react';
 import { Flag, Headset, Link2, List, MessageSquare, MousePointerClick, Zap } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -39,9 +40,17 @@ export type FlowNodeData = {
   trigger?: FlowTrigger;
   imageUrl?: string;
   isStart?: boolean;
+  /** Start node only: how the editor arranges this flow and which sides its connectors sit on. Ignored by the engine. */
+  layout?: FlowLayout;
   /** Editor-only: problems found by the validator, injected before render and stripped before save. */
   issues?: FlowIssue[];
 };
+
+/** vertical: steps flow right to left and options stack under each other. horizontal: steps flow down and options sit side by side. */
+export type FlowLayout = 'vertical' | 'horizontal';
+
+/** The flow's layout, read by every node card to place its connectors. */
+export const FlowLayoutContext = createContext<FlowLayout>('horizontal');
 
 export type FlowNode = Node<FlowNodeData>;
 export type FlowEdge = Edge;
@@ -148,26 +157,80 @@ export function normalizeNodes(nodes: FlowNode[]): FlowNode[] {
   });
 }
 
-const NODE_WIDTH = 280;
+export const NODE_WIDTH = 280;
 const GAP_X = 60;
 const GAP_Y = 90;
+const COLUMN_GAP = 120;
+const ROW_GAP = 36;
 
-/** Arranges nodes in layers by distance from the start, ordered by their parent's option order. */
-export function autoLayout(nodes: FlowNode[], edges: FlowEdge[]): FlowNode[] {
+/** A node's outgoing edges in the order its options are listed, the "any other reply" output last. */
+function outgoingInOrder(nodes: FlowNode[], edges: FlowEdge[], id: string) {
+  const parent = nodes.find((node) => node.id === id);
+  const optionIndex = (handle?: string | null) => {
+    const index = (parent?.data.buttons || []).findIndex((option) => option.id === handle);
+    return index < 0 ? (handle === FALLBACK_HANDLE ? 99 : 0) : index;
+  };
+  return edges.filter((edge) => edge.source === id).sort((a, b) => optionIndex(a.sourceHandle) - optionIndex(b.sourceHandle));
+}
+
+const nodeHeight = (node: FlowNode) => node.measured?.height || estimateHeight(node);
+
+/**
+ * vertical: a tree that reads right to left, one column per step, and each step's options stacked under each other.
+ * horizontal: rows by distance from the start, options side by side.
+ */
+export function autoLayout(nodes: FlowNode[], edges: FlowEdge[], layout: FlowLayout = 'horizontal'): FlowNode[] {
+  return layout === 'vertical' ? treeLayout(nodes, edges) : layeredLayout(nodes, edges);
+}
+
+function treeLayout(nodes: FlowNode[], edges: FlowEdge[]): FlowNode[] {
+  const byId = new Map(nodes.map((node) => [node.id, node]));
+  const children = new Map<string, string[]>();
+  const visited = new Set<string>();
+  const roots: string[] = [];
+  const grow = (rootId: string) => {
+    visited.add(rootId);
+    roots.push(rootId);
+    const queue = [rootId];
+    for (let i = 0; i < queue.length; i++) {
+      const kids: string[] = [];
+      outgoingInOrder(nodes, edges, queue[i]).forEach((edge) => {
+        if (visited.has(edge.target) || !byId.has(edge.target)) return;
+        visited.add(edge.target);
+        kids.push(edge.target);
+        queue.push(edge.target);
+      });
+      children.set(queue[i], kids);
+    }
+  };
+  const start = nodes.find((node) => node.type === 'start') || nodes[0];
+  if (!start) return nodes;
+  grow(start.id);
+  // Steps not reachable from the start: their own trees below, heads (nothing leads to them) first.
+  const targeted = new Set(edges.map((edge) => edge.target));
+  [...nodes].sort((a, b) => Number(targeted.has(a.id)) - Number(targeted.has(b.id))).forEach((node) => { if (!visited.has(node.id)) grow(node.id); });
+
+  const position = new Map<string, { x: number; y: number }>();
+  // Places a subtree from `top` down and returns where the next sibling may start.
+  const place = (id: string, depth: number, top: number): number => {
+    position.set(id, { x: -depth * (NODE_WIDTH + COLUMN_GAP), y: top });
+    let next = top;
+    (children.get(id) || []).forEach((kid) => { next = place(kid, depth + 1, next); });
+    return Math.max(top + nodeHeight(byId.get(id)!) + ROW_GAP, next);
+  };
+  let top = 0;
+  roots.forEach((root) => { top = place(root, 0, top) + ROW_GAP * 2; });
+  return nodes.map((node) => ({ ...node, position: position.get(node.id) || node.position }));
+}
+
+function layeredLayout(nodes: FlowNode[], edges: FlowEdge[]): FlowNode[] {
   const start = nodes.find((node) => node.type === 'start') || nodes[0];
   if (!start) return nodes;
   const depth = new Map<string, number>([[start.id, 0]]);
   const order: string[] = [start.id];
   for (let i = 0; i < order.length; i++) {
     const id = order[i];
-    const parent = nodes.find((node) => node.id === id);
-    const optionIndex = (handle?: string | null) => {
-      const index = (parent?.data.buttons || []).findIndex((option) => option.id === handle);
-      return index < 0 ? (handle === FALLBACK_HANDLE ? 99 : 0) : index;
-    };
-    edges
-      .filter((edge) => edge.source === id)
-      .sort((a, b) => optionIndex(a.sourceHandle) - optionIndex(b.sourceHandle))
+    outgoingInOrder(nodes, edges, id)
       .forEach((edge) => {
         if (depth.has(edge.target)) return;
         depth.set(edge.target, depth.get(id)! + 1);
@@ -186,10 +249,54 @@ export function autoLayout(nodes: FlowNode[], edges: FlowEdge[]): FlowNode[] {
     const width = ids.length * NODE_WIDTH + (ids.length - 1) * GAP_X;
     // RTL: the first option's branch sits on the right.
     ids.forEach((id, index) => position.set(id, { x: width / 2 - NODE_WIDTH - index * (NODE_WIDTH + GAP_X), y }));
-    const tallest = Math.max(...ids.map((id) => estimateHeight(nodes.find((node) => node.id === id)!)));
+    const tallest = Math.max(...ids.map((id) => nodeHeight(nodes.find((node) => node.id === id)!)));
     y += tallest + GAP_Y;
   });
   return nodes.map((node) => ({ ...node, position: position.get(node.id) || node.position }));
+}
+
+/** Option edges of a question node, in option order. */
+function optionEdges(nodes: FlowNode[], edges: FlowEdge[], nodeId: string) {
+  const optionIds = new Set((nodes.find((node) => node.id === nodeId)?.data.buttons || []).map((option) => option.id));
+  return outgoingInOrder(nodes, edges, nodeId).filter((edge) => edge.sourceHandle && optionIds.has(edge.sourceHandle));
+}
+
+/** How many options of a question node lead to a step another of its options also leads to. */
+export function countSharedOptions(nodes: FlowNode[], edges: FlowEdge[], nodeId: string) {
+  const perTarget = new Map<string, number>();
+  optionEdges(nodes, edges, nodeId).forEach((edge) => perTarget.set(edge.target, (perTarget.get(edge.target) || 0) + 1));
+  return [...perTarget.values()].filter((count) => count > 1).reduce((sum, count) => sum + count, 0);
+}
+
+/**
+ * Gives every option of a question node its own copy of a step it shares with an earlier option, so each option's
+ * reply can be edited alone. A copy keeps the original's outgoing links, so what comes after it is unchanged.
+ */
+export function splitSharedTargets(nodes: FlowNode[], edges: FlowEdge[], nodeId: string) {
+  const seen = new Set<string>();
+  const retarget = new Map<string, string>();
+  const added: FlowNode[] = [];
+  const addedEdges: FlowEdge[] = [];
+  optionEdges(nodes, edges, nodeId).forEach((edge) => {
+    if (!seen.has(edge.target)) { seen.add(edge.target); return; }
+    const original = nodes.find((node) => node.id === edge.target);
+    if (!original) return;
+    const data: FlowNodeData = JSON.parse(JSON.stringify(original.data));
+    delete data.issues;
+    const handles = new Map<string, string>();
+    if (data.buttons) data.buttons = data.buttons.map((option) => { const id = uid('opt'); handles.set(option.id, id); return { ...option, id }; });
+    const copy: FlowNode = { id: uid(original.type || 'step'), type: original.type, position: { ...original.position }, data, deletable: true };
+    added.push(copy);
+    retarget.set(edge.id, copy.id);
+    edges.filter((out) => out.source === original.id).forEach((out) => addedEdges.push({
+      ...out, id: uid('e'), source: copy.id, sourceHandle: out.sourceHandle ? handles.get(out.sourceHandle) ?? out.sourceHandle : out.sourceHandle, selected: false,
+    }));
+  });
+  return {
+    copies: added.length,
+    nodes: [...nodes, ...added],
+    edges: [...edges.map((edge) => (retarget.has(edge.id) ? { ...edge, target: retarget.get(edge.id)! } : edge)), ...addedEdges],
+  };
 }
 
 function estimateHeight(node: FlowNode) {

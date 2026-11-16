@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { AlertTriangle, ArrowDown, ArrowUp, FileText, Link2, Loader2, Music, Plus, Smile, Trash2, Upload, Video, X } from 'lucide-react';
+import { AlertTriangle, ArrowDown, ArrowUp, FileText, Link2, Loader2, Music, Plus, Smile, Split, Trash2, Upload, Video, X } from 'lucide-react';
 import api from '../../api/client';
 import { EMOJIS } from '../conversations/emojis';
 import { useToast } from '../Toast';
@@ -289,7 +289,15 @@ const TRIGGER_HINTS: Record<TriggerType, string> = {
   keyword: 'عندما تطابق رسالة العميل كلمة تحددها، مثل «العروض» أو «الأسعار».',
 };
 
-export default function NodeSettings({ node, onChange, onDelete, onClose }: { node: FlowNode; onChange: (data: Partial<FlowNodeData>) => void; onDelete: () => void; onClose: () => void }) {
+export default function NodeSettings({ node, onChange, onDelete, onClose, sharedOptions = 0, onSplitShared }: {
+  node: FlowNode;
+  onChange: (data: Partial<FlowNodeData>) => void;
+  onDelete: () => void;
+  onClose: () => void;
+  /** Options of this question that lead to the same step as another of its options. */
+  sharedOptions?: number;
+  onSplitShared?: () => void;
+}) {
   const type = node.type as FlowNodeType;
   const kind = NODE_KINDS[type] || NODE_KINDS.message;
   const Icon = kind.icon;
@@ -371,6 +379,17 @@ export default function NodeSettings({ node, onChange, onDelete, onClose }: { no
               </Field>
             )}
             <OptionsEditor options={data.buttons || []} onChange={(buttons) => onChange({ buttons })} max={type === 'list' ? MAX_LIST_ROWS : MAX_REPLY_BUTTONS} withDescription={type === 'list'} />
+            {sharedOptions > 1 && onSplitShared && (
+              <div className="space-y-2 rounded-lg border border-labbaik-border p-3">
+                <p className="text-xs leading-relaxed text-labbaik-text">
+                  <span className="font-bold">{sharedOptions} خيارات</span> مربوطة بنفس الخطوة، فيصلها نفس الرد.
+                </p>
+                <button type="button" onClick={onSplitShared} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-labbaik-border px-3 text-xs font-bold text-labbaik-text hover:border-labbaik-blue/40 hover:text-labbaik-blue cursor-pointer">
+                  <Split size={14} /> رد مستقل لكل خيار
+                </button>
+                <p className="text-[11px] leading-relaxed text-labbaik-text-muted">تُنسخ الخطوة لكل خيار لتعدّل رده وحده، وما بعدها يبقى كما هو.</p>
+              </div>
+            )}
             <Field label="تذييل (اختياري)" counter={[(data.footer || '').length, LIMITS.footer]}>
               <input dir="auto" value={data.footer || ''} onChange={(e) => onChange({ footer: e.target.value })} placeholder="نص صغير رمادي أسفل الرسالة" className={inputClass} />
             </Field>
