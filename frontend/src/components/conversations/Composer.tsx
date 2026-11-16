@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
-import { FileText, Loader2, Mic, Pencil, Plus, Send, Smile, StickyNote, Trash2, X, Zap } from 'lucide-react';
+import { FileText, Loader2, Mic, Pencil, Plus, Reply, Send, Smile, StickyNote, Trash2, X, Zap } from 'lucide-react';
 import api from '../../api/client';
 import { useToast } from '../Toast';
 import { EMOJIS } from './emojis';
@@ -21,6 +21,9 @@ interface ComposerProps {
   /** Sends a file with the typed text as its caption; without it the attach button stays disabled. */
   onSendFile?: (file: File, caption: string) => Promise<void> | void;
   disabled?: boolean;
+  /** The message being answered, shown above the box until sent or cancelled. */
+  replyTo?: { who: string; text: string } | null;
+  onCancelReply?: () => void;
 }
 
 /** What WhatsApp accepts (see the server's WHATSAPP_MEDIA_TYPES). */
@@ -31,7 +34,7 @@ const ATTACH_ACCEPT = 'image/jpeg,image/png,video/mp4,video/3gpp,audio/aac,audio
  * team-shared quick replies triggered by typing "/" or from the notes button, and a file to attach
  * (picked or pasted) that goes out with the text as its caption. Voice notes are still "coming soon".
  */
-export default function Composer({ onSend, onSendFile, disabled = false }: ComposerProps) {
+export default function Composer({ onSend, onSendFile, disabled = false, replyTo, onCancelReply }: ComposerProps) {
   const { showToast } = useToast();
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
@@ -54,6 +57,9 @@ export default function Composer({ onSend, onSendFile, disabled = false }: Compo
   const [managing, setManaging] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+
+  // Choosing a message to answer puts the cursor in the box, as in WhatsApp.
+  useEffect(() => { if (replyTo) textareaRef.current?.focus(); }, [replyTo]);
 
   useEffect(() => {
     api.get('/stores/me').then(({ data }) => setReplies(Array.isArray(data?.quickReplies) ? data.quickReplies : [])).catch(() => setReplies([]));
@@ -159,6 +165,7 @@ export default function Composer({ onSend, onSendFile, disabled = false }: Compo
       if (slashQuery !== undefined) setText('');
       return;
     }
+    if (event.key === 'Escape' && replyTo && onCancelReply) { event.preventDefault(); onCancelReply(); return; }
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
       void send();
@@ -222,6 +229,17 @@ export default function Composer({ onSend, onSendFile, disabled = false }: Compo
               </button>
             ))}
           </div>
+        </div>
+      )}
+
+      {replyTo && (
+        <div className="mb-2 flex items-center gap-2 rounded-xl border border-labbaik-border bg-labbaik-page py-1.5 pe-1.5 ps-3">
+          <Reply size={16} className="shrink-0 text-labbaik-blue dark:text-purple-300" />
+          <span className="min-w-0 flex-1 border-s-[3px] border-labbaik-blue ps-2.5 dark:border-purple-300">
+            <span className="block text-xs font-black text-labbaik-blue dark:text-purple-300">الرد على {replyTo.who}</span>
+            <span className="block truncate text-xs text-labbaik-text-muted" dir="auto">{replyTo.text}</span>
+          </span>
+          {onCancelReply && <button type="button" onClick={onCancelReply} aria-label="إلغاء الرد على الرسالة" title="إلغاء (Esc)" className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-labbaik-text-muted hover:text-neutral-900 hover:bg-labbaik-surface dark:hover:text-white cursor-pointer"><X size={16} /></button>}
         </div>
       )}
 

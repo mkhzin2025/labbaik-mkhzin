@@ -39,6 +39,8 @@ export interface InboxFilters {
 export interface InboxCounts { active: number; mine: number; closed: number; unread: number; needsReply: number; pending: number }
 /** The signed-in team member acting on a conversation. */
 export type Agent = { id: string; name: string };
+/** What a reply quotes, stored on the reply as `metadata.replyTo`. */
+export type QuotedMessage = { messageId: string; whatsappMessageId: string | null; from: string; agentName: string | null; type: string; text: string };
 /** Closes kept per conversation for the activity reports. */
 const CLOSURES_KEPT = 50;
 
@@ -1355,7 +1357,7 @@ export class ConversationsService implements OnModuleInit {
    * Sends an image, video, audio or document from the inbox (WhatsApp only). The file is kept next to received
    * media so the thread shows it the same way, uploaded to Meta, and sent with the optional caption.
    */
-  async sendAttachment(conversationId: string, storeId: string, file: UploadedChatFile, caption?: string, agent?: Agent) {
+  async sendAttachment(conversationId: string, storeId: string, file: UploadedChatFile, caption?: string, agent?: Agent, replyTo?: string) {
     if (!file?.buffer?.length) throw new BadRequestException('اختر ملفًا لإرساله.');
     const spec = WHATSAPP_MEDIA_TYPES[file.mimetype];
     if (!spec) throw new BadRequestException(WHATSAPP_MEDIA_UNSUPPORTED);
@@ -1375,6 +1377,7 @@ export class ConversationsService implements OnModuleInit {
     writeFileSync(join(root, filename), file.buffer);
     const originalFilename = Buffer.from(file.originalname || filename, 'latin1').toString('utf8');
     const text = caption?.trim() || '';
+    const quoted = await this.findQuotedMessage(conversationId, replyTo);
 
     const walletCharge = await this.billingService.chargeMetaUsageForStore(storeId, MetaUsageType.SESSION_TEXT, {
       referenceId: conversationId,
@@ -1389,7 +1392,9 @@ export class ConversationsService implements OnModuleInit {
       const media: Record<string, string> = { id: mediaId };
       if (text && spec.type !== 'audio') media.caption = text;
       if (spec.type === 'document') media.filename = originalFilename;
-      providerResponse = await this.messagingService.sendWhatsAppPayload(channel.credentials!.phoneNumberId, channel.credentials!.accessToken, conversation.customerPhone, { type: spec.type, [spec.type]: media });
+      providerResponse = await this.messagingService.sendWhatsAppPayload(channel.credentials!.phoneNumberId, channel.credentials!.accessToken, conversation.customerPhone, {
+        type: spec.type, [spec.type]: media, ...(quoted?.whatsappMessageId ? { context: { message_id: quoted.whatsappMessageId } } : {}),
+      });
     } catch (error) {
       if (walletCharge) await this.billingService.refundMetaUsage(walletCharge.id, 'Manual WhatsApp media send failed');
       const errorText = this.getSendErrorText(error);
@@ -1406,7 +1411,10 @@ export class ConversationsService implements OnModuleInit {
       isManual: true,
       ...(agent ? { agentId: agent.id, agentName: agent.name } : {}),
       timestamp: Date.now(),
-      metadata: whatsappMessageId ? { whatsappMessageId, status: 'accepted', walletTransactionId: walletCharge?.id || null, metaConnectionId: channel.credentials?.metaConnectionId || conversation.metaConnectionId || null } : {},
+      metadata: {
+        ...(whatsappMessageId ? { whatsappMessageId, status: 'accepted', walletTransactionId: walletCharge?.id || null, metaConnectionId: channel.credentials?.metaConnectionId || conversation.metaConnectionId || null } : {}),
+        ...(quoted ? { replyTo: quoted } : {}),
+      },
     };
     await this.addMessage(conversation.customerPhone, storeId, conversation.platform, messageData);
     // Same as a typed reply: the team has taken over, so automatic replies pause for a while.
@@ -1416,9 +1424,31 @@ export class ConversationsService implements OnModuleInit {
     return { status: 'sent', message: messageData };
   }
 
-  async sendMessage(conversationId: string, storeId: string, text: string, agent?: Agent) {
+  /**
+   * The message a reply quotes, found by its WhatsApp id or its id in the thread, as a snapshot kept on the
+   * reply: the thread shows the quote even after the original scrolls out of the loaded page.
+   */
+  private async findQuotedMessage(conversationId: string, ref?: unknown): Promise<QuotedMessage | null> {
+    if (typeof ref !== 'string' || !ref || ref.length > 200) return null;
+    const match: Record<string, unknown>[] = [{ 'metadata.whatsappMessageId': ref }];
+    if (Types.ObjectId.isValid(ref)) match.push({ _id: new Types.ObjectId(ref) });
+    const doc: any = await this.conversationModel.findById(conversationId).select({ messages: { $elemMatch: { $or: match } } }).lean();
+    const message = doc?.messages?.[0];
+    if (!message || ['system_error', 'reaction'].includes(message.type)) return null;
+    return {
+      messageId: String(message._id),
+      whatsappMessageId: message.metadata?.whatsappMessageId || null,
+      from: message.from,
+      agentName: message.agentName || null,
+      type: message.type,
+      text: String(message.text || '').slice(0, 300),
+    };
+  }
+
+  async sendMessage(conversationId: string, storeId: string, text: string, agent?: Agent, replyTo?: string) {
     const conversation = await this.conversationModel.findOne({ _id: conversationId, storeId }).select('-messages');
     if (!conversation) throw new NotFoundException('Conversation not found');
+    const quoted = await this.findQuotedMessage(conversationId, replyTo);
     if (conversation.blockedAt) throw new BadRequestException('هذا العميل محظور. ألغِ الحظر أولًا لمراسلته.');
     const channels = await this.channelsService.findAllByStore(storeId, { maskCredentials: false });
     const channel = channels.find(c => c.type === conversation.platform && (!conversation.metaConnectionId || c.credentials?.metaConnectionId === conversation.metaConnectionId))
@@ -1433,7 +1463,7 @@ export class ConversationsService implements OnModuleInit {
         source: 'manual_agent_reply',
       });
       try {
-        providerResponse = await this.messagingService.sendWhatsAppMessage(channel.credentials!.phoneNumberId, channel.credentials!.accessToken, conversation.customerPhone, text);
+        providerResponse = await this.messagingService.sendWhatsAppMessage(channel.credentials!.phoneNumberId, channel.credentials!.accessToken, conversation.customerPhone, text, quoted?.whatsappMessageId);
       } catch (error) {
         if (walletCharge) await this.billingService.refundMetaUsage(walletCharge.id, 'Manual WhatsApp send failed');
         const errorText = this.getSendErrorText(error);
@@ -1456,7 +1486,10 @@ export class ConversationsService implements OnModuleInit {
       isManual: true,
       ...(agent ? { agentId: agent.id, agentName: agent.name } : {}),
       timestamp: Date.now(),
-      metadata: whatsappMessageId ? { whatsappMessageId, status: 'accepted', walletTransactionId: walletCharge?.id || null, metaConnectionId: channel.credentials?.metaConnectionId || conversation.metaConnectionId || null } : {},
+      metadata: {
+        ...(whatsappMessageId ? { whatsappMessageId, status: 'accepted', walletTransactionId: walletCharge?.id || null, metaConnectionId: channel.credentials?.metaConnectionId || conversation.metaConnectionId || null } : {}),
+        ...(quoted ? { replyTo: quoted } : {}),
+      },
     };
     await this.addMessage(conversation.customerPhone, storeId, conversation.platform, messageData);
     const thirtyMinutesFromNow = new Date(Date.now() + 30 * 60 * 1000);

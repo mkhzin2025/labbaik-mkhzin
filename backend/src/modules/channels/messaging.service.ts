@@ -16,7 +16,8 @@ export class MessagingService {
     private readonly credentialEncryption: CredentialEncryptionService,
   ) {}
 
-  async sendWhatsAppMessage(phoneNumberId: string, accessToken: string, to: string, text: string) {
+  /** `replyToId`: the WhatsApp id of a message this one answers; the customer sees it quoted above the text. */
+  async sendWhatsAppMessage(phoneNumberId: string, accessToken: string, to: string, text: string, replyToId?: string | null) {
     try {
       const plainAccessToken = this.credentialEncryption.decryptSecret(accessToken);
       const url = `https://graph.facebook.com/${this.getGraphVersion()}/${phoneNumberId}/messages`;
@@ -28,6 +29,7 @@ export class MessagingService {
           to: to,
           type: 'text',
           text: { body: text, preview_url: /https?:\/\//i.test(text) },
+          ...(replyToId ? { context: { message_id: replyToId } } : {}),
         },
         {
           headers: {

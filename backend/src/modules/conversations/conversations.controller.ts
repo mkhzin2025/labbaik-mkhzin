@@ -266,9 +266,9 @@ export class ConversationsController {
   }
 
   @Post(':id/messages')
-  async sendMessage(@Param('id') id: string, @Body('text') text: string, @Request() req: any) {
+  async sendMessage(@Param('id') id: string, @Body('text') text: string, @Body('replyTo') replyTo: string | undefined, @Request() req: any) {
     const conversation: any = await this.requireOwnedConversation(id, req);
-    return this.conversationsService.sendMessage(id, conversation.storeId, text, await this.organizationsService.agentFor(req.user.id));
+    return this.conversationsService.sendMessage(id, conversation.storeId, text, await this.organizationsService.agentFor(req.user.id), replyTo);
   }
 
   /** Blocks (or unblocks) the conversation's customer across the organization: their messages are dropped and campaigns skip them. */
@@ -282,9 +282,9 @@ export class ConversationsController {
   /** Sends an image, video, audio or document (with an optional caption) to the customer. */
   @Post(':id/attachments')
   @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 16 * 1024 * 1024 } }))
-  async sendAttachment(@Param('id') id: string, @UploadedFile() file: UploadedChatFile, @Body('caption') caption: string | undefined, @Request() req: any) {
+  async sendAttachment(@Param('id') id: string, @UploadedFile() file: UploadedChatFile, @Body('caption') caption: string | undefined, @Body('replyTo') replyTo: string | undefined, @Request() req: any) {
     const conversation: any = await this.requireOwnedConversation(id, req);
-    return this.conversationsService.sendAttachment(id, conversation.storeId, file, typeof caption === 'string' ? caption.slice(0, 1024) : undefined, await this.organizationsService.agentFor(req.user.id));
+    return this.conversationsService.sendAttachment(id, conversation.storeId, file, typeof caption === 'string' ? caption.slice(0, 1024) : undefined, await this.organizationsService.agentFor(req.user.id), replyTo);
   }
 
   private toFilters(query: InboxFilterQueryDto, req: any): InboxFilters {

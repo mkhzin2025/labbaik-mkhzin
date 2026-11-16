@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from 'react';
+import { Fragment, useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { io, Socket } from 'socket.io-client';
@@ -41,7 +41,9 @@ import {
   RotateCcw,
   Ban,
   UserCheck,
-  UserRound
+  UserRound,
+  Reply,
+  ChevronLeft
 } from 'lucide-react';
 import { 
   FaWhatsapp, 
@@ -49,7 +51,7 @@ import {
   FaFacebook, 
   FaMapMarkerAlt 
 } from 'react-icons/fa';
-import { format, isYesterday } from 'date-fns';
+import { differenceInCalendarDays, format, isYesterday } from 'date-fns';
 import { ar } from 'date-fns/locale';
 import { formatNumber, toEnglishDigits } from '@/lib/utils';
 import { CountUp } from '@/components/ui';
@@ -498,6 +500,24 @@ function isAttachmentPlaceholder(msg: Message) {
   return (msg.attachments || []).some((a) => msg.text === `[${a.type}]`);
 }
 
+const MEDIA_QUOTE_LABELS: Record<string, string> = { image: '📷 صورة', video: '🎥 فيديو', audio: '🎤 رسالة صوتية', document: '📄 ملف', sticker: 'ملصق' };
+
+/** A quoted message's text as WhatsApp shows it: media without a caption reads as its kind. */
+function quoteText(type: string, text: string) {
+  const placeholder = /^\[(\w+)\]$/.exec(text.trim())?.[1];
+  return placeholder ? MEDIA_QUOTE_LABELS[placeholder] || 'مرفق' : MEDIA_QUOTE_LABELS[type] && !text ? MEDIA_QUOTE_LABELS[type] : text;
+}
+
+/** What a reply refers to: the WhatsApp id when there is one (it also links customer replies), else the thread id. */
+const messageRef = (msg: Message): string | undefined => msg.metadata?.whatsappMessageId || msg._id;
+
+const dayKey = (value: string | number | Date) => {
+  const d = new Date(value);
+  return isNaN(d.getTime()) ? '' : `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+};
+
+const LIST_COLLAPSED_KEY = 'inbox-list-collapsed';
+
 function MessageExtras({ msg }: { msg: Message }) {
   const attachments = msg.attachments || [];
   const location = msg.metadata?.location;
@@ -576,6 +596,12 @@ export default function ConversationsPage() {
   const [messagesLoading, setMessagesLoading] = useState(false);
   const [messagesError, setMessagesError] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
+  // The message the next reply answers (quoted above it, in WhatsApp too).
+  const [replyTo, setReplyTo] = useState<Message | null>(null);
+  const [highlightRef, setHighlightRef] = useState<string | null>(null);
+  // Desktop: the conversation list can shrink to a strip of avatars to give the thread more room.
+  const [listCollapsed, setListCollapsed] = useState(() => { try { return localStorage.getItem(LIST_COLLAPSED_KEY) === '1'; } catch { return false; } });
+  useEffect(() => { try { localStorage.setItem(LIST_COLLAPSED_KEY, listCollapsed ? '1' : '0'); } catch { /* storage unavailable */ } }, [listCollapsed]);
 
   const socketRef = useRef<Socket | null>(null);
   const selectedChatRef = useRef<Conversation | null>(null);
@@ -626,6 +652,8 @@ export default function ConversationsPage() {
       return '';
     }
   };
+
+  useEffect(() => { setReplyTo(null); }, [selectedChat?._id]);
 
   useEffect(() => {
     selectedChatRef.current = selectedChat;
@@ -1132,11 +1160,13 @@ export default function ConversationsPage() {
   };
 
   // Rethrows on failure so the composer can put the unsent text back.
-  const sendText = async (text: string) => {
+  const sendText = async (text: string, withReply = true) => {
     if (!selectedChat) return;
     if (!(await confirmTakeover('reply'))) throw new Error('cancelled');
+    const quoted = withReply && replyTo ? messageRef(replyTo) : undefined;
     try {
-      await api.post(`/conversations/${selectedChat._id}/messages`, { text });
+      await api.post(`/conversations/${selectedChat._id}/messages`, { text, ...(quoted ? { replyTo: quoted } : {}) });
+      if (quoted) setReplyTo(null);
     } catch (error: any) {
       showToast(error.response?.data?.message || error.message || 'فشل إرسال الرسالة', 'error');
       throw error;
@@ -1150,8 +1180,11 @@ export default function ConversationsPage() {
     const form = new FormData();
     form.append('file', file);
     if (caption) form.append('caption', caption);
+    const quoted = replyTo ? messageRef(replyTo) : undefined;
+    if (quoted) form.append('replyTo', quoted);
     try {
       await api.post(`/conversations/${selectedChat._id}/attachments`, form);
+      if (quoted) setReplyTo(null);
     } catch (error) {
       const failure = error as { message?: string; response?: { data?: { message?: string } } };
       showToast(failure.response?.data?.message || failure.message || 'فشل إرسال المرفق', 'error');
@@ -1168,7 +1201,7 @@ export default function ConversationsPage() {
   const resendFailed = async (msg: Message, key: string) => {
     setResendingId(key);
     try {
-      await sendText(msg.metadata!.failedText);
+      await sendText(msg.metadata!.failedText, false);
     } catch {
       // sendText already showed the error toast.
     } finally {
@@ -1260,12 +1293,57 @@ export default function ConversationsPage() {
     `w-full flex items-center justify-between gap-2 h-9 px-3 rounded-lg text-sm font-bold transition-colors cursor-pointer ${active ? 'bg-labbaik-blue text-labbaik-on-accent' : 'text-neutral-700 dark:text-neutral-200 hover:bg-labbaik-blue/10'}`;
   const filterHeading = 'text-xs font-black text-labbaik-text-muted flex items-center gap-2 mb-2';
 
+  // Who wrote a message, as a quote names them.
+  const authorOf = (from: string, agentName?: string | null, agentId?: string) =>
+    from === 'me' ? (agentId && agentId === me ? 'أنت' : agentName || 'الرد الآلي') : selectedChat?.customerName || 'العميل';
+  const byWhatsAppId = useMemo(() => {
+    const map = new Map<string, Message>();
+    messages.forEach((m) => { if (m.metadata?.whatsappMessageId) map.set(m.metadata.whatsappMessageId, m); });
+    return map;
+  }, [messages]);
+  // Our replies keep a snapshot of what they quote; a customer's reply carries only the quoted WhatsApp id.
+  const quoteOf = (msg: Message): { who: string; text: string; ref?: string } | null => {
+    const snapshot = msg.metadata?.replyTo;
+    if (snapshot) return { who: authorOf(snapshot.from, snapshot.agentName), text: quoteText(snapshot.type, snapshot.text || ''), ref: snapshot.whatsappMessageId || snapshot.messageId };
+    const contextId = msg.metadata?.contextId;
+    if (!contextId) return null;
+    const original = byWhatsAppId.get(contextId);
+    return original
+      ? { who: authorOf(original.from, original.agentName, original.agentId), text: quoteText(original.type, original.text || ''), ref: contextId }
+      : { who: 'رد على رسالة سابقة', text: 'الرسالة خارج ما تم تحميله', ref: contextId };
+  };
+  const jumpToMessage = (ref?: string) => {
+    const el = ref ? messagesScrollRef.current?.querySelector(`[data-msg-ref="${CSS.escape(ref)}"]`) : null;
+    if (!el) { showToast('الرسالة الأصلية أقدم من الرسائل المعروضة.', 'info'); return; }
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setHighlightRef(ref!);
+    window.setTimeout(() => setHighlightRef((current) => (current === ref ? null : current)), 1600);
+  };
+  const dayLabel = (value: string | number | Date) => {
+    const d = new Date(value);
+    const days = differenceInCalendarDays(new Date(now), d);
+    if (days === 0) return 'اليوم';
+    if (days === 1) return 'أمس';
+    if (days > 1 && days < 7) return safeFormatDate(d, 'EEEE');
+    return safeFormatDate(d, d.getFullYear() === new Date(now).getFullYear() ? 'EEEE، d MMMM' : 'd MMMM yyyy');
+  };
+
   return (
     <div className="h-full min-h-0 flex bg-labbaik-surface overflow-hidden relative" dir="rtl">
 
       {/* Conversation list */}
-      <div className={`${showMobileList ? 'flex' : 'hidden'} lg:flex w-full lg:w-[380px] border-l border-labbaik-border flex-col`}>
-        <div className="px-4 pt-4 pb-3 border-b border-labbaik-border space-y-3">
+      <div className={`${showMobileList ? 'flex' : 'hidden'} lg:flex w-full ${listCollapsed ? 'lg:w-[76px]' : 'lg:w-[380px]'} shrink-0 border-l border-labbaik-border flex-col relative`}>
+        <button
+          type="button"
+          onClick={() => setListCollapsed((collapsed) => !collapsed)}
+          aria-expanded={!listCollapsed}
+          aria-label={listCollapsed ? 'توسيع قائمة المحادثات' : 'تصغير قائمة المحادثات'}
+          title={listCollapsed ? 'توسيع قائمة المحادثات' : 'تصغير قائمة المحادثات'}
+          className="hidden lg:grid absolute top-6 -left-3.5 z-20 h-7 w-7 place-items-center rounded-full border border-labbaik-border bg-labbaik-surface text-labbaik-text-muted shadow-[0_2px_8px_-2px_rgba(15,10,30,0.2)] hover:text-labbaik-blue hover:border-labbaik-blue/40 cursor-pointer"
+        >
+          {listCollapsed ? <ChevronLeft size={15} /> : <ChevronRight size={15} />}
+        </button>
+        <div className={`px-4 pt-4 pb-3 border-b border-labbaik-border space-y-3 ${listCollapsed ? 'lg:hidden' : ''}`}>
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-black text-neutral-900 dark:text-white flex items-center gap-2">
               المحادثات
@@ -1432,15 +1510,19 @@ export default function ConversationsPage() {
                 key={conv._id}
                 onClick={() => selectConversation(conv)}
                 aria-current={selected ? 'true' : undefined}
-                className={`w-full flex items-center gap-3 px-4 py-3 text-right transition-colors border-b border-labbaik-border cursor-pointer
+                title={listCollapsed ? conv.customerName || conv.customerPhone : undefined}
+                className={`w-full flex items-center gap-3 px-4 py-3 text-right transition-colors border-b border-labbaik-border cursor-pointer ${listCollapsed ? 'lg:justify-center lg:px-0' : ''}
                   ${selected ? 'bg-labbaik-blue/12 dark:bg-labbaik-blue/25' : unread ? 'bg-labbaik-blue/5 dark:bg-labbaik-blue/10 hover:bg-labbaik-blue/10' : 'hover:bg-labbaik-page'}`}
               >
                 <div className="relative shrink-0">
                   <CustomerAvatar name={conv.customerName} seed={conv.customerPhone} size={44} className="rounded-full" />
                   <span className="absolute -bottom-0.5 -left-0.5 bg-labbaik-surface rounded-full p-[3px] ring-1 ring-labbaik-border">{getPlatformIcon(conv.platform)}</span>
+                  {listCollapsed && unread && (
+                    <span className="hidden lg:flex absolute -top-1 -right-1 min-w-5 h-5 px-1 rounded-full bg-labbaik-blue text-labbaik-on-accent text-[11px] font-black items-center justify-center tabular-nums ring-2 ring-labbaik-surface">{Number(conv.unreadCount) > 99 ? '99+' : conv.unreadCount}</span>
+                  )}
                 </div>
 
-                <div className="flex-1 min-w-0">
+                <div className={`flex-1 min-w-0 ${listCollapsed ? 'lg:hidden' : ''}`}>
                   <div className="flex items-center justify-between gap-2">
                     <h4 className={`text-sm truncate ${unread ? 'font-black text-neutral-900 dark:text-white' : 'font-bold text-neutral-800 dark:text-neutral-100'}`}>
                       {conv.customerName || <span dir="ltr" className="tabular-nums">{conv.customerPhone}</span>}
@@ -1650,8 +1732,31 @@ export default function ConversationsPage() {
               {messagesError && (
                 <div className="py-10 text-center text-sm font-bold text-labbaik-text-muted">تعذر تحميل الرسائل. أعد فتح المحادثة للمحاولة مجددًا.</div>
               )}
-              {messages.map((msg, idx) => (
-                msg.type === 'reaction' ? (
+              {messages.map((msg, idx) => {
+                const day = dayKey(msg.timestamp || now);
+                const newDay = Boolean(day) && (idx === 0 || day !== dayKey(messages[idx - 1].timestamp || now));
+                const ref = messageRef(msg);
+                const quote = quoteOf(msg);
+                const mine = msg.from === 'me';
+                const replyButton = ref && (
+                  <button
+                    type="button"
+                    onClick={() => setReplyTo(msg)}
+                    aria-label="الرد على هذه الرسالة"
+                    title="رد"
+                    className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-labbaik-text-muted opacity-0 transition-opacity hover:bg-labbaik-surface hover:text-labbaik-blue focus-visible:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-60 cursor-pointer"
+                  >
+                    <Reply size={16} />
+                  </button>
+                );
+                return (
+                <Fragment key={msg._id || `live-${msg.timestamp}-${idx}`}>
+                {newDay && (
+                  <div className="sticky top-0 z-10 flex justify-center py-1 pointer-events-none">
+                    <span className="rounded-lg bg-labbaik-surface/95 px-3 py-1 text-[11px] font-bold text-labbaik-text-muted shadow-[0_1px_2px_rgba(15,10,30,0.08)]">{dayLabel(msg.timestamp || now)}</span>
+                  </div>
+                )}
+                {msg.type === 'reaction' ? (
                   <div key={msg._id || `live-${msg.timestamp}-${idx}`} className="flex justify-start">
                     <span className="inline-flex items-center gap-1.5 h-7 px-3 rounded-full bg-labbaik-surface text-xs font-bold text-labbaik-text-muted">
                       {msg.text}
@@ -1686,8 +1791,20 @@ export default function ConversationsPage() {
                     </div>
                   </div>
                 ) : (
-                <div key={msg._id || `live-${msg.timestamp}-${idx}`} className={`flex ${msg.from === 'me' ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`max-w-[85%] lg:max-w-[65%] px-3.5 py-2.5 rounded-2xl ${msg.from === 'me' ? 'bg-labbaik-blue text-labbaik-on-accent rounded-tl-sm' : 'bg-labbaik-surface text-neutral-900 dark:text-white rounded-tr-sm'}`}>
+                <div data-msg-ref={ref} className={`group flex items-center gap-1 ${mine ? 'justify-end' : 'justify-start'}`}>
+                  {mine && replyButton}
+                  <div className={`max-w-[85%] lg:max-w-[65%] px-3.5 py-2.5 rounded-2xl transition-shadow ${mine ? 'bg-labbaik-blue text-labbaik-on-accent rounded-tl-sm' : 'bg-labbaik-surface text-neutral-900 dark:text-white rounded-tr-sm'} ${highlightRef && highlightRef === ref ? 'ring-4 ring-amber-400/70' : ''}`}>
+                    {quote && (
+                      <button
+                        type="button"
+                        onClick={() => jumpToMessage(quote.ref)}
+                        title="الذهاب إلى الرسالة"
+                        className={`mb-1.5 block w-full min-w-40 rounded-lg border-s-[3px] px-2.5 py-1.5 text-start cursor-pointer ${mine ? 'bg-white/15 border-white/70 hover:bg-white/20' : 'bg-labbaik-page border-labbaik-blue hover:bg-labbaik-blue/10 dark:border-purple-300'}`}
+                      >
+                        <span className={`block text-[11px] font-black ${mine ? '' : 'text-labbaik-blue dark:text-purple-300'}`}>{quote.who}</span>
+                        <span className={`block text-xs line-clamp-2 ${mine ? 'opacity-85' : 'text-labbaik-text-muted'}`} dir="auto">{quote.text}</span>
+                      </button>
+                    )}
                     {!isAttachmentPlaceholder(msg) && (
                       <div className="flex justify-between items-start gap-3">
                         <p className="text-sm leading-relaxed whitespace-pre-wrap break-words">{msg.text}</p>
@@ -1701,9 +1818,12 @@ export default function ConversationsPage() {
                       {renderMessageStatus(msg)}
                     </div>
                   </div>
+                  {!mine && replyButton}
                 </div>
-                )
-              ))}
+                )}
+                </Fragment>
+                );
+              })}
             </div>
             <div className="px-4 lg:px-6 py-3 border-t border-labbaik-border bg-labbaik-surface">
               {selectedChat.blockedAt ? (
@@ -1720,7 +1840,14 @@ export default function ConversationsPage() {
                         className="shrink-0 h-8 px-3 rounded-lg border border-amber-600/40 text-xs font-black hover:bg-amber-500/15 cursor-pointer">أرسل قالبًا</button>
                     </div>
                   )}
-                  <Composer key={selectedChat._id} disabled={replyWindowClosed} onSend={sendText} onSendFile={selectedChat.platform === 'whatsapp' ? sendFile : undefined} />
+                  <Composer
+                    key={selectedChat._id}
+                    disabled={replyWindowClosed}
+                    onSend={(text) => sendText(text)}
+                    onSendFile={selectedChat.platform === 'whatsapp' ? sendFile : undefined}
+                    replyTo={replyTo ? { who: authorOf(replyTo.from, replyTo.agentName, replyTo.agentId), text: quoteText(replyTo.type, replyTo.text || '') } : null}
+                    onCancelReply={() => setReplyTo(null)}
+                  />
                 </>
               )}
             </div>

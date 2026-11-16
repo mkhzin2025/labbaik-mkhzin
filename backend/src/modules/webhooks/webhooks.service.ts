@@ -394,6 +394,8 @@ export class WebhooksService {
       rawType: message.type,
       phoneNumberId: webhookMetadata?.phone_number_id,
       displayPhoneNumber: webhookMetadata?.display_phone_number,
+      // The customer replied to (quoted) one of the thread's messages: its WhatsApp id, shown above their message.
+      ...(message.context?.id ? { contextId: message.context.id } : {}),
     };
 
     if (message.text?.body) {
