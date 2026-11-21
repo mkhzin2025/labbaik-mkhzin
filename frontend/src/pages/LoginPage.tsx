@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import api from '../api/client';
-import { useNavigate } from 'react-router-dom';
-import { Mail, Lock, Eye, EyeOff, Sun, Moon } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
+import { Mail, Lock, Eye, EyeOff, Sun, Moon, ArrowRight } from 'lucide-react';
 import LogoImage from '../assets/logos/tael-bot-glyph-white.svg';
 import LogoAltImage from '../assets/logos/tael-bot-glyph-purple.svg';
 import BackgroundImage from '../assets/login-bg.webp';
@@ -56,6 +56,19 @@ export default function LoginPage() {
         aria-hidden="true"
       />
 
+      {/* Back to Home */}
+      <div className="absolute top-4 right-4 sm:top-6 sm:right-6 z-20">
+        <Link
+          to="/"
+          className="flex items-center gap-1.5 h-10 px-3 rounded-xl text-neutral-600 dark:text-neutral-300 hover:text-labbaik-blue dark:hover:text-white hover:bg-labbaik-surface transition-colors"
+          aria-label="العودة إلى الصفحة الرئيسية"
+          title="العودة إلى الصفحة الرئيسية"
+        >
+          <ArrowRight className="w-4 h-4" />
+          <span className="text-xs font-semibold select-none">الرئيسية</span>
+        </Link>
+      </div>
+
       {/* Theme Toggle Button in Top Corner */}
       <div className="absolute top-4 left-4 sm:top-6 sm:left-6 z-20">
         <button
@@ -84,11 +97,18 @@ export default function LoginPage() {
         <div className="rounded-2xl border border-labbaik-border bg-labbaik-surface p-6 sm:p-8 shadow-[0_24px_48px_-24px_rgba(15,10,30,0.35)]">
           {/* Header */}
           <div className="mb-8 text-center">
-            <img
-              src={theme === 'light' ? LogoAltImage : LogoImage}
-              alt="تيل بوت"
-              className="mx-auto mb-6 h-20 w-auto object-contain"
-            />
+            <Link
+              to="/"
+              className="mx-auto mb-6 block w-fit rounded-xl transition-opacity hover:opacity-80"
+              aria-label="الصفحة الرئيسية"
+              title="الصفحة الرئيسية"
+            >
+              <img
+                src={theme === 'light' ? LogoAltImage : LogoImage}
+                alt="تيل بوت"
+                className="h-20 w-auto object-contain"
+              />
+            </Link>
             <h1 className="text-2xl font-bold text-neutral-900 dark:text-white mb-2">أهلاً بك في تيل بوت</h1>
             <p className="text-sm text-labbaik-text-muted">
               نظام الرد والتواصل الذكي المتكامل
