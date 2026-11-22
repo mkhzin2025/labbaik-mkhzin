@@ -1012,7 +1012,10 @@ export class CustomersService implements OnModuleInit {
     return { success: true, updated: customerIds.length };
   }
 
-  /** Imports a deduplicated batch and updates matching numbers in the selected branch. */
+  /**
+   * Imports a deduplicated batch and updates matching numbers in the selected branch.
+   * The chosen tags go to newly created customers only; existing customers in the file keep their tags.
+   */
   async importCustomers(
     storeId: string,
     organizationId: string,
@@ -1075,12 +1078,12 @@ export class CustomersService implements OnModuleInit {
       }
 
       const saved = await repo.save(records, { chunk: 200 });
-      if (tags.length) {
-        const ids = saved.map((customer) => customer.id);
+      const newIds = saved.filter((customer) => !byPhone.has(customer.phoneNumber)).map((customer) => customer.id);
+      if (tags.length && newIds.length) {
         for (const tag of tags) {
           await manager.query(
             'INSERT INTO customer_tag_links ("customerId", "tagId") SELECT unnest($1::uuid[]), $2 ON CONFLICT DO NOTHING',
-            [ids, tag.id],
+            [newIds, tag.id],
           );
         }
       }
