@@ -74,7 +74,20 @@ async function main() {
           AND (("scope" = 'store' AND "storeId" = $3) OR "scope" = 'organization')`,
       [organizationId, String(args.tag).trim(), branch.id],
     );
-    if (tags.length !== 1) throw new Error(`Tag "${args.tag}" matched ${tags.length} tags for ${branch.name}`);
+    if (tags.length !== 1) {
+      const { rows: available } = await client.query(
+        `SELECT t.name, t.scope, COUNT(c.id)::int AS customers
+           FROM customer_tags t
+           LEFT JOIN customer_tag_links l ON l."tagId" = t.id
+           LEFT JOIN customers c ON c.id = l."customerId" AND c."storeId" = $2
+          WHERE t."organizationId" = $1 AND ((t.scope = 'store' AND t."storeId" = $2) OR t.scope = 'organization')
+          GROUP BY t.id ORDER BY t."createdAt" DESC`,
+        [organizationId, branch.id],
+      );
+      console.log(`Tags available to ${branch.name} (newest first; copy the name exactly):`);
+      for (const t of available) console.log(`  [${t.name}]  ${t.scope}, ${t.customers} customers in this branch`);
+      throw new Error(`Tag "${args.tag}" matched ${tags.length} tags for ${branch.name}`);
+    }
     const tag = tags[0];
 
     const { rows: tagged } = await client.query(
