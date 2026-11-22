@@ -113,7 +113,7 @@ export async function writeSummaryReportExcel(response: Response, report: Summar
   response.end();
 }
 
-/** The same table as the Excel file, on one Tael Bot–branded landscape page (more pages only for many branches). */
+/** The same table as the Excel file, on a single Tael Bot–branded landscape page. */
 export function writeSummaryReportPdf(response: Response, report: SummaryReport) {
   const date = displayDate(report.date);
   // "11-2026" flips to "2026-11" inside Arabic text; "/" keeps the month first.
@@ -125,7 +125,7 @@ export function writeSummaryReportPdf(response: Response, report: SummaryReport)
 
   response.setHeader('Content-Type', 'application/pdf');
   response.setHeader('Content-Disposition', `attachment; filename="competition-cashiers-${report.date}.pdf"`);
-  const doc = new PDFDocument({ size: 'A4', layout: 'landscape', margins: { top: 0, bottom: 0, left: 0, right: 0 }, bufferPages: true });
+  const doc = new PDFDocument({ size: 'A4', layout: 'landscape', margins: { top: 0, bottom: 0, left: 0, right: 0 } });
   doc.pipe(response);
   doc.registerFont('ArabicRegular', join(process.cwd(), 'assets', 'fonts', 'Tajarib-Regular.otf'));
   doc.registerFont('ArabicBold', join(process.cwd(), 'assets', 'fonts', 'Tajarib-Bold.otf'));
@@ -209,7 +209,7 @@ export function writeSummaryReportPdf(response: Response, report: SummaryReport)
   const headerHeight = 30;
   const totalHeight = 28;
   const noteHeight = 30;
-  const footerSpace = 40;
+  const bottom = 24;
 
   const tableHeader = (y: number) => {
     doc.roundedRect(PAGE_MARGIN, y, contentWidth, headerHeight, 8).fill(COLORS.plum);
@@ -222,36 +222,27 @@ export function writeSummaryReportPdf(response: Response, report: SummaryReport)
   };
 
   let y = tableHeader(cardY + cardHeight + 16);
-  // Fit every branch on the first page when possible; otherwise continue on table-only pages.
-  const room = height - footerSpace - noteHeight - totalHeight - 12 - y;
-  const rowHeight = Math.max(18, Math.min(26, room / Math.max(1, report.rows.length)));
+  // Always one page: the rows share whatever height is left, and the text shrinks with them.
+  const room = height - bottom - noteHeight - totalHeight - 12 - y;
+  const rowHeight = Math.min(26, room / Math.max(1, report.rows.length));
+  const rowSize = Math.max(5, Math.min(9.5, rowHeight * 0.45));
   report.rows.forEach((row, index) => {
-    if (y + rowHeight > height - footerSpace) {
-      doc.addPage();
-      band(70, 'ارقام المسابقة مع الكاشيرات', 15);
-      y = tableHeader(88);
-    }
     doc.rect(PAGE_MARGIN, y, contentWidth, rowHeight).fill(index % 2 ? COLORS.zebra : COLORS.white);
     columns.forEach((column, columnIndex) => {
       if (column.strong) doc.rect(columnX(columnIndex), y, columnWidth, rowHeight).fill(COLORS.soft);
     });
-    const textY = y + (rowHeight - 10) / 2;
-    text(row.storeName, right - branchWidth + 8, textY, branchWidth - 20, { size: 9.5, color: COLORS.ink, bold: true });
+    const textY = y + (rowHeight - rowSize * 1.05) / 2;
+    text(row.storeName, right - branchWidth + 8, textY, branchWidth - 20, { size: rowSize, color: COLORS.ink, bold: true });
     columns.forEach((column, columnIndex) => {
       const value = column.value(row);
-      text(value ? n(value) : '0', columnX(columnIndex) + 4, textY, columnWidth - 8, {
-        size: 9.5, align: 'center', bold: column.strong, color: column.strong ? COLORS.brand : value ? COLORS.ink : COLORS.lavender,
+      text(n(value), columnX(columnIndex) + 4, textY, columnWidth - 8, {
+        size: rowSize, align: 'center', bold: column.strong, color: column.strong ? COLORS.brand : value ? COLORS.ink : COLORS.lavender,
       });
     });
     doc.moveTo(PAGE_MARGIN, y + rowHeight).lineTo(right, y + rowHeight).lineWidth(0.4).stroke(COLORS.line);
     y += rowHeight;
   });
 
-  if (y + totalHeight + noteHeight + 12 > height - footerSpace) {
-    doc.addPage();
-    band(70, 'ارقام المسابقة مع الكاشيرات', 15);
-    y = 88;
-  }
   doc.rect(PAGE_MARGIN, y, contentWidth, totalHeight).fill('#F5B700');
   text('الإجمالي', right - branchWidth + 8, y + 9, branchWidth - 20, { size: 10, color: COLORS.plumDeep, bold: true });
   columns.forEach((column, index) => {
@@ -264,14 +255,5 @@ export function writeSummaryReportPdf(response: Response, report: SummaryReport)
     `ملاحظة: ${SUMMARY_NOTE}. كل عميل محسوب مرة واحدة. الأرقام الجديدة = ${tagName}، والكاشيرات القديمة = نقاط البيع السابقة وكل الداتا القديمة.`,
     PAGE_MARGIN + 14, y + 10, contentWidth - 28, { size: 8.5, color: COLORS.muted },
   );
-
-  const pages = doc.bufferedPageRange();
-  for (let index = 0; index < pages.count; index += 1) {
-    doc.switchToPage(index);
-    doc.moveTo(PAGE_MARGIN, height - 30).lineTo(right, height - 30).lineWidth(0.5).stroke(COLORS.line);
-    text(`${index + 1} / ${pages.count}`, PAGE_MARGIN, height - 22, contentWidth, { size: 7.5, color: COLORS.muted, align: 'center' });
-    text('taelbot.com', PAGE_MARGIN, height - 22, 120, { size: 7.5, color: COLORS.muted, align: 'left' });
-    text('تيل بوت | تقرير داخلي', right - 200, height - 22, 200, { size: 7.5, color: COLORS.muted });
-  }
   doc.end();
 }

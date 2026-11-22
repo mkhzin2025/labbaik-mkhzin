@@ -1,6 +1,6 @@
 import ExcelJS from 'exceljs';
 import { PassThrough } from 'stream';
-import { isAgeTagAbove, posTagMonth, writeSummaryReportExcel, SUMMARY_NOTE } from './customers-summary-report';
+import { isAgeTagAbove, posTagMonth, writeSummaryReportExcel, writeSummaryReportPdf, SUMMARY_NOTE } from './customers-summary-report';
 
 describe('summary report', () => {
   it('keeps only age tags above 35', () => {
@@ -38,5 +38,21 @@ describe('summary report', () => {
     expect(sheet.getCell('A2').value).toBe('ارقام المسابقة مع الكاشيرات تاريخ 22 / 11 / 2026');
     expect(sheet.getRow(5).values).toEqual([undefined, 'طويق', 100, 20, 120, 30, 5, 155, SUMMARY_NOTE]);
     expect(sheet.getRow(7).values).toEqual([undefined, 'الإجمالي', 150, 30, 180, 30, 6, 216, '']);
+  });
+
+  it.each([1, 9, 30])('fits %i branches on a single PDF page', async (count) => {
+    const stream = new PassThrough() as any;
+    stream.setHeader = jest.fn();
+    const chunks: Buffer[] = [];
+    stream.on('data', (chunk: Buffer) => chunks.push(chunk));
+    const finished = new Promise((resolve) => stream.on('end', resolve));
+    writeSummaryReportPdf(stream, {
+      date: '2026-11-22',
+      newTagName: 'نقاط البيع 11-2026',
+      rows: Array.from({ length: count }, (_, index) => ({ storeName: `فرع ${index + 1}`, old: 1000, fresh: 100, comp35: 50, app: 10 })),
+    });
+    await finished;
+    const pages = Buffer.concat(chunks).toString('latin1').match(/\/Type \/Page[^s]/g) || [];
+    expect(pages).toHaveLength(1);
   });
 });
