@@ -116,6 +116,18 @@ export class CustomersController {
     return this.customersService.getExportTags(organization.id, access.storeIds);
   }
 
+  /** Point-of-sale tags for the summary report's "new numbers", newest month first. */
+  @Get('export/pos-tags')
+  async posTags(@Request() req: any, @Query('storeIds') storeIds?: string) {
+    const organization = await this.organizationsService.getForUser(req.user.id, req.user.organizationId);
+    const access = await this.organizationsService.assertRequestedStoresAccessible(req.user.id, organization.id, this.csv(storeIds));
+    if (!access.storeIds.length) return [];
+    const tags = await this.customersService.getPosTags(organization.id, access.storeIds);
+    const seen = new Set<string>();
+    // One entry per name: branch copies of the same month are the same tag in the report.
+    return tags.filter((tag) => !seen.has(tag.name.trim()) && seen.add(tag.name.trim())).map((tag) => ({ id: tag.id, name: tag.name.trim() }));
+  }
+
   @Get('export/statistics-sources')
   async statisticsSources(@Request() req: any, @Query('storeIds') storeIds?: string) {
     const organization = await this.organizationsService.getForUser(req.user.id, req.user.organizationId);
@@ -128,15 +140,17 @@ export class CustomersController {
     @Request() req: any,
     @Res() response: Response,
     @Query('format') format?: 'xlsx' | 'pdf',
-    @Query('exportType') exportType?: 'customers' | 'statistics',
+    @Query('exportType') exportType?: 'customers' | 'statistics' | 'summary',
     @Query('storeIds') storeIds?: string,
     @Query('tagId') tagId?: string,
     @Query('sources') sources?: string,
     @Query('baselineDate') baselineDate?: string,
     @Query('branchDetails') branchDetails?: string,
+    @Query('newTagId') newTagId?: string,
   ) {
     if (format !== 'xlsx' && format !== 'pdf') throw new BadRequestException('Export format must be xlsx or pdf');
-    if (exportType && exportType !== 'customers' && exportType !== 'statistics') throw new BadRequestException('Export type must be customers or statistics');
+    if (exportType && !['customers', 'statistics', 'summary'].includes(exportType)) throw new BadRequestException('Export type must be customers, statistics or summary');
+    if (exportType === 'summary' && format !== 'xlsx') throw new BadRequestException('The summary report is Excel only');
     const organization = await this.organizationsService.getForUser(req.user.id, req.user.organizationId);
     const access = await this.organizationsService.assertRequestedStoresAccessible(req.user.id, organization.id, this.csv(storeIds));
     if (!access.storeIds.length) throw new BadRequestException('Choose at least one branch');
@@ -149,6 +163,7 @@ export class CustomersController {
       sources: this.csv(sources),
       baselineDate: baselineDate || undefined,
       branchDetails: branchDetails === 'true',
+      newTagId: newTagId || undefined,
     });
   }
 

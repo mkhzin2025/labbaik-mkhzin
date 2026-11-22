@@ -2,6 +2,7 @@ import { normalizePhoneNumber } from '../../common/utils/phone.util';
 import { drawPdfText } from '../../common/utils/pdf-text.util';
 import { SourceStatisticsReport, SourceStatisticsRow, StatisticsSource, writeSourceStatisticsPdf } from './customers-statistics-pdf';
 import { AGE_TAG_PREFIX, COMPETITION_CATEGORY, COMPETITION_ONLINE_CATEGORY } from './competition-sync.plan';
+import { APP_CATEGORY, POS_TAG_PREFIX, isAgeTagAbove, posTagMonth, writeSummaryReportExcel } from './customers-summary-report';
 import { BadRequestException, Injectable, Logger, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Brackets, EntityManager, In, Repository, SelectQueryBuilder } from 'typeorm';
@@ -106,7 +107,9 @@ type CustomerExportOptions = {
   storeIds: string[];
   tagId?: string;
   format: 'xlsx' | 'pdf';
-  exportType: 'customers' | 'statistics';
+  exportType: 'customers' | 'statistics' | 'summary';
+  /** Summary report: the point-of-sale tag that counts as "new numbers" (default: the newest month). */
+  newTagId?: string;
   /** Statistics PDF columns, in order: "category:<id>" / "tag:<id>". */
   sources?: string[];
   /** Statistics PDF: customers created before this day (YYYY-MM-DD, Riyadh) count as "stored before". */
@@ -323,6 +326,7 @@ export class CustomersService implements OnModuleInit {
   }
 
   async exportCustomers(response: Response, options: CustomerExportOptions) {
+    if (options.exportType === 'summary') return writeSummaryReportExcel(response, await this.summaryReport(options));
     if (options.exportType === 'statistics') {
       if (options.format === 'pdf') return writeSourceStatisticsPdf(response, await this.sourceStatisticsReport(options));
       const rows = await this.exportStatistics(options);
@@ -334,6 +338,85 @@ export class CustomersService implements OnModuleInit {
     }
     if (options.format === 'xlsx') return this.writeExcelExport(response, options, total);
     return this.writePdfExport(response, options, total);
+  }
+
+  /** Point-of-sale tags visible to these branches, newest month first (for the summary report's "new numbers"). */
+  async getPosTags(organizationId: string, storeIds: string[]) {
+    const tags = await this.tagRepository.createQueryBuilder('tag')
+      .where('tag.organizationId = :organizationId', { organizationId })
+      .andWhere('tag.isActive = true')
+      .andWhere('TRIM(tag.name) LIKE :prefix', { prefix: `${POS_TAG_PREFIX}%` })
+      .andWhere(new Brackets((qb) => qb
+        .where('tag.scope = :organizationScope', { organizationScope: CustomerTaxonomyScope.ORGANIZATION })
+        .orWhere('(tag.scope = :storeScope AND tag.storeId IN (:...storeIds))', { storeScope: CustomerTaxonomyScope.STORE, storeIds })))
+      .getMany();
+    return tags.sort((a, b) => posTagMonth(b.name) - posTagMonth(a.name) || b.createdAt.getTime() - a.createdAt.getTime());
+  }
+
+  /** Per-branch counts for the compact competition/cashiers report; each customer lands in one column only. */
+  private async summaryReport(options: CustomerExportOptions) {
+    const stores: { id: string; name: string }[] = await this.customerRepository.query(
+      'SELECT id, name FROM stores WHERE "organizationId" = $1 AND id = ANY($2::uuid[]) ORDER BY name ASC',
+      [options.organizationId, options.storeIds],
+    );
+    // The main branch only holds customers waiting to be distributed; it is not a sales branch.
+    const branches = stores.length > 1 ? stores.filter((store) => !store.name.includes('رئيسي')) : stores;
+    const storeIds = branches.map((store) => store.id);
+    if (!storeIds.length) throw new BadRequestException('Choose at least one branch');
+
+    const posTags = await this.getPosTags(options.organizationId, storeIds);
+    const newTag = options.newTagId ? posTags.find((tag) => tag.id === options.newTagId) : posTags[0];
+    if (!newTag) throw new BadRequestException(`لا يوجد تاق «${POS_TAG_PREFIX}» لهذه الفروع لاعتباره الأرقام الجديدة.`);
+    // Branch copies of the same month count as the same tag.
+    const newIds = posTags.filter((tag) => tag.name.trim() === newTag.name.trim()).map((tag) => tag.id);
+    const oldPosIds = posTags.filter((tag) => !newIds.includes(tag.id)).map((tag) => tag.id);
+
+    const categories: { id: string; name: string }[] = await this.customerRepository.query(
+      `SELECT id, TRIM(name) AS name FROM customer_categories
+        WHERE "organizationId" = $1 AND TRIM(name) = ANY($2::text[])`,
+      [options.organizationId, [COMPETITION_CATEGORY, COMPETITION_ONLINE_CATEGORY, APP_CATEGORY]],
+    );
+    const competitionIds = categories.filter((item) => item.name !== APP_CATEGORY).map((item) => item.id);
+    const appIds = categories.filter((item) => item.name === APP_CATEGORY).map((item) => item.id);
+    const ageTags: { id: string; name: string }[] = await this.customerRepository.query(
+      'SELECT id, TRIM(name) AS name FROM customer_tags WHERE "organizationId" = $1 AND TRIM(name) LIKE $2',
+      [options.organizationId, `${AGE_TAG_PREFIX.trim()}%`],
+    );
+    const olderIds = ageTags.filter((tag) => isAgeTagAbove(tag.name)).map((tag) => tag.id);
+
+    const counts: { storeId: string; fresh: number; old: number; comp35: number; app: number }[] = await this.customerRepository.query(
+      `WITH flags AS (
+         SELECT c."storeId",
+                EXISTS (SELECT 1 FROM customer_tag_links l WHERE l."customerId" = c.id AND l."tagId" = ANY($2::uuid[])) AS fresh,
+                EXISTS (SELECT 1 FROM customer_tag_links l WHERE l."customerId" = c.id AND l."tagId" = ANY($3::uuid[])) AS old_pos,
+                EXISTS (SELECT 1 FROM customer_category_links l WHERE l."customerId" = c.id AND l."categoryId" = ANY($4::uuid[])) AS comp,
+                EXISTS (SELECT 1 FROM customer_tag_links l WHERE l."customerId" = c.id AND l."tagId" = ANY($5::uuid[])) AS older,
+                EXISTS (SELECT 1 FROM customer_category_links l WHERE l."customerId" = c.id AND l."categoryId" = ANY($6::uuid[])) AS app
+           FROM customers c WHERE c."storeId" = ANY($1::uuid[])
+       )
+       SELECT "storeId",
+              COUNT(*) FILTER (WHERE fresh)::int AS fresh,
+              COUNT(*) FILTER (WHERE NOT fresh AND (old_pos OR (NOT comp AND NOT app)))::int AS old,
+              COUNT(*) FILTER (WHERE NOT fresh AND NOT old_pos AND comp AND older)::int AS comp35,
+              COUNT(*) FILTER (WHERE NOT fresh AND NOT old_pos AND NOT (comp AND older) AND app)::int AS app
+         FROM flags GROUP BY "storeId"`,
+      [storeIds, newIds, oldPosIds, competitionIds, olderIds, appIds],
+    );
+    const byStore = new Map(counts.map((row) => [String(row.storeId), row]));
+    return {
+      date: riyadhDate(new Date()),
+      newTagName: newTag.name.trim(),
+      rows: branches.map((store) => {
+        const row = byStore.get(store.id);
+        return {
+          storeName: store.name,
+          fresh: Number(row?.fresh || 0),
+          old: Number(row?.old || 0),
+          comp35: Number(row?.comp35 || 0),
+          app: Number(row?.app || 0),
+        };
+      }),
+    };
   }
 
   private async sourceStatisticsReport(options: CustomerExportOptions): Promise<SourceStatisticsReport> {
