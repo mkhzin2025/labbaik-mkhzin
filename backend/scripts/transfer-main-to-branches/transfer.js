@@ -352,6 +352,9 @@ async function main() {
               merged.marketingOptOut, merged.marketingOptOutAt, merged.notes]);
           for (const c of sourceLinks.categories.filter(fits)) await client.query('INSERT INTO customer_category_links ("customerId", "categoryId") VALUES ($1, $2) ON CONFLICT DO NOTHING', [target.id, c.id]);
           for (const t of sourceLinks.tags.filter(fits)) await client.query('INSERT INTO customer_tag_links ("customerId", "tagId") VALUES ($1, $2) ON CONFLICT DO NOTHING', [target.id, t.id]);
+          // The live foreign keys do not all cascade; the source's links were copied above and are in the journal.
+          await client.query('DELETE FROM customer_category_links WHERE "customerId" = $1', [sourceId]);
+          await client.query('DELETE FROM customer_tag_links WHERE "customerId" = $1', [sourceId]);
           await client.query('DELETE FROM customers WHERE id = $1', [sourceId]);
           keptId = target.id;
         }
