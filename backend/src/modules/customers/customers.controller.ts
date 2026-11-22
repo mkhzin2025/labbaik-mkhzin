@@ -150,7 +150,6 @@ export class CustomersController {
   ) {
     if (format !== 'xlsx' && format !== 'pdf') throw new BadRequestException('Export format must be xlsx or pdf');
     if (exportType && !['customers', 'statistics', 'summary'].includes(exportType)) throw new BadRequestException('Export type must be customers, statistics or summary');
-    if (exportType === 'summary' && format !== 'xlsx') throw new BadRequestException('The summary report is Excel only');
     const organization = await this.organizationsService.getForUser(req.user.id, req.user.organizationId);
     const access = await this.organizationsService.assertRequestedStoresAccessible(req.user.id, organization.id, this.csv(storeIds));
     if (!access.storeIds.length) throw new BadRequestException('Choose at least one branch');

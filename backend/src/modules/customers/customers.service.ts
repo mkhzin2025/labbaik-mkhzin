@@ -2,7 +2,7 @@ import { normalizePhoneNumber } from '../../common/utils/phone.util';
 import { drawPdfText } from '../../common/utils/pdf-text.util';
 import { SourceStatisticsReport, SourceStatisticsRow, StatisticsSource, writeSourceStatisticsPdf } from './customers-statistics-pdf';
 import { AGE_TAG_PREFIX, COMPETITION_CATEGORY, COMPETITION_ONLINE_CATEGORY } from './competition-sync.plan';
-import { APP_CATEGORY, POS_TAG_PREFIX, isAgeTagAbove, posTagMonth, writeSummaryReportExcel } from './customers-summary-report';
+import { APP_CATEGORY, POS_TAG_PREFIX, isAgeTagAbove, posTagMonth, writeSummaryReportExcel, writeSummaryReportPdf } from './customers-summary-report';
 import { BadRequestException, Injectable, Logger, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Brackets, EntityManager, In, Repository, SelectQueryBuilder } from 'typeorm';
@@ -326,7 +326,10 @@ export class CustomersService implements OnModuleInit {
   }
 
   async exportCustomers(response: Response, options: CustomerExportOptions) {
-    if (options.exportType === 'summary') return writeSummaryReportExcel(response, await this.summaryReport(options));
+    if (options.exportType === 'summary') {
+      const report = await this.summaryReport(options);
+      return options.format === 'pdf' ? writeSummaryReportPdf(response, report) : writeSummaryReportExcel(response, report);
+    }
     if (options.exportType === 'statistics') {
       if (options.format === 'pdf') return writeSourceStatisticsPdf(response, await this.sourceStatisticsReport(options));
       const rows = await this.exportStatistics(options);

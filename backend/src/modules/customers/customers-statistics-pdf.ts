@@ -42,7 +42,7 @@ export type SourceStatisticsReport = {
   branchDetails?: boolean;
 };
 
-const COLORS = {
+export const COLORS = {
   page: '#FBF9FD',
   ink: '#241B2E',
   plum: '#38204A',
@@ -63,15 +63,15 @@ const GLYPH_VIEWBOX = { x: 236.8, y: 347.55, size: 1602 };
 const GLYPH_PATH = 'M741.99 622.3l710.58 0c201.36,0 366.1,164.91 366.1,366.47l0 327.68c0,114.99 -64.35,215.66 -158.78,267.73l-552.03 319.03c-3.88,2.24 -8.32,2.24 -12.2,0 -3.88,-2.24 -6.1,-6.09 -6.1,-10.58l0 -251.32c0,-4.49 2.22,-8.34 6.1,-10.58l425.01 -245.62c47.38,-31.87 78.72,-86 78.72,-147.12l0 -228.45c0,-97.42 -79.63,-177.12 -176.95,-177.12l-683.11 0c-6.71,0 -12.2,5.5 -12.2,12.22l0 393.36c0,97.42 79.63,177.13 176.95,177.13l173.27 0c6.72,0 12.2,5.49 12.2,12.22l0 182.3c0,6.73 -5.48,12.22 -12.2,12.22l-201.14 0c-201.36,0 -366.1,-164.91 -366.1,-366.47l0 -851.59c0,-6.73 5.48,-12.22 12.2,-12.22l195.25 0c6.72,0 12.2,5.49 12.2,12.22l0 206.31c0,6.73 5.48,12.22 12.2,12.22z';
 const GLYPH_DOTS = [[1217.53, 1015.14], [892, 1015.14], [256.95, 618.74]];
 
-const PAGE_MARGIN = 36;
+export const PAGE_MARGIN = 36;
 const BASELINE_COLOR = COLORS.plum;
 
 const format = (value: number) => value.toLocaleString('en');
 const percent = (value: number, total: number) => (total ? `${Math.round((value / total) * 100)}%` : '0%');
 // Inside Arabic text the bidi algorithm reverses "2026-10-22"; "/" keeps the digits in reading order.
-const displayDate = (value: string) => value.replace(/-/g, '/');
+export const displayDate = (value: string) => value.replace(/-/g, '/');
 
-function drawGlyph(doc: PDFKit.PDFDocument, x: number, y: number, size: number, color: string) {
+export function drawGlyph(doc: PDFKit.PDFDocument, x: number, y: number, size: number, color: string) {
   doc.save();
   doc.translate(x, y).scale(size / GLYPH_VIEWBOX.size).translate(-GLYPH_VIEWBOX.x, -GLYPH_VIEWBOX.y);
   doc.path(GLYPH_PATH).fill(color, 'even-odd');

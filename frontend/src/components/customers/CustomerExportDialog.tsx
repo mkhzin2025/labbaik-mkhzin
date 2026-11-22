@@ -94,10 +94,9 @@ export default function CustomerExportDialog({ branches, initialStoreId, onClose
   const sourceReport = exportType === 'statistics' && format === 'pdf';
   const summaryReport = exportType === 'summary';
 
-  // The compact report is Excel only; "new numbers" defaults to the newest point-of-sale month.
+  // "New numbers" defaults to the newest point-of-sale month.
   useEffect(() => {
     if (!summaryReport) return;
-    setFormat('xlsx');
     if (!effectiveStoreIds.length) { setPosTags([]); return; }
     void api.get<PosTag[]>('/customers/export/pos-tags', { params: { storeIds: effectiveStoreIds.join(',') } })
       .then(({ data }) => {
@@ -151,7 +150,7 @@ export default function CustomerExportDialog({ branches, initialStoreId, onClose
     try {
       const response = await api.get('/customers/export', {
         params: summaryReport
-          ? { format: 'xlsx', exportType, storeIds: effectiveStoreIds.join(','), newTagId: newTagId || undefined }
+          ? { format, exportType, storeIds: effectiveStoreIds.join(','), newTagId: newTagId || undefined }
           : sourceReport
           ? { format, exportType, storeIds: effectiveStoreIds.join(','), sources: activeSources.join(',') || undefined, baselineDate, branchDetails: branchDetails || undefined }
           : { format, exportType, storeIds: effectiveStoreIds.join(','), tagId: tagId || undefined },
@@ -202,7 +201,7 @@ export default function CustomerExportDialog({ branches, initialStoreId, onClose
               </button>
               <button type="button" role="radio" aria-checked={exportType === 'summary'} disabled={busy} onClick={() => { setExportType('summary'); setError(''); setDownloaded(false); }} className={`flex items-start gap-3 rounded-xl border p-4 text-right transition-colors focus:outline-none focus:ring-2 focus:ring-labbaik-blue/30 sm:col-span-2 ${exportType === 'summary' ? 'border-labbaik-blue bg-labbaik-blue/10' : 'border-labbaik-border hover:border-labbaik-blue/40'}`}>
                 <Table2 size={23} className="mt-0.5 shrink-0 text-labbaik-blue" />
-                <span><b className="block text-sm text-neutral-900 dark:text-white">تقرير المسابقة مع الكاشيرات</b><span className="mt-1 block text-xs leading-5 text-labbaik-text-muted">جدول مختصر لكل فرع: الكاشيرات القديمة والجديدة، المسابقة فوق 35، التطبيق، والإجمالي. Excel.</span></span>
+                <span><b className="block text-sm text-neutral-900 dark:text-white">تقرير المسابقة مع الكاشيرات</b><span className="mt-1 block text-xs leading-5 text-labbaik-text-muted">جدول مختصر لكل فرع: الكاشيرات القديمة والجديدة، المسابقة فوق 35، التطبيق، والإجمالي. Excel أو PDF.</span></span>
               </button>
             </div>
           </fieldset>
@@ -302,7 +301,7 @@ export default function CustomerExportDialog({ branches, initialStoreId, onClose
             </div>
           </label>}
 
-          {!summaryReport && <fieldset className="space-y-3">
+          <fieldset className="space-y-3">
             <legend className="text-sm font-black text-neutral-900 dark:text-white">صيغة التصدير</legend>
             <div className="grid gap-3 sm:grid-cols-2">
               <button type="button" role="radio" aria-checked={format === 'xlsx'} disabled={busy} onClick={() => { setFormat('xlsx'); setError(''); }} className={`flex items-start gap-3 rounded-xl border p-4 text-right transition-colors focus:outline-none focus:ring-2 focus:ring-labbaik-blue/30 ${format === 'xlsx' ? 'border-emerald-500 bg-emerald-50/70 dark:bg-emerald-950/20' : 'border-labbaik-border hover:border-emerald-500/50'}`}>
@@ -312,7 +311,7 @@ export default function CustomerExportDialog({ branches, initialStoreId, onClose
                 <FileText size={23} className="mt-0.5 shrink-0 text-red-500" /><span><b className="block text-sm text-neutral-900 dark:text-white">PDF</b><span className="mt-1 block text-xs leading-5 text-labbaik-text-muted">{exportType === 'customers' ? `تقرير جاهز للطباعة حتى ${PDF_LIMIT.toLocaleString('en')} عميل.` : 'ملخص إحصائي منسق وجاهز للطباعة.'}</span></span>
               </button>
             </div>
-          </fieldset>}
+          </fieldset>
 
           {format === 'pdf' && exportType === 'customers' && <p className="rounded-xl bg-amber-50 px-4 py-3 text-xs font-bold leading-5 text-amber-800 dark:bg-amber-950/20 dark:text-amber-300">إذا تجاوزت النتيجة {PDF_LIMIT.toLocaleString('en')} عميل، اختر Excel أو ضيّق الفروع والتاق.</p>}
           {downloaded && <p role="status" className="flex items-center gap-2 rounded-xl bg-emerald-50 px-4 py-3 text-sm font-black text-emerald-700 dark:bg-emerald-950/20 dark:text-emerald-300"><Check size={17} /> تم إنشاء الملف وبدء تنزيله.</p>}
@@ -321,7 +320,7 @@ export default function CustomerExportDialog({ branches, initialStoreId, onClose
 
         <footer className="sticky bottom-0 flex flex-col-reverse gap-2 border-t border-labbaik-border bg-labbaik-surface px-5 py-4 sm:flex-row sm:justify-end sm:px-6">
           <button type="button" onClick={onClose} disabled={busy} className="h-10 rounded-lg border border-labbaik-border px-5 text-sm font-black text-neutral-700 transition-colors hover:bg-labbaik-page focus:outline-none focus:ring-2 focus:ring-labbaik-blue/30 disabled:opacity-40 dark:text-neutral-200">إغلاق</button>
-          <button type="button" onClick={() => void exportCustomers()} disabled={busy || optionsBusy || !effectiveStoreIds.length || (summaryReport && !newTagId)} className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-labbaik-blue px-5 text-sm font-black text-white transition-colors hover:bg-labbaik-blue/90 focus:outline-none focus:ring-2 focus:ring-labbaik-blue/30 disabled:opacity-40">{busy ? <Loader2 size={17} className="animate-spin" /> : <Download size={17} />}{busy ? 'جاري تجهيز الملف...' : summaryReport ? 'تصدير التقرير بصيغة Excel' : `تصدير ${exportType === 'customers' ? 'الأرقام' : 'الإحصائيات'} بصيغة ${format === 'xlsx' ? 'Excel' : 'PDF'}`}</button>
+          <button type="button" onClick={() => void exportCustomers()} disabled={busy || optionsBusy || !effectiveStoreIds.length || (summaryReport && !newTagId)} className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-labbaik-blue px-5 text-sm font-black text-white transition-colors hover:bg-labbaik-blue/90 focus:outline-none focus:ring-2 focus:ring-labbaik-blue/30 disabled:opacity-40">{busy ? <Loader2 size={17} className="animate-spin" /> : <Download size={17} />}{busy ? 'جاري تجهيز الملف...' : summaryReport ? `تصدير التقرير بصيغة ${format === 'xlsx' ? 'Excel' : 'PDF'}` : `تصدير ${exportType === 'customers' ? 'الأرقام' : 'الإحصائيات'} بصيغة ${format === 'xlsx' ? 'Excel' : 'PDF'}`}</button>
         </footer>
       </section>
     </div>

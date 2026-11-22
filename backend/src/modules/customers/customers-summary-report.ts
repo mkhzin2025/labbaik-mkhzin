@@ -1,5 +1,9 @@
+import { join } from 'node:path';
 import type { Response } from 'express';
 import ExcelJS from 'exceljs';
+import PDFDocument from 'pdfkit';
+import { drawPdfText } from '../../common/utils/pdf-text.util';
+import { COLORS, PAGE_MARGIN, displayDate, drawGlyph } from './customers-statistics-pdf';
 
 /**
  * Compact "competition with cashiers" report: one row per branch, every customer counted once, by priority:
@@ -107,4 +111,167 @@ export async function writeSummaryReportExcel(response: Response, report: Summar
   response.setHeader('Content-Disposition', `attachment; filename="competition-cashiers-${report.date}.xlsx"`);
   await workbook.xlsx.write(response);
   response.end();
+}
+
+/** The same table as the Excel file, on one Tael Bot–branded landscape page (more pages only for many branches). */
+export function writeSummaryReportPdf(response: Response, report: SummaryReport) {
+  const date = displayDate(report.date);
+  // "11-2026" flips to "2026-11" inside Arabic text; "/" keeps the month first.
+  const tagName = report.newTagName.replace(/(\d+)-(\d+)/g, '$1/$2');
+  const sum = (key: keyof Omit<SummaryRow, 'storeName'>) => report.rows.reduce((total, row) => total + row[key], 0);
+  const totals = { old: sum('old'), fresh: sum('fresh'), comp35: sum('comp35'), app: sum('app') };
+  const cashiers = totals.old + totals.fresh;
+  const grand = cashiers + totals.comp35 + totals.app;
+
+  response.setHeader('Content-Type', 'application/pdf');
+  response.setHeader('Content-Disposition', `attachment; filename="competition-cashiers-${report.date}.pdf"`);
+  const doc = new PDFDocument({ size: 'A4', layout: 'landscape', margins: { top: 0, bottom: 0, left: 0, right: 0 }, bufferPages: true });
+  doc.pipe(response);
+  doc.registerFont('ArabicRegular', join(process.cwd(), 'assets', 'fonts', 'Tajarib-Regular.otf'));
+  doc.registerFont('ArabicBold', join(process.cwd(), 'assets', 'fonts', 'Tajarib-Bold.otf'));
+
+  const width = doc.page.width;
+  const height = doc.page.height;
+  const right = width - PAGE_MARGIN;
+  const contentWidth = width - PAGE_MARGIN * 2;
+  const n = (value: number) => value.toLocaleString('en');
+  const text = (value: string, x: number, y: number, boxWidth: number, options: { size: number; color: string; bold?: boolean; align?: 'left' | 'right' | 'center' }) => {
+    doc.font(options.bold ? 'ArabicBold' : 'ArabicRegular').fillColor(options.color);
+    let size = options.size;
+    while (size > 6 && doc.fontSize(size).widthOfString(value, { features: [] }) > boxWidth) size -= 0.5;
+    drawPdfText(doc.fontSize(size), value, x, y + (options.size - size) * 0.4, { width: boxWidth, align: options.align, ellipsis: true });
+  };
+  const chip = (x: number, y: number, chipWidth: number, label: string, value: string) => {
+    doc.save().fillOpacity(0.12).roundedRect(x, y, chipWidth, 38, 9).fill(COLORS.white).restore();
+    text(label, x + 10, y + 7, chipWidth - 20, { size: 7, color: COLORS.lavender });
+    text(value, x + 10, y + 19, chipWidth - 20, { size: 10, color: COLORS.white, bold: true });
+  };
+  const band = (bandHeight: number, title: string, titleSize: number) => {
+    doc.rect(0, 0, width, height).fill(COLORS.page);
+    const gradient = doc.linearGradient(0, 0, width, bandHeight);
+    gradient.stop(0, COLORS.brand).stop(1, COLORS.plumDeep);
+    doc.rect(0, 0, width, bandHeight).fill(gradient);
+    doc.save().fillOpacity(0.07);
+    doc.circle(70, bandHeight + 10, 95).fill(COLORS.white);
+    doc.circle(210, -30, 70).fill(COLORS.white);
+    doc.restore();
+    const glyph = bandHeight > 90 ? 40 : 32;
+    drawGlyph(doc, right - glyph, 20, glyph, COLORS.white);
+    text('تيل بوت', right - glyph - 150, 20 + glyph * 0.08, 140, { size: glyph * 0.4, color: COLORS.white, bold: true });
+    text('Tael Bot', right - glyph - 150, 20 + glyph * 0.58, 140, { size: glyph * 0.2, color: COLORS.lavender });
+    text(title, right - 520, bandHeight > 90 ? 72 : 26, bandHeight > 90 ? 520 : 300, { size: titleSize, color: COLORS.white, bold: true });
+    chip(PAGE_MARGIN, 20, 104, 'تاريخ التقرير', date);
+    chip(PAGE_MARGIN + 112, 20, 150, 'الأرقام الجديدة', tagName);
+    if (bandHeight > 90) chip(PAGE_MARGIN + 270, 20, 70, 'الفروع', n(report.rows.length));
+  };
+
+  // ---------- Header and summary cards ----------
+  band(112, 'ارقام المسابقة مع الكاشيرات', 20);
+  const cards = [
+    { label: 'الإجمالي', value: grand, note: 'كل عميل مرة واحدة', color: COLORS.plum, hero: true },
+    { label: 'ارقام الكاشيرات القديمة', value: totals.old, note: 'نقاط البيع السابقة والداتا القديمة', color: COLORS.plum },
+    { label: 'الأرقام الجديدة', value: totals.fresh, note: tagName, color: COLORS.teal },
+    { label: 'إجمالي الكاشيرات', value: cashiers, note: 'القديمة + الجديدة', color: COLORS.brand },
+    { label: `المسابقة فوق ${SUMMARY_AGE_LIMIT}`, value: totals.comp35, note: 'المسابقة والمسابقة أونلاين', color: '#D97706' },
+    { label: 'التطبيق', value: totals.app, note: 'عملاء التطبيق', color: '#2563EB' },
+  ];
+  const gap = 10;
+  const cardWidth = (contentWidth - gap * (cards.length - 1)) / cards.length;
+  const cardY = 126;
+  const cardHeight = 66;
+  cards.forEach((card, index) => {
+    const x = right - cardWidth - index * (cardWidth + gap);
+    if (card.hero) {
+      const gradient = doc.linearGradient(x, cardY, x + cardWidth, cardY + cardHeight);
+      gradient.stop(0, COLORS.brand).stop(1, COLORS.plum);
+      doc.roundedRect(x, cardY, cardWidth, cardHeight, 11).fill(gradient);
+    } else {
+      doc.roundedRect(x, cardY, cardWidth, cardHeight, 11).lineWidth(0.8).fillAndStroke(COLORS.white, COLORS.line);
+      doc.roundedRect(x + cardWidth - 5, cardY + 14, 3, cardHeight - 28, 1.5).fill(card.color);
+    }
+    text(card.label, x + 10, cardY + 10, cardWidth - 22, { size: 7.5, color: card.hero ? COLORS.lavender : COLORS.muted, bold: true });
+    text(n(card.value), x + 10, cardY + 25, cardWidth - 22, { size: 17, color: card.hero ? COLORS.white : COLORS.ink, bold: true });
+    text(card.note, x + 10, cardY + 48, cardWidth - 22, { size: 6.5, color: card.hero ? COLORS.lavender : COLORS.muted });
+  });
+
+  // ---------- Branch table ----------
+  const columns: { title: string; value: (row: Omit<SummaryRow, 'storeName'>) => number; strong?: boolean }[] = [
+    { title: 'ارقام الكاشيرات القديمة', value: (row) => row.old },
+    { title: 'الأرقام الجديدة', value: (row) => row.fresh },
+    { title: 'الإجمالي', value: (row) => row.old + row.fresh, strong: true },
+    { title: `ارقام المسابقة فوق ${SUMMARY_AGE_LIMIT}`, value: (row) => row.comp35 },
+    { title: 'التطبيق', value: (row) => row.app },
+    { title: 'الإجمالي', value: (row) => row.old + row.fresh + row.comp35 + row.app, strong: true },
+  ];
+  const branchWidth = 150;
+  const columnWidth = (contentWidth - branchWidth) / columns.length;
+  const columnX = (index: number) => right - branchWidth - (index + 1) * columnWidth;
+  const headerHeight = 30;
+  const totalHeight = 28;
+  const noteHeight = 30;
+  const footerSpace = 40;
+
+  const tableHeader = (y: number) => {
+    doc.roundedRect(PAGE_MARGIN, y, contentWidth, headerHeight, 8).fill(COLORS.plum);
+    text('الفروع', right - branchWidth + 8, y + 10, branchWidth - 20, { size: 9.5, color: COLORS.white, bold: true });
+    columns.forEach((column, index) => {
+      if (column.strong) doc.save().fillOpacity(0.16).rect(columnX(index), y, columnWidth, headerHeight).fill(COLORS.white).restore();
+      text(column.title, columnX(index) + 4, y + 10, columnWidth - 8, { size: 8.5, color: COLORS.white, bold: true, align: 'center' });
+    });
+    return y + headerHeight;
+  };
+
+  let y = tableHeader(cardY + cardHeight + 16);
+  // Fit every branch on the first page when possible; otherwise continue on table-only pages.
+  const room = height - footerSpace - noteHeight - totalHeight - 12 - y;
+  const rowHeight = Math.max(18, Math.min(26, room / Math.max(1, report.rows.length)));
+  report.rows.forEach((row, index) => {
+    if (y + rowHeight > height - footerSpace) {
+      doc.addPage();
+      band(70, 'ارقام المسابقة مع الكاشيرات', 15);
+      y = tableHeader(88);
+    }
+    doc.rect(PAGE_MARGIN, y, contentWidth, rowHeight).fill(index % 2 ? COLORS.zebra : COLORS.white);
+    columns.forEach((column, columnIndex) => {
+      if (column.strong) doc.rect(columnX(columnIndex), y, columnWidth, rowHeight).fill(COLORS.soft);
+    });
+    const textY = y + (rowHeight - 10) / 2;
+    text(row.storeName, right - branchWidth + 8, textY, branchWidth - 20, { size: 9.5, color: COLORS.ink, bold: true });
+    columns.forEach((column, columnIndex) => {
+      const value = column.value(row);
+      text(value ? n(value) : '0', columnX(columnIndex) + 4, textY, columnWidth - 8, {
+        size: 9.5, align: 'center', bold: column.strong, color: column.strong ? COLORS.brand : value ? COLORS.ink : COLORS.lavender,
+      });
+    });
+    doc.moveTo(PAGE_MARGIN, y + rowHeight).lineTo(right, y + rowHeight).lineWidth(0.4).stroke(COLORS.line);
+    y += rowHeight;
+  });
+
+  if (y + totalHeight + noteHeight + 12 > height - footerSpace) {
+    doc.addPage();
+    band(70, 'ارقام المسابقة مع الكاشيرات', 15);
+    y = 88;
+  }
+  doc.rect(PAGE_MARGIN, y, contentWidth, totalHeight).fill('#F5B700');
+  text('الإجمالي', right - branchWidth + 8, y + 9, branchWidth - 20, { size: 10, color: COLORS.plumDeep, bold: true });
+  columns.forEach((column, index) => {
+    text(n(column.value(totals)), columnX(index) + 4, y + 9, columnWidth - 8, { size: 10, color: COLORS.plumDeep, bold: true, align: 'center' });
+  });
+  y += totalHeight + 12;
+
+  doc.roundedRect(PAGE_MARGIN, y, contentWidth, noteHeight, 8).fill(COLORS.soft);
+  text(
+    `ملاحظة: ${SUMMARY_NOTE}. كل عميل محسوب مرة واحدة. الأرقام الجديدة = ${tagName}، والكاشيرات القديمة = نقاط البيع السابقة وكل الداتا القديمة.`,
+    PAGE_MARGIN + 14, y + 10, contentWidth - 28, { size: 8.5, color: COLORS.muted },
+  );
+
+  const pages = doc.bufferedPageRange();
+  for (let index = 0; index < pages.count; index += 1) {
+    doc.switchToPage(index);
+    doc.moveTo(PAGE_MARGIN, height - 30).lineTo(right, height - 30).lineWidth(0.5).stroke(COLORS.line);
+    text(`${index + 1} / ${pages.count}`, PAGE_MARGIN, height - 22, contentWidth, { size: 7.5, color: COLORS.muted, align: 'center' });
+    text('taelbot.com', PAGE_MARGIN, height - 22, 120, { size: 7.5, color: COLORS.muted, align: 'left' });
+    text('تيل بوت | تقرير داخلي', right - 200, height - 22, 200, { size: 7.5, color: COLORS.muted });
+  }
+  doc.end();
 }
