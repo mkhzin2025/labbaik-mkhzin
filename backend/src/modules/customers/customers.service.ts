@@ -1317,6 +1317,47 @@ export class CustomersService implements OnModuleInit {
     return { customer, fromStoreId, removedCustomerId: existing ? source.id : null };
   }
 
+  /** Every customer of a branch with just what is needed to match them to conversations. */
+  async contactsInStore(storeId: string) {
+    return this.customerRepository.find({
+      where: { storeId },
+      select: ['id', 'fullName', 'phoneNumber', 'whatsappId'],
+    });
+  }
+
+  /** `${storeId}:${phone}` for each of these numbers that already has a record in one of these branches. */
+  async existingPhonesInStores(storeIds: string[], phones: string[]) {
+    if (!storeIds.length || !phones.length) return new Set<string>();
+    const rows: { storeId: string; phone: string }[] = await this.customerRepository.query(
+      `SELECT c."storeId", REGEXP_REPLACE(COALESCE(c."phoneNumber", c."whatsappId", ''), '[^0-9]', '', 'g') AS phone
+         FROM customers c
+        WHERE c."storeId" = ANY($1::uuid[])
+          AND REGEXP_REPLACE(COALESCE(c."phoneNumber", c."whatsappId", ''), '[^0-9]', '', 'g') = ANY($2::text[])`,
+      [storeIds, phones],
+    );
+    return new Set(rows.map((row) => `${row.storeId}:${row.phone}`));
+  }
+
+  /** An active organization-wide category, the only kind that stays valid when customers change branch. */
+  async findOrganizationCategory(organizationId: string, categoryId: string) {
+    const category = await this.categoryRepository.findOne({
+      where: { id: categoryId, organizationId, scope: CustomerTaxonomyScope.ORGANIZATION, isActive: true },
+    });
+    if (!category) throw new BadRequestException('Choose an active category that applies to all branches');
+    return category;
+  }
+
+  /** Links customers to a category; returns how many were newly linked. */
+  async linkCategory(customerIds: string[], categoryId: string) {
+    if (!customerIds.length) return 0;
+    const rows = await this.customerRepository.query(
+      `INSERT INTO customer_category_links ("customerId", "categoryId") SELECT unnest($1::uuid[]), $2
+       ON CONFLICT DO NOTHING RETURNING "customerId"`,
+      [customerIds, categoryId],
+    );
+    return rows.length;
+  }
+
   private async findSameContactInStore(customer: Customer, storeId: string) {
     const query = this.customerRepository.createQueryBuilder('customer')
       .leftJoinAndSelect('customer.categories', 'category')

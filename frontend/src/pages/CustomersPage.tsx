@@ -22,6 +22,7 @@ import {
   RefreshCw,
   Users,
   X,
+  ArrowLeftRight,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { toEnglishDigits } from '@/lib/utils';
@@ -32,6 +33,8 @@ import type { Branch } from '../components/customers/BranchSelector';
 import CustomerImportDialog from '../components/customers/CustomerImportDialog';
 import CustomerExportDialog from '../components/customers/CustomerExportDialog';
 import CompetitionSyncDialog from '../components/customers/CompetitionSyncDialog';
+import BranchDistributionDialog from '../components/customers/BranchDistributionDialog';
+import { readCachedAccess } from '../lib/access';
 import Pagination from '../components/ui/Pagination';
 import { useToast } from '../components/Toast';
 
@@ -131,6 +134,9 @@ export default function CustomersPage() {
   const [showImport, setShowImport] = useState(false);
   const [showExport, setShowExport] = useState(false);
   const [showCompetitionSync, setShowCompetitionSync] = useState(false);
+  const [showDistribution, setShowDistribution] = useState(false);
+  // Moving customers between branches in bulk is for owners/admins (the same people who manage the team).
+  const canDistribute = useMemo(() => Boolean(readCachedAccess()?.sections.includes('team')), []);
   const [bulkBusy, setBulkBusy] = useState(false);
   const requestId = useRef(0);
   const pageCache = useRef(new Map<string, { at: number; data: CustomerPage }>());
@@ -385,6 +391,15 @@ export default function CustomersPage() {
           >
             <RefreshCw size={16} /> مزامنة المسابقة
           </button>
+          {canDistribute && branches.length > 1 && (
+            <button
+              type="button"
+              onClick={() => setShowDistribution(true)}
+              className="inline-flex h-10 items-center gap-2 rounded-lg border border-labbaik-blue/25 bg-labbaik-surface px-4 text-sm font-black text-labbaik-blue transition-colors hover:border-labbaik-blue hover:bg-labbaik-blue/5 focus:outline-none focus:ring-2 focus:ring-labbaik-blue/30"
+            >
+              <ArrowLeftRight size={16} /> توزيع على الفروع
+            </button>
+          )}
           <button
             type="button"
             onClick={() => setShowTaxonomy(true)}
@@ -610,6 +625,14 @@ export default function CustomersPage() {
           usage={usage}
           onClose={() => setShowTaxonomy(false)}
           onChanged={async () => { await Promise.all([loadTaxonomy(storeId), refreshCustomers()]); }}
+        />
+      )}
+
+      {showDistribution && (
+        <BranchDistributionDialog
+          branches={branches}
+          onClose={() => setShowDistribution(false)}
+          onDistributed={onCompetitionSynced}
         />
       )}
 

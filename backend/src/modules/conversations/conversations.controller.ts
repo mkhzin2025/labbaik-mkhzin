@@ -9,7 +9,7 @@ import { createReadStream, existsSync } from 'fs';
 import { basename, join } from 'path';
 import { OrganizationsService } from '../organizations/organizations.service';
 import { CustomersService } from '../customers/customers.service';
-import { IsBoolean, IsIn, IsInt, IsISO8601, IsOptional, IsString, IsUUID, Matches, Max, MaxLength, Min } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsInt, IsISO8601, IsOptional, IsString, IsUUID, Matches, Max, MaxLength, Min, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import { CONVERSATION_RATINGS, CONVERSATION_STATUSES } from './schemas/conversation.schema';
 import type { ConversationRating, ConversationStatus } from './schemas/conversation.schema';
@@ -107,6 +107,37 @@ export class TransferCustomerDto {
   storeId: string;
 }
 
+class DistributionItemDto {
+  @IsUUID()
+  customerId: string;
+
+  @IsUUID()
+  storeId: string;
+}
+
+export class DistributeToBranchesDto {
+  @IsUUID()
+  sourceStoreId: string;
+
+  @IsArray()
+  @ArrayMaxSize(50)
+  @ValidateNested({ each: true })
+  @Type(() => DistributionItemDto)
+  items: DistributionItemDto[];
+
+  @IsOptional()
+  @IsUUID()
+  categoryId?: string;
+}
+
+export class DistributionCategoryDto {
+  @IsUUID()
+  sourceStoreId: string;
+
+  @IsUUID()
+  categoryId: string;
+}
+
 @ApiTags('Conversations')
 @ApiBearerAuth()
 @Access('conversations')
@@ -199,6 +230,41 @@ export class ConversationsController {
     await this.organizationsService.assertStoreAccessibleByUser(req.user.id, organization.id, customer.storeId);
     await this.organizationsService.assertStoreAccessibleByUser(req.user.id, organization.id, dto.storeId);
     return this.conversationsService.transferCustomer(customerId, organization.id, dto.storeId);
+  }
+
+  /** Preview: customers of a branch matched to the branch they picked in the bot. Owners/admins only. */
+  @Get('branch-distribution/preview')
+  async previewBranchDistribution(@Query('sourceStoreId') sourceStoreId: string, @Request() req: any) {
+    const { sourceStoreId: source, branches } = await this.distributionScope(req, sourceStoreId);
+    return this.conversationsService.planBranchDistribution(source, branches);
+  }
+
+  /** Moves one batch (≤ 50) of the previewed customers to their branches. */
+  @Post('branch-distribution/apply')
+  async applyBranchDistribution(@Body() dto: DistributeToBranchesDto, @Request() req: any) {
+    const { organizationId, branches } = await this.distributionScope(req, dto.sourceStoreId);
+    if (dto.categoryId) await this.customersService.findOrganizationCategory(organizationId, dto.categoryId);
+    return this.conversationsService.distributeToBranches(
+      organizationId, dto.sourceStoreId, branches.map((branch) => branch.id), dto.items, dto.categoryId,
+    );
+  }
+
+  /** Links the customers who stay in the source branch (those with a WhatsApp conversation) to the category. */
+  @Post('branch-distribution/link-category')
+  async linkStayingToCategory(@Body() dto: DistributionCategoryDto, @Request() req: any) {
+    const { organizationId } = await this.distributionScope(req, dto.sourceStoreId);
+    await this.customersService.findOrganizationCategory(organizationId, dto.categoryId);
+    return this.conversationsService.linkWhatsAppCustomersToCategory(dto.sourceStoreId, dto.categoryId);
+  }
+
+  /** Owners/admins see every branch; the targets are all branches but the source. */
+  private async distributionScope(req: any, sourceStoreId: string) {
+    if (!sourceStoreId) throw new BadRequestException('sourceStoreId is required');
+    const { organization } = await this.organizationsService.assertCanManageMembers(req.user.id, req.user.organizationId);
+    const { stores } = await this.organizationsService.listStoresForUser(req.user.id, organization.id);
+    if (!stores.some((store) => store.id === sourceStoreId)) throw new ForbiddenException('Branch is outside your access');
+    const branches = stores.filter((store) => store.id !== sourceStoreId).map((store) => ({ id: store.id, name: store.name }));
+    return { organizationId: organization.id, sourceStoreId, branches };
   }
 
   @Get('attachments/:filename')

@@ -14,6 +14,7 @@ import { WhatsAppMediaService } from '../channels/whatsapp-media.service';
 import { TtlCache, concurrencyLimit } from '../../common/utils/ttl-cache';
 import { dashboardStatsPipeline, type DashboardStatsRow } from './dashboard-stats.pipeline';
 import { randomBytes } from 'crypto';
+import { pickBranch, type BranchPick, type DistributionBranch } from './branch-distribution';
 import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
 
@@ -389,7 +390,15 @@ export class ConversationsService implements OnModuleInit {
         moved.push({ from: String(source._id), to: String(source._id) });
         continue;
       }
+      // A thread merged before (or by an interrupted transfer) must not show its messages twice.
+      const seen = new Set<string>();
       const messages = [...(target.messages || []), ...(source.messages || [])]
+        .filter((m: any) => {
+          const key = String(m._id || m.metadata?.whatsappMessageId || `${m.timestamp}|${m.from}|${m.text}`);
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        })
         .sort((a: any, b: any) => (Number(a.timestamp) || 0) - (Number(b.timestamp) || 0));
       const latest = [target, source].sort((a, b) => new Date(b.lastMessageAt || 0).getTime() - new Date(a.lastMessageAt || 0).getTime())[0];
       await this.conversationModel.updateOne({ _id: target._id }, {
@@ -414,6 +423,123 @@ export class ConversationsService implements OnModuleInit {
     const event = { customerId: customer.id, previousCustomerId: customerId, fromStoreId, toStoreId: targetStoreId, conversations: moved };
     this.eventsGateway.server.to(`store_${fromStoreId}`).to(`store_${targetStoreId}`).emit('customer_transferred', event);
     return { customer, ...event };
+  }
+
+  /**
+   * Customers of a source branch (usually the main one) matched to the branch they picked in the bot.
+   * Read-only; the caller moves them in batches with distributeToBranches.
+   */
+  async planBranchDistribution(sourceStoreId: string, branches: DistributionBranch[]) {
+    const customers = await this.customersService.contactsInStore(sourceStoreId);
+    const byId = new Map(customers.map((customer) => [customer.id, customer]));
+    const byPhone = new Map<string, (typeof customers)[number]>();
+    for (const customer of customers) {
+      const phone = normalizePhoneNumber(customer.phoneNumber || customer.whatsappId || '');
+      if (phone && !byPhone.has(phone)) byPhone.set(phone, customer);
+    }
+
+    const conversations = await this.conversationModel.find(
+      { storeId: sourceStoreId, platform: 'whatsapp' },
+      { customerPhone: 1, customerId: 1, 'messages.from': 1, 'messages.text': 1, 'messages.type': 1, 'messages.timestamp': 1 },
+    ).lean().exec();
+
+    const picks = new Map<string, { customer: (typeof customers)[number]; phone: string; pick: BranchPick }>();
+    const withConversation = new Set<string>();
+    for (const conversation of conversations) {
+      const customer = (conversation.customerId && byId.get(String(conversation.customerId)))
+        || byPhone.get(normalizePhoneNumber(conversation.customerPhone));
+      if (!customer) continue;
+      withConversation.add(customer.id);
+      const pick = pickBranch(conversation.messages as any[], branches);
+      if (pick) picks.set(customer.id, { customer, phone: normalizePhoneNumber(customer.phoneNumber || customer.whatsappId || ''), pick });
+    }
+
+    const existing = await this.customersService.existingPhonesInStores(
+      branches.map((branch) => branch.id),
+      [...picks.values()].map((item) => item.phone).filter(Boolean),
+    );
+    const items = [...picks.values()].map(({ customer, phone, pick }) => ({
+      customerId: customer.id,
+      fullName: customer.fullName,
+      phone,
+      storeId: pick.storeId,
+      how: pick.how,
+      merge: existing.has(`${pick.storeId}:${phone}`),
+    }));
+
+    const perBranch = branches.map((branch) => {
+      const mine = items.filter((item) => item.storeId === branch.id);
+      return {
+        storeId: branch.id,
+        name: branch.name,
+        total: mine.length,
+        move: mine.filter((item) => !item.merge).length,
+        merge: mine.filter((item) => item.merge).length,
+        byMenu: mine.filter((item) => item.how === 'menu').length,
+        byName: mine.filter((item) => item.how === 'name').length,
+        byOffers: mine.filter((item) => item.how === 'offers').length,
+      };
+    }).filter((branch) => branch.total > 0).sort((a, b) => b.total - a.total);
+
+    return {
+      sourceCustomers: customers.length,
+      withConversation: withConversation.size,
+      transfer: items.length,
+      staying: withConversation.size - items.length,
+      perBranch,
+      items,
+    };
+  }
+
+  /** Moves one batch from the plan; each customer goes through transferCustomer (merge-aware, conversations follow). */
+  async distributeToBranches(
+    organizationId: string,
+    sourceStoreId: string,
+    targetStoreIds: string[],
+    items: { customerId: string; storeId: string }[],
+    categoryId?: string,
+  ) {
+    const result = { moved: 0, merged: 0, skipped: 0, failed: 0 };
+    for (const item of items) {
+      if (!targetStoreIds.includes(item.storeId) || item.storeId === sourceStoreId) { result.skipped += 1; continue; }
+      try {
+        const customer = await this.customersService.findOneInOrganization(item.customerId, organizationId);
+        // Already moved (e.g. a re-run, or someone transferred it by hand) — nothing to do.
+        if (customer.storeId !== sourceStoreId) { result.skipped += 1; continue; }
+        const transfer = await this.transferCustomer(item.customerId, organizationId, item.storeId);
+        if (categoryId) await this.customersService.linkCategory([transfer.customerId], categoryId);
+        if (transfer.customerId === item.customerId) result.moved += 1;
+        else result.merged += 1;
+      } catch (error: any) {
+        if (error instanceof NotFoundException) { result.skipped += 1; continue; }
+        this.logger.warn(`Branch distribution of ${item.customerId} failed: ${error?.message}`);
+        result.failed += 1;
+      }
+    }
+    return result;
+  }
+
+  /** Links every customer of the branch that has a WhatsApp conversation (those who stay) to the category. */
+  async linkWhatsAppCustomersToCategory(sourceStoreId: string, categoryId: string) {
+    const customers = await this.customersService.contactsInStore(sourceStoreId);
+    const ids = new Set(customers.map((customer) => customer.id));
+    const byPhone = new Map<string, string>();
+    for (const customer of customers) {
+      const phone = normalizePhoneNumber(customer.phoneNumber || customer.whatsappId || '');
+      if (phone && !byPhone.has(phone)) byPhone.set(phone, customer.id);
+    }
+    const conversations = await this.conversationModel.find(
+      { storeId: sourceStoreId, platform: 'whatsapp' }, { customerPhone: 1, customerId: 1 },
+    ).lean().exec();
+    const linked = new Set<string>();
+    for (const conversation of conversations) {
+      const id = conversation.customerId && ids.has(String(conversation.customerId))
+        ? String(conversation.customerId)
+        : byPhone.get(normalizePhoneNumber(conversation.customerPhone));
+      if (id) linked.add(id);
+    }
+    const newlyLinked = await this.customersService.linkCategory([...linked], categoryId);
+    return { customers: linked.size, newlyLinked };
   }
 
   /** Sets the workflow status of a conversation (open / pending / snoozed / closed). */
