@@ -121,7 +121,8 @@ async function main() {
        ON CONFLICT DO NOTHING`,
       [organizationTag.id, branchIds],
     );
-    // Deleting the branch copies removes their links (ON DELETE CASCADE).
+    // The live foreign key does not cascade, so the branch links go first.
+    await client.query('DELETE FROM customer_tag_links WHERE "tagId" = ANY($1::uuid[])', [branchIds]);
     const { rowCount: deleted } = await client.query('DELETE FROM customer_tags WHERE id = ANY($1::uuid[])', [branchIds]);
     await client.query('COMMIT');
 
