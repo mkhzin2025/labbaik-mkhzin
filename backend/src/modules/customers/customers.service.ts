@@ -1014,15 +1014,17 @@ export class CustomersService implements OnModuleInit {
 
   /**
    * Imports a deduplicated batch and updates matching numbers in the selected branch.
-   * The chosen tags go to newly created customers only; existing customers in the file keep their tags.
+   * The chosen categories and tags go to newly created customers only; existing customers in the file keep theirs.
    */
   async importCustomers(
     storeId: string,
     organizationId: string,
     rows: { phoneNumber: string; fullName?: string; email?: string; notes?: string }[],
     tagIds: string[],
+    categoryIds: string[] = [],
   ) {
     const tags = tagIds.length ? await this.resolveTags(organizationId, storeId, tagIds) : [];
+    const categories = await this.resolveCategories(organizationId, storeId, categoryIds);
     const normalized = new Map<string, { phoneNumber: string; fullName?: string; email?: string; notes?: string }>();
     let skipped = 0;
 
@@ -1079,11 +1081,17 @@ export class CustomersService implements OnModuleInit {
 
       const saved = await repo.save(records, { chunk: 200 });
       const newIds = saved.filter((customer) => !byPhone.has(customer.phoneNumber)).map((customer) => customer.id);
-      if (tags.length && newIds.length) {
+      if (newIds.length) {
         for (const tag of tags) {
           await manager.query(
             'INSERT INTO customer_tag_links ("customerId", "tagId") SELECT unnest($1::uuid[]), $2 ON CONFLICT DO NOTHING',
             [newIds, tag.id],
+          );
+        }
+        for (const category of categories) {
+          await manager.query(
+            'INSERT INTO customer_category_links ("customerId", "categoryId") SELECT unnest($1::uuid[]), $2 ON CONFLICT DO NOTHING',
+            [newIds, category.id],
           );
         }
       }

@@ -166,6 +166,11 @@ export class ImportCustomersDto {
   @IsArray()
   @IsUUID('4', { each: true })
   tagIds?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @IsUUID('4', { each: true })
+  categoryIds?: string[];
 }
 
 /** Who a WhatsApp campaign targets; resolved to customers on the server. */

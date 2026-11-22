@@ -1,9 +1,43 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent } from 'react';
-import { Building2, Check, CheckCircle2, Download, FileSpreadsheet, Loader2, Plus, Tag, UploadCloud, X } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type Dispatch, type DragEvent, type ReactNode, type SetStateAction } from 'react';
+import { Building2, Check, CheckCircle2, Download, FileSpreadsheet, FolderOpen, Loader2, Plus, Tag, UploadCloud, X } from 'lucide-react';
 import api from '../../api/client';
 import type { Branch } from './BranchSelector';
 
-type TaxonomyTag = { id: string; name: string; color: string; isActive: boolean };
+type TaxonomyItem = { id: string; name: string; color: string; isActive: boolean };
+
+type PickerProps = {
+  label: string;
+  icon: ReactNode;
+  placeholder: string;
+  addLabel: string;
+  items: TaxonomyItem[];
+  selected: string[];
+  disabled: boolean;
+  onToggle: (id: string) => void;
+  onCreate: (name: string) => Promise<void>;
+};
+
+/** Pick existing categories/tags of the branch or create a new one; applied to new numbers only. */
+function TaxonomyPicker({ label, icon, placeholder, addLabel, items, selected, disabled, onToggle, onCreate }: PickerProps) {
+  const [draft, setDraft] = useState('');
+  const [creating, setCreating] = useState(false);
+  const create = async () => {
+    const name = draft.trim();
+    if (!name || creating) return;
+    setCreating(true);
+    try { await onCreate(name); setDraft(''); } finally { setCreating(false); }
+  };
+  return (
+    <div className="space-y-2">
+      <span className="flex items-center gap-2 text-sm font-black text-neutral-900 dark:text-white">{icon} {label} <span className="font-medium text-labbaik-text-muted">(اختياري، للأرقام الجديدة فقط)</span></span>
+      <div className="flex gap-2">
+        <input value={draft} disabled={disabled} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void create(); } }} placeholder={placeholder} className="h-11 min-w-0 flex-1 rounded-lg border border-labbaik-border bg-labbaik-page px-3 text-sm text-neutral-900 outline-none placeholder:text-labbaik-text-muted focus:border-labbaik-blue focus:ring-2 focus:ring-labbaik-blue/20 disabled:opacity-50 dark:text-white" />
+        <button type="button" onClick={() => void create()} disabled={!draft.trim() || creating || disabled} aria-label={addLabel} className="grid size-11 shrink-0 place-items-center rounded-lg bg-labbaik-blue text-white transition-colors hover:bg-labbaik-blue/90 focus:outline-none focus:ring-2 focus:ring-labbaik-blue/30 disabled:opacity-40">{creating ? <Loader2 size={17} className="animate-spin" /> : <Plus size={18} />}</button>
+      </div>
+      {items.length > 0 && <div className="flex flex-wrap gap-2 pt-1" aria-label={label}>{items.map((item) => { const active = selected.includes(item.id); return <button key={item.id} type="button" disabled={disabled} aria-pressed={active} onClick={() => onToggle(item.id)} className={`inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-xs font-black transition-colors focus:outline-none focus:ring-2 focus:ring-labbaik-blue/30 disabled:opacity-50 ${active ? 'bg-labbaik-blue text-white' : 'bg-labbaik-page text-labbaik-text-muted hover:text-labbaik-blue'}`}>{active && <Check size={13} />}{item.name}</button>; })}</div>}
+    </div>
+  );
+}
 type ImportRow = { phoneNumber: string; fullName?: string; email?: string; notes?: string };
 type ImportResult = { total: number; created: number; updated: number; skipped: number };
 
@@ -66,10 +100,10 @@ function rowsFromCsv(text: string): { rows: ImportRow[]; error?: string } {
 
 export default function CustomerImportDialog({ branches, initialStoreId, onClose, onImported }: Props) {
   const [storeId, setStoreId] = useState(initialStoreId || branches[0]?.id || '');
-  const [tags, setTags] = useState<TaxonomyTag[]>([]);
+  const [tags, setTags] = useState<TaxonomyItem[]>([]);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
-  const [newTag, setNewTag] = useState('');
-  const [tagBusy, setTagBusy] = useState(false);
+  const [categories, setCategories] = useState<TaxonomyItem[]>([]);
+  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
   const [fileName, setFileName] = useState('');
   const [rows, setRows] = useState<ImportRow[]>([]);
   const [fileError, setFileError] = useState('');
@@ -100,12 +134,16 @@ export default function CustomerImportDialog({ branches, initialStoreId, onClose
 
   useEffect(() => {
     setSelectedTags([]);
+    setSelectedCategories([]);
+    const active = (list?: TaxonomyItem[]) => (list || []).filter((item) => item.isActive);
     void api.get('/customers/taxonomy', { params: { storeId } })
-      .then(({ data }) => setTags((data?.tags || []).filter((tag: TaxonomyTag) => tag.isActive)))
-      .catch(() => setTags([]));
+      .then(({ data }) => { setTags(active(data?.tags)); setCategories(active(data?.categories)); })
+      .catch(() => { setTags([]); setCategories([]); });
   }, [storeId]);
 
   const selectedNames = useMemo(() => tags.filter((tag) => selectedTags.includes(tag.id)).map((tag) => tag.name), [tags, selectedTags]);
+  const selectedCategoryNames = useMemo(() => categories.filter((item) => selectedCategories.includes(item.id)).map((item) => item.name), [categories, selectedCategories]);
+  const toggle = (setter: Dispatch<SetStateAction<string[]>>) => (id: string) => setter((current) => current.includes(id) ? current.filter((value) => value !== id) : [...current, id]);
 
   const downloadTemplate = () => {
     const example = ['سارة محمد', '0501234567', 'sara@example.com', 'عميلة مهتمة بالعروض'];
@@ -129,16 +167,18 @@ export default function CustomerImportDialog({ branches, initialStoreId, onClose
     setFileError(result.error || '');
   };
 
-  const createTag = async () => {
-    const name = newTag.trim();
-    if (!name || !storeId) return;
-    setTagBusy(true);
-    try {
-      const { data } = await api.post('/customers/tags', { scope: 'store', storeId, name });
-      setTags((current) => [...current, data]);
-      setSelectedTags((current) => [...current, data.id]);
-      setNewTag('');
-    } finally { setTagBusy(false); }
+  const createTag = async (name: string) => {
+    if (!storeId) return;
+    const { data } = await api.post('/customers/tags', { scope: 'store', storeId, name });
+    setTags((current) => [...current, data]);
+    setSelectedTags((current) => [...current, data.id]);
+  };
+
+  const createCategory = async (name: string) => {
+    if (!storeId) return;
+    const { data } = await api.post('/customers/categories', { scope: 'store', storeId, name });
+    setCategories((current) => [...current, data]);
+    setSelectedCategories((current) => [...current, data.id]);
   };
 
   const submit = async () => {
@@ -150,7 +190,7 @@ export default function CustomerImportDialog({ branches, initialStoreId, onClose
     try {
       for (let offset = 0; offset < rows.length; offset += IMPORT_BATCH_SIZE) {
         const batch = rows.slice(offset, offset + IMPORT_BATCH_SIZE);
-        const { data } = await api.post('/customers/import', { storeId, rows: batch, tagIds: selectedTags }, {
+        const { data } = await api.post('/customers/import', { storeId, rows: batch, tagIds: selectedTags, categoryIds: selectedCategories }, {
           onUploadProgress: (event) => {
             const uploaded = event.total ? Math.min(0.9, event.loaded / event.total) : 0;
             setProgress(Math.round(((offset + batch.length * uploaded) / rows.length) * 100));
@@ -227,12 +267,12 @@ export default function CustomerImportDialog({ branches, initialStoreId, onClose
             <button type="button" onClick={downloadTemplate} className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-lg border border-labbaik-blue/25 bg-labbaik-surface px-4 text-sm font-black text-labbaik-blue transition-colors hover:border-labbaik-blue hover:bg-labbaik-blue/5 focus:outline-none focus:ring-2 focus:ring-labbaik-blue/30"><Download size={16} /> تحميل النموذج</button>
           </div>
 
-          <div className="grid gap-5 sm:grid-cols-2">
-            <label className="space-y-2"><span className="flex items-center gap-2 text-sm font-black text-neutral-900 dark:text-white"><Building2 size={16} className="text-labbaik-blue" /> الفرع <b className="text-red-500">*</b></span><select value={storeId} disabled={busy} onChange={(e) => setStoreId(e.target.value)} className="h-11 w-full rounded-lg border border-labbaik-border bg-labbaik-page px-3 text-sm font-bold text-neutral-900 outline-none focus:border-labbaik-blue focus:ring-2 focus:ring-labbaik-blue/20 disabled:opacity-50 dark:text-white">{branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></label>
-            <div className="space-y-2"><span className="flex items-center gap-2 text-sm font-black text-neutral-900 dark:text-white"><Tag size={16} className="text-labbaik-blue" /> التاقات <span className="font-medium text-labbaik-text-muted">(اختياري، للأرقام الجديدة فقط)</span></span><div className="flex gap-2"><input value={newTag} onChange={(e) => setNewTag(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void createTag(); } }} placeholder="اكتب اسم تاق جديد" className="h-11 min-w-0 flex-1 rounded-lg border border-labbaik-border bg-labbaik-page px-3 text-sm text-neutral-900 outline-none placeholder:text-labbaik-text-muted focus:border-labbaik-blue focus:ring-2 focus:ring-labbaik-blue/20 dark:text-white" /><button type="button" onClick={() => void createTag()} disabled={!newTag.trim() || tagBusy} aria-label="إضافة التاق" className="grid size-11 shrink-0 place-items-center rounded-lg bg-labbaik-blue text-white transition-colors hover:bg-labbaik-blue/90 focus:outline-none focus:ring-2 focus:ring-labbaik-blue/30 disabled:opacity-40">{tagBusy ? <Loader2 size={17} className="animate-spin" /> : <Plus size={18} />}</button></div></div>
-          </div>
+          <label className="block space-y-2"><span className="flex items-center gap-2 text-sm font-black text-neutral-900 dark:text-white"><Building2 size={16} className="text-labbaik-blue" /> الفرع <b className="text-red-500">*</b></span><select value={storeId} disabled={busy} onChange={(e) => setStoreId(e.target.value)} className="h-11 w-full rounded-lg border border-labbaik-border bg-labbaik-page px-3 text-sm font-bold text-neutral-900 outline-none focus:border-labbaik-blue focus:ring-2 focus:ring-labbaik-blue/20 disabled:opacity-50 dark:text-white">{branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></label>
 
-          {tags.length > 0 && <div className="flex flex-wrap gap-2" aria-label="اختيار التاقات">{tags.map((tag) => { const active = selectedTags.includes(tag.id); return <button key={tag.id} type="button" disabled={busy} aria-pressed={active} onClick={() => setSelectedTags((current) => active ? current.filter((id) => id !== tag.id) : [...current, tag.id])} className={`inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-xs font-black transition-colors focus:outline-none focus:ring-2 focus:ring-labbaik-blue/30 disabled:opacity-50 ${active ? 'bg-labbaik-blue text-white' : 'bg-labbaik-page text-labbaik-text-muted hover:text-labbaik-blue'}`}>{active && <Check size={13} />}{tag.name}</button>; })}</div>}
+          <div className="grid gap-5 sm:grid-cols-2">
+            <TaxonomyPicker label="الفئات" icon={<FolderOpen size={16} className="text-labbaik-blue" />} placeholder="اكتب اسم فئة جديدة" addLabel="إضافة الفئة" items={categories} selected={selectedCategories} disabled={busy} onToggle={toggle(setSelectedCategories)} onCreate={createCategory} />
+            <TaxonomyPicker label="التاقات" icon={<Tag size={16} className="text-labbaik-blue" />} placeholder="اكتب اسم تاق جديد" addLabel="إضافة التاق" items={tags} selected={selectedTags} disabled={busy} onToggle={toggle(setSelectedTags)} onCreate={createTag} />
+          </div>
 
           <div onDragOver={(e) => { e.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={drop} className={`rounded-xl border border-dashed p-6 text-center transition-colors ${fileError ? 'border-red-400 bg-red-50/60 dark:bg-red-950/15' : dragging ? 'border-labbaik-blue bg-labbaik-blue/5' : rows.length ? 'border-emerald-400 bg-emerald-50/60 dark:bg-emerald-950/15' : 'border-labbaik-border bg-labbaik-page'}`}>
             <input ref={fileRef} type="file" accept=".csv,text/csv" className="sr-only" onChange={(e: ChangeEvent<HTMLInputElement>) => void readFile(e.target.files?.[0])} />
@@ -256,7 +296,7 @@ export default function CustomerImportDialog({ branches, initialStoreId, onClose
             </div>
           )}
 
-          {rows.length > 0 && <p className="text-xs leading-5 text-labbaik-text-muted">سيتم ربط الأرقام بفرع <b className="text-neutral-800 dark:text-neutral-100">{branches.find((branch) => branch.id === storeId)?.name}</b>{selectedNames.length ? <> وإضافة التاقات: <b className="text-neutral-800 dark:text-neutral-100">{selectedNames.join('، ')}</b></> : null}. الرقم الموجود مسبقًا سيُحدّث ولن يتكرر.</p>}
+          {rows.length > 0 && <p className="text-xs leading-5 text-labbaik-text-muted">سيتم ربط الأرقام بفرع <b className="text-neutral-800 dark:text-neutral-100">{branches.find((branch) => branch.id === storeId)?.name}</b>{selectedCategoryNames.length ? <>، وإضافة الفئات: <b className="text-neutral-800 dark:text-neutral-100">{selectedCategoryNames.join('، ')}</b></> : null}{selectedNames.length ? <>، وإضافة التاقات: <b className="text-neutral-800 dark:text-neutral-100">{selectedNames.join('، ')}</b></> : null}{selectedCategoryNames.length || selectedNames.length ? ' للأرقام الجديدة فقط' : ''}. الرقم الموجود مسبقًا سيُحدّث ولن يتكرر.</p>}
         </div>}
 
         <footer className="sticky bottom-0 flex flex-col-reverse gap-2 border-t border-labbaik-border bg-labbaik-surface px-5 py-4 sm:flex-row sm:justify-end sm:px-6">

@@ -106,7 +106,7 @@ export class CustomersController {
   async importCustomers(@Request() req: any, @Body() dto: ImportCustomersDto) {
     const organization = await this.organizationsService.getForUser(req.user.id, req.user.organizationId);
     await this.organizationsService.assertStoreAccessibleByUser(req.user.id, organization.id, dto.storeId);
-    return this.customersService.importCustomers(dto.storeId, organization.id, dto.rows, dto.tagIds || []);
+    return this.customersService.importCustomers(dto.storeId, organization.id, dto.rows, dto.tagIds || [], dto.categoryIds || []);
   }
 
   @Get('export/options')
