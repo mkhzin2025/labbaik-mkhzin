@@ -8,10 +8,11 @@ import { COLORS, PAGE_MARGIN, displayDate, drawGlyph } from './customers-statist
 /**
  * Compact "competition with cashiers" report: one row per branch, every customer counted once, by priority:
  *   1. new        — carries the current point-of-sale tag (e.g. "نقاط البيع 11-2026")
- *   2. old        — carries an older point-of-sale tag, or is in neither the competition nor the app
- *   3. comp35     — in a competition category with an age tag above 35
- *   4. app        — in the app category
- *   competition customers aged 35 or under (or without an age) are left out.
+ *   2. old        — carries an older point-of-sale tag, or was not brought by the competition or the app
+ *                   (stored before that source started, or never linked to it)
+ *   3. comp35     — came from the competition (added after it started) with an age tag above 35
+ *   4. app        — came from the app (added after it started)
+ *   competition newcomers aged 35 or under (or without an age) are left out.
  */
 
 export const POS_TAG_PREFIX = 'نقاط البيع';
@@ -103,7 +104,7 @@ export async function writeSummaryReportExcel(response: Response, report: Summar
 
   const legend = sheet.getRow(7 + report.rows.length);
   sheet.mergeCells(legend.number, 1, legend.number, 8);
-  legend.getCell(1).value = `الأرقام الجديدة: ${report.newTagName}. ارقام الكاشيرات القديمة: نقاط البيع السابقة وكل الداتا القديمة. كل عميل محسوب مرة واحدة.`;
+  legend.getCell(1).value = `الأرقام الجديدة: ${report.newTagName}. ارقام الكاشيرات القديمة: نقاط البيع السابقة وكل الداتا القديمة (حتى من شارك منهم في المسابقة لاحقاً). كل عميل محسوب مرة واحدة.`;
   legend.getCell(1).font = { size: 10, color: { argb: 'FF6B6B6B' } };
   legend.getCell(1).alignment = { horizontal: 'right' };
 
@@ -252,7 +253,7 @@ export function writeSummaryReportPdf(response: Response, report: SummaryReport)
 
   doc.roundedRect(PAGE_MARGIN, y, contentWidth, noteHeight, 8).fill(COLORS.soft);
   text(
-    `ملاحظة: ${SUMMARY_NOTE}. كل عميل محسوب مرة واحدة. الأرقام الجديدة = ${tagName}، والكاشيرات القديمة = نقاط البيع السابقة وكل الداتا القديمة.`,
+    `ملاحظة: ${SUMMARY_NOTE}. كل عميل محسوب مرة واحدة. الأرقام الجديدة = ${tagName}، والكاشيرات القديمة = نقاط البيع السابقة وكل الداتا القديمة حتى من شارك منهم في المسابقة لاحقاً.`,
     PAGE_MARGIN + 14, y + 10, contentWidth - 28, { size: 8.5, color: COLORS.muted },
   );
   doc.end();

@@ -356,7 +356,10 @@ export class CustomersService implements OnModuleInit {
     return tags.sort((a, b) => posTagMonth(b.name) - posTagMonth(a.name) || b.createdAt.getTime() - a.createdAt.getTime());
   }
 
-  /** Per-branch counts for the compact competition/cashiers report; each customer lands in one column only. */
+  /**
+   * Per-branch counts for the compact competition/cashiers report; each customer lands in one column only.
+   * "comp"/"app" mean the customer came from that source (added after it started), not merely linked to it.
+   */
   private async summaryReport(options: CustomerExportOptions) {
     const stores: { id: string; name: string }[] = await this.customerRepository.query(
       'SELECT id, name FROM stores WHERE "organizationId" = $1 AND id = ANY($2::uuid[]) ORDER BY name ASC',
@@ -374,13 +377,21 @@ export class CustomersService implements OnModuleInit {
     const newIds = posTags.filter((tag) => tag.name.trim() === newTag.name.trim()).map((tag) => tag.id);
     const oldPosIds = posTags.filter((tag) => !newIds.includes(tag.id)).map((tag) => tag.id);
 
-    const categories: { id: string; name: string }[] = await this.customerRepository.query(
-      `SELECT id, TRIM(name) AS name FROM customer_categories
+    const categories: { id: string; name: string; createdAt: Date }[] = await this.customerRepository.query(
+      `SELECT id, TRIM(name) AS name, "createdAt" FROM customer_categories
         WHERE "organizationId" = $1 AND TRIM(name) = ANY($2::text[])`,
       [options.organizationId, [COMPETITION_CATEGORY, COMPETITION_ONLINE_CATEGORY, APP_CATEGORY]],
     );
     const competitionIds = categories.filter((item) => item.name !== APP_CATEGORY).map((item) => item.id);
     const appIds = categories.filter((item) => item.name === APP_CATEGORY).map((item) => item.id);
+    // When each source started: customers already stored before it are old cashier data even if they joined later
+    // (the competition sync links existing branch customers into its categories).
+    const startOf = (ids: string[]) => {
+      const times = categories.filter((item) => ids.includes(item.id)).map((item) => new Date(item.createdAt).getTime());
+      return times.length ? new Date(Math.min(...times)).toISOString() : null;
+    };
+    const competitionStart = startOf(competitionIds);
+    const appStart = startOf(appIds);
     const ageTags: { id: string; name: string }[] = await this.customerRepository.query(
       'SELECT id, TRIM(name) AS name FROM customer_tags WHERE "organizationId" = $1 AND TRIM(name) LIKE $2',
       [options.organizationId, `${AGE_TAG_PREFIX.trim()}%`],
@@ -392,9 +403,11 @@ export class CustomersService implements OnModuleInit {
          SELECT c."storeId",
                 EXISTS (SELECT 1 FROM customer_tag_links l WHERE l."customerId" = c.id AND l."tagId" = ANY($2::uuid[])) AS fresh,
                 EXISTS (SELECT 1 FROM customer_tag_links l WHERE l."customerId" = c.id AND l."tagId" = ANY($3::uuid[])) AS old_pos,
-                EXISTS (SELECT 1 FROM customer_category_links l WHERE l."customerId" = c.id AND l."categoryId" = ANY($4::uuid[])) AS comp,
+                c."createdAt" >= $7::timestamptz
+                  AND EXISTS (SELECT 1 FROM customer_category_links l WHERE l."customerId" = c.id AND l."categoryId" = ANY($4::uuid[])) AS comp,
                 EXISTS (SELECT 1 FROM customer_tag_links l WHERE l."customerId" = c.id AND l."tagId" = ANY($5::uuid[])) AS older,
-                EXISTS (SELECT 1 FROM customer_category_links l WHERE l."customerId" = c.id AND l."categoryId" = ANY($6::uuid[])) AS app
+                c."createdAt" >= $8::timestamptz
+                  AND EXISTS (SELECT 1 FROM customer_category_links l WHERE l."customerId" = c.id AND l."categoryId" = ANY($6::uuid[])) AS app
            FROM customers c WHERE c."storeId" = ANY($1::uuid[])
        )
        SELECT "storeId",
@@ -403,7 +416,7 @@ export class CustomersService implements OnModuleInit {
               COUNT(*) FILTER (WHERE NOT fresh AND NOT old_pos AND comp AND older)::int AS comp35,
               COUNT(*) FILTER (WHERE NOT fresh AND NOT old_pos AND NOT (comp AND older) AND app)::int AS app
          FROM flags GROUP BY "storeId"`,
-      [storeIds, newIds, oldPosIds, competitionIds, olderIds, appIds],
+      [storeIds, newIds, oldPosIds, competitionIds, olderIds, appIds, competitionStart || 'infinity', appStart || 'infinity'],
     );
     const byStore = new Map(counts.map((row) => [String(row.storeId), row]));
     return {

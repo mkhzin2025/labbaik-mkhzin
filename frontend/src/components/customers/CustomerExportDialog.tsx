@@ -287,7 +287,7 @@ export default function CustomerExportDialog({ branches, initialStoreId, onClose
             <select value={newTagId} onChange={(event) => { setNewTagId(event.target.value); setDownloaded(false); }} disabled={busy || !posTags.length} className="h-11 w-full rounded-lg border border-labbaik-border bg-labbaik-page px-3 text-sm font-bold text-neutral-900 outline-none focus:border-labbaik-blue focus:ring-2 focus:ring-labbaik-blue/20 disabled:opacity-50 dark:text-white">
               {posTags.length ? posTags.map((tag) => <option key={tag.id} value={tag.id}>{tag.name}</option>) : <option value="">لا يوجد تاق «نقاط البيع» لهذه الفروع</option>}
             </select>
-            <span className="block text-xs leading-5 text-labbaik-text-muted">الكاشيرات القديمة = نقاط البيع السابقة وكل الداتا القديمة. كل عميل يُحسب مرة واحدة، ومشاركو المسابقة تحت 35 مستبعدون. الفرع الرئيسي لا يظهر في التقرير.</span>
+            <span className="block text-xs leading-5 text-labbaik-text-muted">الكاشيرات القديمة = نقاط البيع السابقة وكل الداتا القديمة، حتى من شارك منهم في المسابقة لاحقاً. كل عميل يُحسب مرة واحدة، ومن جاء من المسابقة وعمره 35 أو أقل مستبعد. الفرع الرئيسي لا يظهر في التقرير.</span>
           </label>}
 
           {!sourceReport && !summaryReport && <label className="block space-y-2">
