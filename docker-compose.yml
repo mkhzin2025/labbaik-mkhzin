@@ -47,6 +47,10 @@ services:
       WHATSAPP_VERIFY_TOKEN: ${WHATSAPP_VERIFY_TOKEN:-labbaik_whatsapp_verify_change_me}
       META_APP_SECRET: ${META_APP_SECRET:-labbaik_meta_app_secret_change_me}
       CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:-labbaik_credential_encryption_change_me}
+      MSEGAT_API_KEY: ${MSEGAT_API_KEY:-}
+      MSEGAT_USERNAME: ${MSEGAT_USERNAME:-}
+      MSEGAT_SENDER: ${MSEGAT_SENDER:-}
+      MSEGAT_BASE_URL: ${MSEGAT_BASE_URL:-https://www.msegat.com/gw/sendsms.php}
       UPLOADS_DIR: /app/uploads
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       GROQ_API_KEY: ${GROQ_API_KEY:-}

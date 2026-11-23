@@ -86,6 +86,10 @@ services:
       REDIS_PORT: 6379
       META_APP_SECRET: ${META_APP_SECRET}
       CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY}
+      MSEGAT_API_KEY: ${MSEGAT_API_KEY:-}
+      MSEGAT_USERNAME: ${MSEGAT_USERNAME:-}
+      MSEGAT_SENDER: ${MSEGAT_SENDER:-}
+      MSEGAT_BASE_URL: ${MSEGAT_BASE_URL:-https://www.msegat.com/gw/sendsms.php}
       UPLOADS_DIR: /app/uploads
     volumes:
       - backend_uploads:/app/uploads
