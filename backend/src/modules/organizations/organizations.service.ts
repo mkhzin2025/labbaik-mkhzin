@@ -10,6 +10,9 @@ import { User, UserRole } from '../users/entities/user.entity';
 import { MEMBER_ROLES, memberRoleOf, sectionsFor, seesAllBranches } from './roles';
 import type { MemberRole } from './roles';
 import { Store } from '../stores/entities/store.entity';
+import { normalizePhoneNumber } from '../../common/utils/phone.util';
+
+const SUPPORT_PHONE_REQUIRED = 'موظف دعم العملاء يحتاج رقم جوال، لأن رمز التحقق يصله برسالة نصية عند كل تسجيل دخول.';
 
 @Injectable()
 export class OrganizationsService {
@@ -243,6 +246,7 @@ export class OrganizationsService {
       userId: member.userId,
       fullName: member.user?.fullName || '',
       email: member.user?.email || '',
+      phoneNumber: member.user?.phoneNumber || null,
       role: memberRoleOf(member.role),
       // null = every branch (owners and admins)
       storeIds: seesAllBranches(member.role)
@@ -257,7 +261,7 @@ export class OrganizationsService {
    * Creates the member's login (the admin sets the first password) and gives them their branches.
    * An email that already has an account is refused: logins resolve to a single organization.
    */
-  async addMember(actorUserId: string, organizationId: string | undefined, dto: { fullName?: string; email?: string; password?: string; role?: string; storeIds?: string[] }) {
+  async addMember(actorUserId: string, organizationId: string | undefined, dto: { fullName?: string; email?: string; password?: string; phoneNumber?: string; role?: string; storeIds?: string[] }) {
     const { organization } = await this.assertCanManageMembers(actorUserId, organizationId);
     const fullName = String(dto.fullName || '').trim();
     const email = String(dto.email || '').trim().toLowerCase();
@@ -265,6 +269,8 @@ export class OrganizationsService {
     if (!fullName) throw new BadRequestException('اكتب اسم العضو.');
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new BadRequestException('اكتب بريدًا إلكترونيًا صحيحًا.');
     this.assertPassword(dto.password);
+    const phoneNumber = this.parsePhone(dto.phoneNumber);
+    if (!phoneNumber && memberRoleOf(role) === 'support') throw new BadRequestException(SUPPORT_PHONE_REQUIRED);
 
     const existing = await this.userRepository.findOne({ where: { email } });
     if (existing) {
@@ -278,6 +284,7 @@ export class OrganizationsService {
         email,
         fullName,
         password: await bcrypt.hash(String(dto.password), 10),
+        phoneNumber,
         role: UserRole.EMPLOYEE,
       }));
       await manager.save(manager.create(OrganizationMember, { organizationId: organization.id, userId: user.id, role }));
@@ -289,7 +296,7 @@ export class OrganizationsService {
     return (await this.listMembers(actorUserId, organization.id)).find((member) => member.userId === userId);
   }
 
-  async updateMember(actorUserId: string, organizationId: string | undefined, targetUserId: string, dto: { fullName?: string; password?: string; role?: string; storeIds?: string[] }) {
+  async updateMember(actorUserId: string, organizationId: string | undefined, targetUserId: string, dto: { fullName?: string; password?: string; phoneNumber?: string; role?: string; storeIds?: string[] }) {
     const { organization } = await this.assertCanManageMembers(actorUserId, organizationId);
     const member = await this.memberRepository.findOne({ where: { userId: targetUserId, organizationId: organization.id }, relations: ['user'] });
     if (!member) throw new NotFoundException('العضو غير موجود في فريقك.');
@@ -300,6 +307,8 @@ export class OrganizationsService {
     if (dto.password !== undefined) this.assertPassword(dto.password);
     const fullName = dto.fullName !== undefined ? String(dto.fullName).trim() : undefined;
     if (fullName === '') throw new BadRequestException('اكتب اسم العضو.');
+    const phoneNumber = dto.phoneNumber !== undefined ? this.parsePhone(dto.phoneNumber) : member.user?.phoneNumber || null;
+    if (!phoneNumber && memberRoleOf(role) === 'support') throw new BadRequestException(SUPPORT_PHONE_REQUIRED);
     const branchesChange = dto.storeIds !== undefined || role !== member.role;
     const storeIds = branchesChange ? await this.resolveMemberStores(organization.id, role, dto.storeIds) : [];
 
@@ -308,6 +317,7 @@ export class OrganizationsService {
       const userPatch: Partial<User> = {};
       if (fullName) userPatch.fullName = fullName;
       if (dto.password !== undefined) userPatch.password = await bcrypt.hash(String(dto.password), 10);
+      if (dto.phoneNumber !== undefined) userPatch.phoneNumber = phoneNumber;
       if (Object.keys(userPatch).length) await manager.update(User, { id: targetUserId }, userPatch);
       if (branchesChange) {
         const orgStoreIds = (await this.listStoresByOrganization(organization.id)).map((store) => store.id);
@@ -348,6 +358,16 @@ export class OrganizationsService {
     const role = MEMBER_ROLES[value as MemberRole];
     if (!role) throw new BadRequestException('اختر صلاحية العضو: مدير، دعم، أو حملات.');
     return role;
+  }
+
+  /** Empty = no number. Saudi numbers in any common form become 9665XXXXXXXX. */
+  private parsePhone(value?: string | null): string | null {
+    if (!String(value || '').trim()) return null;
+    const phone = normalizePhoneNumber(value);
+    if (!/^\d{10,15}$/.test(phone) || (phone.startsWith('966') && !/^9665\d{8}$/.test(phone))) {
+      throw new BadRequestException('رقم الجوال غير صحيح. اكتبه هكذا: 05XXXXXXXX');
+    }
+    return phone;
   }
 
   private assertPassword(password?: string) {

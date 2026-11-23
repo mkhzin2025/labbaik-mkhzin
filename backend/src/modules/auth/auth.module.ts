@@ -6,6 +6,7 @@ import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { UsersModule } from '../users/users.module';
 import { JwtStrategy } from './strategies/jwt.strategy';
+import { SmsService } from './sms.service';
 import { OrganizationsModule } from '../organizations/organizations.module';
 import { StoresModule } from '../stores/stores.module';
 
@@ -27,7 +28,7 @@ import { StoresModule } from '../stores/stores.module';
       }),
     }),
   ],
-  providers: [AuthService, JwtStrategy],
+  providers: [AuthService, JwtStrategy, SmsService],
   controllers: [AuthController],
   exports: [AuthService],
 })

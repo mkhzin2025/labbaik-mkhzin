@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import api from '../api/client';
 import { Link, useNavigate } from 'react-router-dom';
-import { Mail, Lock, Eye, EyeOff, Sun, Moon, ArrowRight } from 'lucide-react';
+import { Mail, Lock, Eye, EyeOff, Sun, Moon, ArrowRight, MessageSquareText } from 'lucide-react';
 import LogoImage from '../assets/logos/tael-bot-glyph-white.svg';
 import LogoAltImage from '../assets/logos/tael-bot-glyph-purple.svg';
 import BackgroundImage from '../assets/login-bg.webp';
@@ -18,6 +18,32 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const navigate = useNavigate();
+  // Support staff confirm each sign-in with a code texted to their mobile.
+  const [otp, setOtp] = useState<{ challenge: string; phone: string } | null>(null);
+  const [code, setCode] = useState('');
+  const [resendIn, setResendIn] = useState(0);
+
+  useEffect(() => {
+    if (resendIn <= 0) return;
+    const timer = setTimeout(() => setResendIn((value) => value - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [resendIn]);
+
+  const serverMessage = (err: unknown) => {
+    const response = (err as { response?: { status?: number; data?: { message?: unknown } } }).response;
+    const message = response?.data?.message;
+    if (message === 'Invalid credentials') return 'بيانات الدخول غير صحيحة، يرجى التحقق.';
+    if (response && typeof message === 'string' && /[\u0600-\u06FF]/.test(message)) return message;
+    return 'حدث خطأ في الاتصال، يرجى المحاولة لاحقاً.';
+  };
+
+  const finish = (data: { token: string; user: unknown; organization?: unknown }) => {
+    localStorage.setItem('access_token', data.token);
+    localStorage.setItem('user', JSON.stringify(data.user));
+    localStorage.removeItem('access'); // the dashboard fetches this account's role
+    if (data.organization) localStorage.setItem('organization', JSON.stringify(data.organization));
+    navigate('/dashboard');
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -26,22 +52,53 @@ export default function LoginPage() {
 
     try {
       const { data } = await api.post('/auth/login', { email, password });
-      localStorage.setItem('access_token', data.token);
-      localStorage.setItem('user', JSON.stringify(data.user));
-      localStorage.removeItem('access'); // the dashboard fetches this account's role
-      if (data.organization) localStorage.setItem('organization', JSON.stringify(data.organization));
-      navigate('/dashboard');
+      if (data.otpRequired) {
+        setOtp({ challenge: data.challenge, phone: data.phone });
+        setCode('');
+        setResendIn(data.resendIn || 60);
+        return;
+      }
+      finish(data);
     } catch (err: unknown) {
-      const responseMessage = (err as { response?: { data?: { message?: string } } })
-        .response?.data?.message;
-      setError(
-        responseMessage === 'Invalid credentials'
-          ? 'بيانات الدخول غير صحيحة، يرجى التحقق.'
-          : 'حدث خطأ في الاتصال، يرجى المحاولة لاحقاً.'
-      );
+      setError(serverMessage(err));
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleVerify = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!otp) return;
+    setLoading(true);
+    setError('');
+    try {
+      const { data } = await api.post('/auth/login/verify', { challenge: otp.challenge, code });
+      finish(data);
+    } catch (err: unknown) {
+      setError(serverMessage(err));
+      setCode('');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResend = async () => {
+    if (!otp || resendIn > 0) return;
+    setError('');
+    try {
+      const { data } = await api.post('/auth/login/resend', { challenge: otp.challenge });
+      setResendIn(data.resendIn || 60);
+      setCode('');
+    } catch (err: unknown) {
+      setError(serverMessage(err));
+    }
+  };
+
+  const backToPassword = () => {
+    setOtp(null);
+    setCode('');
+    setPassword('');
+    setError('');
   };
 
   return (
@@ -115,68 +172,117 @@ export default function LoginPage() {
             </p>
           </div>
 
-          {/* Form */}
-          <form onSubmit={handleLogin} className="space-y-5">
-            {/* Error Alert */}
-            {error && (
-              <Alert type="error" title="خطأ في الدخول">
-                {error}
-              </Alert>
-            )}
+          {otp ? (
+            <form onSubmit={handleVerify} className="space-y-5">
+              {error && (
+                <Alert type="error" title="تعذر التحقق">
+                  {error}
+                </Alert>
+              )}
+              <div className="flex items-start gap-3 rounded-xl bg-labbaik-blue/5 p-4">
+                <MessageSquareText className="mt-0.5 h-5 w-5 shrink-0 text-labbaik-blue dark:text-purple-200" />
+                <p className="text-sm leading-relaxed text-neutral-800 dark:text-neutral-100">
+                  أرسلنا رمز تحقق من 6 أرقام إلى جوالك <span dir="ltr" className="font-bold">{otp.phone}</span>
+                </p>
+              </div>
+              <label className="block space-y-1.5">
+                <span className="text-sm font-bold text-neutral-800 dark:text-neutral-100">رمز التحقق</span>
+                <input
+                  value={code}
+                  onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  dir="ltr"
+                  autoFocus
+                  required
+                  minLength={6}
+                  maxLength={6}
+                  placeholder="••••••"
+                  aria-label="رمز التحقق"
+                  disabled={loading}
+                  className="h-14 w-full rounded-xl border border-labbaik-border bg-labbaik-page text-center text-2xl font-bold tracking-[0.5em] text-neutral-900 dark:text-white placeholder:text-labbaik-text-muted/60 focus:outline-none focus:ring-2 focus:ring-labbaik-blue/30"
+                />
+              </label>
+              <Button type="submit" variant="primary" size="lg" isFullWidth isLoading={loading} loadingText="جاري التحقق..." disabled={code.length !== 6}>
+                تأكيد الدخول
+              </Button>
+              <div className="flex items-center justify-between text-sm">
+                <button type="button" onClick={backToPassword} className="font-semibold text-labbaik-text-muted hover:text-neutral-900 dark:hover:text-white cursor-pointer">
+                  رجوع
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleResend()}
+                  disabled={resendIn > 0 || loading}
+                  className="font-semibold text-labbaik-blue dark:text-purple-200 hover:underline disabled:no-underline disabled:text-labbaik-text-muted disabled:cursor-default cursor-pointer"
+                >
+                  {resendIn > 0 ? `إعادة الإرسال بعد ${resendIn} ث` : 'إعادة إرسال الرمز'}
+                </button>
+              </div>
+            </form>
+          ) : (
+            <form onSubmit={handleLogin} className="space-y-5">
+              {/* Error Alert */}
+              {error && (
+                <Alert type="error" title="خطأ في الدخول">
+                  {error}
+                </Alert>
+              )}
 
-            {/* Email Input */}
-            <Input
-              type="email"
-              label="البريد الإلكتروني"
-              placeholder="أدخل بريدك الإلكتروني"
-              autoComplete="email"
-              dir="ltr"
-              className="text-right placeholder:text-right"
-              icon={<Mail className="h-5 w-5" />}
-              required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              disabled={loading}
-            />
-
-            {/* Password Input */}
-            <div className="relative">
+              {/* Email Input */}
               <Input
-                type={showPassword ? 'text' : 'password'}
-                label="كلمة المرور"
-                placeholder="أدخل كلمة المرور"
-                autoComplete="current-password"
-                className="pl-12"
-                icon={<Lock className="h-5 w-5" />}
+                type="email"
+                label="البريد الإلكتروني"
+                placeholder="أدخل بريدك الإلكتروني"
+                autoComplete="email"
+                dir="ltr"
+                className="text-right placeholder:text-right"
+                icon={<Mail className="h-5 w-5" />}
                 required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
                 disabled={loading}
               />
-              <button
-                type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                className="absolute left-1 top-7.5 grid h-11 w-11 place-items-center rounded-lg text-labbaik-text-muted hover:text-neutral-900 dark:hover:text-white transition-colors cursor-pointer"
-                aria-label={showPassword ? 'إخفاء كلمة المرور' : 'إظهار كلمة المرور'}
-                aria-pressed={showPassword}
-                title={showPassword ? 'إخفاء كلمة المرور' : 'إظهار كلمة المرور'}
+
+              {/* Password Input */}
+              <div className="relative">
+                <Input
+                  type={showPassword ? 'text' : 'password'}
+                  label="كلمة المرور"
+                  placeholder="أدخل كلمة المرور"
+                  autoComplete="current-password"
+                  className="pl-12"
+                  icon={<Lock className="h-5 w-5" />}
+                  required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  disabled={loading}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute left-1 top-7.5 grid h-11 w-11 place-items-center rounded-lg text-labbaik-text-muted hover:text-neutral-900 dark:hover:text-white transition-colors cursor-pointer"
+                  aria-label={showPassword ? 'إخفاء كلمة المرور' : 'إظهار كلمة المرور'}
+                  aria-pressed={showPassword}
+                  title={showPassword ? 'إخفاء كلمة المرور' : 'إظهار كلمة المرور'}
+                >
+                  {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                </button>
+              </div>
+              {/* Submit Button */}
+              <Button
+                type="submit"
+                variant="primary"
+                size="lg"
+                isFullWidth
+                isLoading={loading}
+                loadingText="جاري الدخول..."
+                className="mt-6"
               >
-                {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
-              </button>
-            </div>
-            {/* Submit Button */}
-            <Button
-              type="submit"
-              variant="primary"
-              size="lg"
-              isFullWidth
-              isLoading={loading}
-              loadingText="جاري الدخول..."
-              className="mt-6"
-            >
-              دخول المنصة
-            </Button>
-          </form>
+                دخول المنصة
+              </Button>
+            </form>
+          )}
 
           {/* Footer */}
           <div className="mt-6 text-center">

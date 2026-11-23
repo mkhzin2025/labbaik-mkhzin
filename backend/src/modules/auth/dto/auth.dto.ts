@@ -46,3 +46,22 @@ export class LoginDto {
   @IsNotEmpty()
   password: string;
 }
+
+export class VerifyLoginCodeDto {
+  @ApiProperty({ description: 'The challenge returned by POST /auth/login when otpRequired is true.' })
+  @IsString()
+  @IsNotEmpty()
+  challenge: string;
+
+  @ApiProperty({ example: '123456' })
+  @IsString()
+  @IsNotEmpty()
+  code: string;
+}
+
+export class ResendLoginCodeDto {
+  @ApiProperty({ description: 'The challenge returned by POST /auth/login when otpRequired is true.' })
+  @IsString()
+  @IsNotEmpty()
+  challenge: string;
+}

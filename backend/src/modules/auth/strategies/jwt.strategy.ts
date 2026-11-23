@@ -14,6 +14,8 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   }
 
   async validate(payload: any) {
+    // The login-code token only finishes a sign-in; it is not a session.
+    if (payload.purpose) throw new UnauthorizedException();
     return { id: payload.sub, email: payload.email, role: payload.role, organizationId: payload.organizationId };
   }
 }

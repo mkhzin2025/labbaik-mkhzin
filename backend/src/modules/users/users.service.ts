@@ -12,7 +12,7 @@ export class UsersService {
   ) {}
 
   async findByEmail(email: string): Promise<User | null> {
-    return this.userRepository.findOne({ where: { email }, select: ['id', 'email', 'password', 'fullName', 'role'] });
+    return this.userRepository.findOne({ where: { email }, select: ['id', 'email', 'password', 'fullName', 'phoneNumber', 'role'] });
   }
 
   async create(userData: Partial<User>): Promise<User> {

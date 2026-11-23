@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
-import { BarChart3, Check, Copy, Eye, EyeOff, KeyRound, Loader2, Pencil, Plus, RefreshCw, Trash2, UserCog, X } from 'lucide-react';
+import { BarChart3, Check, Copy, Eye, EyeOff, KeyRound, Loader2, Pencil, Phone, Plus, RefreshCw, Trash2, UserCog, X } from 'lucide-react';
 import api from '../api/client';
 import { useToast } from '../components/Toast';
 import CustomerAvatar from '../components/CustomerAvatar';
@@ -14,6 +14,7 @@ interface Member {
   userId: string;
   fullName: string;
   email: string;
+  phoneNumber: string | null;
   role: MemberRole;
   storeIds: string[] | null;
   isYou: boolean;
@@ -133,6 +134,22 @@ function PasswordField({ value, onChange, label }: { value: string; onChange: (v
   );
 }
 
+/** 966501234567 → 0501234567 */
+const localPhone = (phone: string | null) => (phone ? (phone.startsWith('966') ? `0${phone.slice(3)}` : phone) : '');
+
+function PhoneField({ value, onChange, role }: { value: string; onChange: (value: string) => void; role: AssignableRole }) {
+  const required = role === 'support';
+  return (
+    <label className="block space-y-1.5">
+      <span className="text-[13px] font-bold text-neutral-800 dark:text-neutral-100">
+        رقم جوال الموظف {required ? <span className="text-red-600">*</span> : <span className="font-normal text-labbaik-text-muted">(اختياري)</span>}
+      </span>
+      <input type="tel" dir="ltr" inputMode="tel" value={value} onChange={(e) => onChange(e.target.value)} required={required} placeholder="05XXXXXXXX" autoComplete="off" className={`${inputClass} text-right`} />
+      {required && <span className="block text-xs text-labbaik-text-muted">يصله رمز تحقق برسالة نصية عند كل تسجيل دخول.</span>}
+    </label>
+  );
+}
+
 function CredentialsNote({ email, password, onClose }: { email: string; password: string; onClose: () => void }) {
   const [copied, setCopied] = useState(false);
   const text = `رابط الدخول: ${window.location.origin}/login\nالبريد: ${email}\nكلمة المرور: ${password}`;
@@ -162,6 +179,7 @@ function AddMemberForm({ branches, onAdded, onCancel }: { branches: Branch[]; on
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState(generatePassword);
   const [role, setRole] = useState<AssignableRole>('support');
+  const [phoneNumber, setPhoneNumber] = useState('');
   const [storeIds, setStoreIds] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
 
@@ -169,7 +187,7 @@ function AddMemberForm({ branches, onAdded, onCancel }: { branches: Branch[]; on
     event.preventDefault();
     setSaving(true);
     try {
-      const { data } = await api.post<Member>('/organizations/members', { fullName, email, password, role, storeIds: role === 'admin' ? [] : storeIds });
+      const { data } = await api.post<Member>('/organizations/members', { fullName, email, password, phoneNumber, role, storeIds: role === 'admin' ? [] : storeIds });
       onAdded(data, password);
     } catch (error) {
       showToast(errorMessage(error, 'تعذر إضافة العضو.'), 'error');
@@ -202,6 +220,9 @@ function AddMemberForm({ branches, onAdded, onCancel }: { branches: Branch[]; on
         <span className="block text-[13px] font-bold text-neutral-800 dark:text-neutral-100">الصلاحية</span>
         <RolePicker value={role} onChange={setRole} />
       </div>
+      <div className="max-w-md">
+        <PhoneField value={phoneNumber} onChange={setPhoneNumber} role={role} />
+      </div>
       {role !== 'admin' && <BranchPicker branches={branches} value={storeIds} onChange={setStoreIds} />}
       <div className="flex gap-2 pt-1">
         <button type="submit" disabled={saving} className="inline-flex h-10 items-center gap-2 rounded-lg bg-labbaik-blue px-4 text-sm font-black text-labbaik-on-accent hover:bg-[#553174] disabled:opacity-50 cursor-pointer">
@@ -219,6 +240,7 @@ function EditMember({ member, branches, onSaved, onCancel }: { member: Member; b
   const [role, setRole] = useState<AssignableRole>(member.role === 'owner' ? 'admin' : member.role);
   const [storeIds, setStoreIds] = useState<string[]>(member.storeIds && member.storeIds.length < branches.length ? member.storeIds : []);
   const [password, setPassword] = useState('');
+  const [phoneNumber, setPhoneNumber] = useState(localPhone(member.phoneNumber));
   const [saving, setSaving] = useState(false);
 
   const save = async () => {
@@ -229,6 +251,7 @@ function EditMember({ member, branches, onSaved, onCancel }: { member: Member; b
       if (fullName.trim() !== member.fullName) body.fullName = fullName.trim();
       if (!member.isYou) body.role = role;
       if (password) body.password = password;
+      if (phoneNumber.trim() !== localPhone(member.phoneNumber)) body.phoneNumber = phoneNumber.trim();
       const { data } = await api.patch<Member>(`/organizations/members/${member.userId}`, body);
       if (member.isYou && body.fullName) {
         try { localStorage.setItem('user', JSON.stringify({ ...JSON.parse(localStorage.getItem('user') || '{}'), fullName: data.fullName })); } catch { /* storage unavailable */ }
@@ -252,6 +275,9 @@ function EditMember({ member, branches, onSaved, onCancel }: { member: Member; b
       {member.isYou
         ? <p className="text-sm text-labbaik-text-muted">لا يمكنك تغيير صلاحيتك بنفسك.</p>
         : <RolePicker value={role} onChange={setRole} />}
+      <div className="max-w-md">
+        <PhoneField value={phoneNumber} onChange={setPhoneNumber} role={role} />
+      </div>
       {role !== 'admin' && <BranchPicker branches={branches} value={storeIds} onChange={setStoreIds} />}
       <div className="max-w-md">
         <PasswordField label="كلمة مرور جديدة (اختياري)" value={password} onChange={setPassword} />
@@ -366,7 +392,14 @@ export default function TeamPage() {
                       {member.isYou && <span className="h-5 rounded bg-labbaik-page px-1.5 text-[11px] font-bold leading-5 text-labbaik-text-muted">أنت</span>}
                       <span className={`h-5 rounded px-1.5 text-[11px] font-bold leading-5 ${ROLE_TONES[member.role]}`}>{ROLE_LABELS[member.role]}</span>
                     </div>
-                    <p className="text-xs text-labbaik-text-muted"><span dir="ltr">{member.email}</span> · {branchSummary(member)}</p>
+                    <p className="text-xs text-labbaik-text-muted">
+                      <span dir="ltr">{member.email}</span>
+                      {member.phoneNumber && <> · <Phone size={11} className="inline align-[-1px]" /> <span dir="ltr">{localPhone(member.phoneNumber)}</span></>}
+                      {' · '}{branchSummary(member)}
+                    </p>
+                    {member.role === 'support' && !member.phoneNumber && (
+                      <p className="mt-0.5 text-xs font-bold text-amber-700 dark:text-amber-300">بدون رقم جوال: لن يستطيع الدخول حتى تضيف رقمه من «تعديل».</p>
+                    )}
                   </div>
                   {editable && (
                     <div className="flex items-center gap-1">

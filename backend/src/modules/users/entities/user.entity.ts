@@ -19,6 +19,10 @@ export class User {
   @Column()
   fullName: string;
 
+  /** Mobile number (9665XXXXXXXX) that receives the login code for support staff. */
+  @Column({ type: 'varchar', length: 20, nullable: true })
+  phoneNumber: string | null;
+
   @Column({
     type: 'enum',
     enum: UserRole,
