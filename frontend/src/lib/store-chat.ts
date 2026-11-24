@@ -87,9 +87,18 @@ export interface StoreShipment {
   deliveryMethod: string;
   deliveryMethodAr?: string;
   assigneeName: string | null;
+  /** Internal courier's phone; external carriers have none. */
+  assigneePhone?: string | null;
   createdAt: string;
   itemsCount: number;
   isScheduledOrder?: boolean;
+  /** The customer's chosen delivery window; null for standard orders (missing on older store servers). */
+  scheduledDelivery?: {
+    date: string | null;
+    startAt: string | null;
+    endAt: string | null;
+    label: string | null;
+  } | null;
   address?: { city: string | null; district: string | null; street: string | null };
   fulfillment?: StoreFulfillment | null;
   customerFirstName?: string | null;
@@ -203,6 +212,41 @@ export function fulfillmentStage(f?: StoreFulfillment | null): { label: string; 
     return { label: `قيد التجهيز${progress}`, cls: 'bg-sky-500/12 text-sky-800 dark:text-sky-300' };
   }
   return { label: 'بانتظار التجهيز', cls: neutral };
+}
+
+// Store times are Saudi time whatever the viewer's device says.
+const STORE_TZ = 'Asia/Riyadh';
+const LOCALE = 'ar-u-ca-gregory-nu-latn';
+const dayKey = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: STORE_TZ }).format(d);
+const timeOf = (d: Date) => new Intl.DateTimeFormat(LOCALE, { timeZone: STORE_TZ, hour: 'numeric', minute: '2-digit' }).format(d);
+const valid = (value?: string | null) => {
+  if (!value) return null;
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d;
+};
+
+/**
+ * A scheduled order's delivery window, ready to show:
+ * relative ("اليوم" / "غداً" / "أمس" / weekday + date), the full date, and the time range.
+ */
+export function scheduleInfo(s: StoreShipment, now = new Date()) {
+  const sd = s.scheduledDelivery;
+  if (!s.isScheduledOrder && !sd) return null;
+  const start = valid(sd?.startAt) || valid(sd?.date);
+  const end = valid(sd?.endAt);
+  if (!start) return { relative: null, fullDate: null, timeRange: sd?.label || null, label: sd?.label || null, isPast: false };
+
+  const today = dayKey(now);
+  const tomorrow = dayKey(new Date(now.getTime() + 24 * 3600 * 1000));
+  const yesterday = dayKey(new Date(now.getTime() - 24 * 3600 * 1000));
+  const key = dayKey(start);
+  const fullDate = new Intl.DateTimeFormat(LOCALE, { timeZone: STORE_TZ, weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(start);
+  const shortDate = new Intl.DateTimeFormat(LOCALE, { timeZone: STORE_TZ, weekday: 'short', day: 'numeric', month: 'short' }).format(start);
+  const relative = key === today ? 'اليوم' : key === tomorrow ? 'غداً' : key === yesterday ? 'أمس' : shortDate;
+  const hasTime = Boolean(sd?.startAt);
+  const timeRange = hasTime ? (end ? `${timeOf(start)} – ${timeOf(end)}` : timeOf(start)) : sd?.label || null;
+
+  return { relative, fullDate, timeRange, label: sd?.label || null, isPast: (end || start).getTime() < now.getTime() };
 }
 
 export const PICKING_LABELS: Record<PickingStatus, string> = {

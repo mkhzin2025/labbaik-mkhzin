@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { format, isToday, isYesterday } from 'date-fns';
 import { ar } from 'date-fns/locale';
 import {
+  CalendarClock,
   CheckCheck,
   ChevronRight,
   Clock,
@@ -13,6 +14,7 @@ import {
   Package,
   PanelLeftClose,
   PanelLeftOpen,
+  Phone,
   RotateCcw,
   Search,
   Store,
@@ -33,6 +35,7 @@ import {
   SHIPMENT_STATUS,
   readSavedBranch,
   saveBranch,
+  scheduleInfo,
   storeChatApi,
 } from '../lib/store-chat';
 import type { ChatState, ReturnsPage, Paged, StoreBranch, StoreChatCustomer, StoreChatMessage, StoreReturn, StoreShipment } from '../lib/store-chat';
@@ -630,6 +633,7 @@ function CustomerOrders({ branch, customerId }: { branch: string; customerId: st
       {data.data.map((s) => {
         const status = SHIPMENT_STATUS[s.status] || { label: s.status, cls: 'bg-labbaik-page text-labbaik-text-muted' };
         const stage = fulfillmentStage(s.fulfillment);
+        const schedule = scheduleInfo(s);
         const address = [s.address?.city, s.address?.district].filter(Boolean).join('، ');
         return (
           <button key={s.shipmentId} type="button" onClick={() => setOpened(s)} title="عرض تفاصيل الطلب" className={clickableCard}>
@@ -639,10 +643,23 @@ function CustomerOrders({ branch, customerId }: { branch: string; customerId: st
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
               <LabeledChip label="الشحن" text={status.label} cls={status.cls} />
               <LabeledChip label="التجهيز" text={stage.label} cls={stage.cls} />
-              {s.isScheduledOrder && <span className={`${chip} bg-labbaik-page text-labbaik-text-muted`}>مجدول</span>}
+              {schedule && (
+                <span title={[schedule.fullDate, schedule.timeRange].filter(Boolean).join(' · ') || 'طلب مجدول'} className={`${chip} gap-1 bg-labbaik-blue/12 text-labbaik-blue dark:text-purple-200 ring-1 ring-inset ring-labbaik-blue/25`}>
+                  <CalendarClock size={12} className="shrink-0" />
+                  مجدول{schedule.relative ? ` · ${schedule.relative}` : ''}{schedule.timeRange ? ` ${schedule.timeRange}` : ''}
+                </span>
+              )}
             </div>
-            <div className="flex items-center justify-between gap-2 text-[11px] font-bold text-labbaik-text-muted">
-              <span className="truncate">{s.deliveryMethodAr || s.deliveryMethod}{s.assigneeName ? ` · ${s.assigneeName}` : ''}</span>
+            <div className="flex items-start justify-between gap-2 text-[11px] font-bold text-labbaik-text-muted">
+              <div className="min-w-0">
+                <p className="truncate">{s.deliveryMethodAr || s.deliveryMethod}{s.assigneeName ? ` · ${s.assigneeName}` : ''}</p>
+                {s.assigneePhone && (
+                  <p className="mt-0.5 inline-flex items-center gap-1 tabular-nums" title="جوال المندوب">
+                    <Phone size={11} className="shrink-0" />
+                    <span dir="ltr">{s.assigneePhone}</span>
+                  </p>
+                )}
+              </div>
               <span className="shrink-0 tabular-nums">{safeDate(s.createdAt, 'dd/MM/yyyy')}</span>
             </div>
             {(address || s.itemsCount > 0) && (

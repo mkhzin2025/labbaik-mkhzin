@@ -2,7 +2,7 @@ import { useEffect, useRef, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { format } from 'date-fns';
 import { ar } from 'date-fns/locale';
-import { ExternalLink, MapPin, Package, Undo2, X } from 'lucide-react';
+import { CalendarClock, ExternalLink, MapPin, Package, Phone, Undo2, X } from 'lucide-react';
 import { formatNumber } from '@/lib/utils';
 import {
   CHECKING_LABELS,
@@ -10,6 +10,7 @@ import {
   PICKING_LABELS,
   RETURN_STATUS_CLS,
   REVIEW_LABELS,
+  scheduleInfo,
   SHIPMENT_STATUS,
 } from '../../lib/store-chat';
 import type { StoreReturn, StoreShipment } from '../../lib/store-chat';
@@ -103,14 +104,35 @@ export function ShipmentDetailsDialog({ shipment: s, onClose }: { shipment: Stor
   const stage = fulfillmentStage(s.fulfillment);
   const f = s.fulfillment;
   const address = [s.address?.city, s.address?.district, s.address?.street].filter(Boolean).join('، ');
+  const schedule = scheduleInfo(s);
 
   return (
     <Dialog title={<span dir="ltr">{s.orderNumber || 'تفاصيل الطلب'}</span>} icon={<Package size={18} />} onClose={onClose}>
       <div className="flex flex-wrap items-center gap-1.5">
         <span className={`${chip} ${status.cls}`}>{status.label}</span>
         <span className={`${chip} ${stage.cls}`}>{stage.label}</span>
-        {s.isScheduledOrder && <span className={`${chip} ${muted}`}>طلب مجدول</span>}
+        {schedule && <span className={`${chip} gap-1 bg-labbaik-blue/12 text-labbaik-blue dark:text-purple-200`}><CalendarClock size={13} /> طلب مجدول</span>}
       </div>
+
+      {schedule && (
+        <div className="rounded-xl border border-labbaik-blue/30 bg-labbaik-blue/8 p-4 flex items-start gap-3">
+          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-labbaik-blue text-labbaik-on-accent"><CalendarClock size={20} /></span>
+          <div className="min-w-0 space-y-0.5">
+            <p className="text-xs font-black text-labbaik-blue dark:text-purple-300">موعد التوصيل المجدول</p>
+            {schedule.timeRange && <p className="text-lg font-black text-neutral-900 dark:text-white tabular-nums">{schedule.timeRange}</p>}
+            {schedule.fullDate && (
+              <p className="text-sm font-bold text-neutral-800 dark:text-neutral-100">
+                {schedule.relative && !schedule.relative.includes(' ') ? `${schedule.relative} · ` : ''}{schedule.fullDate}
+              </p>
+            )}
+            {schedule.label && schedule.label !== schedule.timeRange && <p className="text-xs font-bold text-labbaik-text-muted">الفترة: {schedule.label}</p>}
+            {!schedule.timeRange && !schedule.fullDate && <p className="text-sm font-bold text-labbaik-text-muted">لم يُسجَّل وقت الجدولة لهذا الطلب.</p>}
+            {schedule.isPast && s.status !== 'DELIVERED' && s.status !== 'CANCELLED' && (
+              <p className="text-xs font-black text-red-700 dark:text-red-300">تجاوز الطلب موعده المجدول</p>
+            )}
+          </div>
+        </div>
+      )}
 
       <Section title="الطلب">
         <Row label="رقم الطلب" value={s.orderNumber} ltr />
@@ -122,6 +144,14 @@ export function ShipmentDetailsDialog({ shipment: s, onClose }: { shipment: Stor
       <Section title="الشحن">
         <Row label="طريقة التوصيل" value={s.deliveryMethodAr || s.deliveryMethod} />
         <Row label={s.deliveryMethod === 'EXTERNAL' ? 'شركة الشحن' : 'المندوب'} value={s.assigneeName} />
+        <Row
+          label="جوال المندوب"
+          value={s.assigneePhone ? (
+            <a href={`tel:${s.assigneePhone}`} dir="ltr" className="inline-flex items-center gap-1 text-labbaik-blue dark:text-purple-300 hover:underline tabular-nums">
+              <Phone size={13} /> {s.assigneePhone}
+            </a>
+          ) : null}
+        />
         <Row label="المسافة" value={s.distanceKm != null ? `${formatNumber(Number(s.distanceKm).toFixed(1))} كم` : null} />
         <Row
           label="العنوان"
