@@ -325,7 +325,7 @@ export class ConversationsService implements OnModuleInit {
           ],
         },
       },
-    }]).exec();
+    }], { updatePipeline: true }).exec();
     this.logger.log(`Needs-reply limited to flow handoffs (${result.modifiedCount} conversation(s) updated)`);
   }
 
