@@ -3,7 +3,9 @@ import { createPortal } from 'react-dom';
 import { format, isToday, isYesterday } from 'date-fns';
 import { ar } from 'date-fns/locale';
 import {
+  CheckCheck,
   ChevronRight,
+  Clock,
   ExternalLink,
   Inbox,
   Loader2,
@@ -22,8 +24,10 @@ import { ReturnDetailsDialog, ShipmentDetailsDialog } from '../components/store-
 import { useToast } from '../components/Toast';
 import { formatNumber } from '@/lib/utils';
 import {
+  chatState,
   customerName,
   errorMessage,
+  formatWait,
   fulfillmentStage,
   RETURN_STATUS_CLS,
   SHIPMENT_STATUS,
@@ -31,9 +35,17 @@ import {
   saveBranch,
   storeChatApi,
 } from '../lib/store-chat';
-import type { ReturnsPage, Paged, StoreBranch, StoreChatCustomer, StoreChatMessage, StoreReturn, StoreShipment } from '../lib/store-chat';
+import type { ChatState, ReturnsPage, Paged, StoreBranch, StoreChatCustomer, StoreChatMessage, StoreReturn, StoreShipment } from '../lib/store-chat';
 
 const LIST_REFRESH_MS = 20_000;
+
+type ListFilter = 'all' | ChatState;
+const LIST_FILTERS: { id: ListFilter; label: string }[] = [
+  { id: 'all', label: 'الكل' },
+  { id: 'unread', label: 'غير مقروءة' },
+  { id: 'needsReply', label: 'تحتاج رداً' },
+  { id: 'replied', label: 'تم الرد' },
+];
 const THREAD_REFRESH_MS = 10_000;
 
 const safeDate = (value: string | null | undefined, pattern: string) => {
@@ -120,7 +132,9 @@ export default function StoreChatsPage() {
   const [listError, setListError] = useState(false);
   const [unreadTotal, setUnreadTotal] = useState(0);
   const [search, setSearch] = useState('');
-  const [onlyUnread, setOnlyUnread] = useState(false);
+  const [filter, setFilter] = useState<ListFilter>('all');
+  // Clock for the "waiting since" badges; advances with every list refresh.
+  const [now, setNow] = useState(() => Date.now());
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const branchRef = useRef(branch);
@@ -133,6 +147,7 @@ export default function StoreChatsPage() {
       const [list, total] = await Promise.all([storeChatApi.customers(requested), storeChatApi.unreadTotal(requested)]);
       if (requested !== branchRef.current) return; // the user switched branch meanwhile
       setCustomers(list);
+      setNow(Date.now());
       setUnreadTotal(total);
       setBranchUnread((counts) => ({ ...counts, [requested]: total }));
       setListError(false);
@@ -147,11 +162,17 @@ export default function StoreChatsPage() {
   const visibleCustomers = useMemo(() => {
     const q = search.trim().toLowerCase();
     return (customers || []).filter((c) => {
-      if (onlyUnread && !c.hasUnread) return false;
+      if (filter !== 'all' && chatState(c) !== filter) return false;
       if (!q) return true;
       return customerName(c).toLowerCase().includes(q) || String(c.customer?.phone || '').includes(q);
     });
-  }, [customers, search, onlyUnread]);
+  }, [customers, search, filter]);
+
+  const stateCounts = useMemo(() => {
+    const counts: Record<ChatState, number> = { unread: 0, needsReply: 0, replied: 0 };
+    for (const c of customers || []) counts[chatState(c)] += 1;
+    return counts;
+  }, [customers]);
 
   const selected = useMemo(() => customers?.find((c) => c.customerId === selectedId) || null, [customers, selectedId]);
 
@@ -241,6 +262,11 @@ export default function StoreChatsPage() {
       if (created?.id) {
         setMessages((current) => (current.some((m) => m.id === created.id) ? current : [...current, created]));
       }
+      // The team answered last → "تم الرد" right away, before the next list refresh
+      const sentAt = created?.createdAt || new Date().toISOString();
+      setCustomers((list) => list?.map((c) => (c.customerId === selectedId
+        ? { ...c, unreadCount: 0, hasUnread: false, lastMessageAt: sentAt, lastMessage: { senderType: 'EMPLOYEE', content: text.slice(0, 120), createdAt: sentAt, senderName: null } }
+        : c)) || list);
       stickToBottom.current = true;
       scrollToBottom();
       void refreshThread();
@@ -304,19 +330,26 @@ export default function StoreChatsPage() {
               className="w-full h-10 bg-labbaik-page border border-labbaik-border rounded-lg pr-10 pl-3 text-sm text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-labbaik-blue/30 focus:border-labbaik-blue transition-colors font-medium placeholder:text-labbaik-text-muted"
             />
           </div>
-          <div className="grid grid-cols-2 gap-1 rounded-lg border border-labbaik-border bg-labbaik-page p-0.5" role="tablist" aria-label="تصفية المحادثات">
-            {[{ id: false, label: 'الكل' }, { id: true, label: 'غير المقروءة' }].map((option) => (
-              <button
-                key={String(option.id)}
-                type="button"
-                role="tab"
-                aria-selected={onlyUnread === option.id}
-                onClick={() => setOnlyUnread(option.id)}
-                className={`h-8 rounded-md text-xs font-black transition-colors cursor-pointer ${onlyUnread === option.id ? 'bg-labbaik-surface text-labbaik-blue dark:text-white shadow-sm' : 'text-labbaik-text-muted hover:text-neutral-900 dark:hover:text-white'}`}
-              >
-                {option.label}
-              </button>
-            ))}
+          <div className="grid grid-cols-4 gap-1 rounded-lg border border-labbaik-border bg-labbaik-page p-0.5" role="tablist" aria-label="تصفية المحادثات">
+            {LIST_FILTERS.map((option) => {
+              const active = filter === option.id;
+              const count = option.id === 'all' ? null : stateCounts[option.id];
+              return (
+                <button
+                  key={option.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => setFilter(option.id)}
+                  className={`h-9 px-1 flex flex-col items-center justify-center rounded-md text-[11px] leading-tight font-black transition-colors cursor-pointer ${active ? 'bg-labbaik-surface text-labbaik-blue dark:text-white shadow-sm' : 'text-labbaik-text-muted hover:text-neutral-900 dark:hover:text-white'}`}
+                >
+                  <span className="truncate max-w-full">{option.label}</span>
+                  {count !== null && (
+                    <span className={`tabular-nums text-[10px] ${count > 0 && option.id === 'unread' ? 'text-labbaik-blue dark:text-purple-300' : count > 0 && option.id === 'needsReply' ? 'text-amber-700 dark:text-amber-300' : ''}`}>{formatNumber(count)}</span>
+                  )}
+                </button>
+              );
+            })}
           </div>
         </div>
 
@@ -339,32 +372,52 @@ export default function StoreChatsPage() {
           ) : !visibleCustomers.length ? (
             <div className="p-8 flex flex-col items-center text-center gap-2 text-labbaik-text-muted">
               <Inbox size={32} />
-              <p className="text-sm font-bold">{search || onlyUnread ? 'لا توجد نتائج' : 'لا توجد محادثات حالياً'}</p>
+              <p className="text-sm font-bold">{search || filter !== 'all' ? 'لا توجد نتائج' : 'لا توجد محادثات حالياً'}</p>
               <p className="text-xs">محادثات المتجر تبقى 3 أيام ثم تُحذف تلقائياً.</p>
             </div>
           ) : (
             visibleCustomers.map((c) => {
               const active = c.customerId === selectedId;
               const name = customerName(c);
+              const state = chatState(c);
+              const unread = state === 'unread';
+              const last = c.lastMessage;
+              const preview = last
+                ? `${last.senderType === 'EMPLOYEE' ? `${last.senderName || 'الفريق'}: ` : ''}${last.content}`
+                : c.customer?.phone || '—';
               return (
                 <button
                   key={c.customerId}
                   type="button"
                   onClick={() => setSelectedId(c.customerId)}
                   aria-current={active ? 'true' : undefined}
-                  className={`w-full flex items-center gap-3 px-4 py-3 text-right transition-colors border-b border-labbaik-border cursor-pointer ${active ? 'bg-labbaik-blue/12 dark:bg-labbaik-blue/25' : c.hasUnread ? 'bg-labbaik-blue/5 dark:bg-labbaik-blue/10 hover:bg-labbaik-blue/10' : 'hover:bg-labbaik-page'}`}
+                  title={c.customer?.phone || undefined}
+                  className={`w-full flex items-center gap-3 px-4 py-3 text-right transition-colors border-b border-labbaik-border cursor-pointer ${active ? 'bg-labbaik-blue/12 dark:bg-labbaik-blue/25' : unread ? 'bg-labbaik-blue/5 dark:bg-labbaik-blue/10 hover:bg-labbaik-blue/10' : 'hover:bg-labbaik-page'}`}
                 >
                   <CustomerAvatar name={name} seed={c.customer?.phone || c.customerId} size={44} className="rounded-full" />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between gap-2">
-                      <h4 className={`text-sm truncate ${c.hasUnread ? 'font-black text-neutral-900 dark:text-white' : 'font-bold text-neutral-800 dark:text-neutral-100'}`}>{name}</h4>
-                      <time className={`text-[11px] shrink-0 tabular-nums ${c.hasUnread ? 'text-labbaik-blue dark:text-purple-300 font-black' : 'text-labbaik-text-muted font-bold'}`}>{listTime(c.lastMessageAt)}</time>
+                      <h4 className={`text-sm truncate ${unread ? 'font-black text-neutral-900 dark:text-white' : 'font-bold text-neutral-800 dark:text-neutral-100'}`}>{name}</h4>
+                      <time className={`text-[11px] shrink-0 tabular-nums ${unread ? 'text-labbaik-blue dark:text-purple-300 font-black' : 'text-labbaik-text-muted font-bold'}`}>{listTime(c.lastMessageAt)}</time>
                     </div>
                     <div className="flex items-center justify-between gap-2 mt-0.5">
-                      <p className="text-xs truncate text-labbaik-text-muted font-medium" dir="ltr" style={{ textAlign: 'right' }}>{c.customer?.phone || '—'}</p>
-                      {c.hasUnread && (
-                        <span className="min-w-5 h-5 px-1.5 rounded-full bg-labbaik-blue text-labbaik-on-accent text-[11px] font-black flex items-center justify-center tabular-nums">{c.unreadCount > 99 ? '99+' : c.unreadCount}</span>
-                      )}
+                      <p className={`text-xs truncate flex items-center gap-1 ${unread ? 'text-neutral-800 dark:text-neutral-100 font-bold' : 'text-labbaik-text-muted font-medium'}`}>
+                        {state === 'replied' && last && <CheckCheck size={14} className="shrink-0" />}
+                        <span className="truncate" dir={last ? 'auto' : 'ltr'}>{preview}</span>
+                      </p>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {state === 'needsReply' && (
+                          <span title={`العميل ينتظر الرد منذ ${formatWait(last?.createdAt, now)}`} className="inline-flex items-center gap-0.5 h-5 px-1.5 rounded-md bg-amber-500/15 text-amber-800 dark:text-amber-300 text-[11px] font-black tabular-nums">
+                            <Clock size={11} /> بانتظار الرد · {formatWait(last?.createdAt, now)}
+                          </span>
+                        )}
+                        {state === 'replied' && last && (
+                          <span className="h-5 px-1.5 rounded-md bg-labbaik-page text-[11px] font-bold leading-5 text-labbaik-text-muted">تم الرد</span>
+                        )}
+                        {unread && (
+                          <span className="min-w-5 h-5 px-1.5 rounded-full bg-labbaik-blue text-labbaik-on-accent text-[11px] font-black flex items-center justify-center tabular-nums">{c.unreadCount > 99 ? '99+' : c.unreadCount}</span>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </button>

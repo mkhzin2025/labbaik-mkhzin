@@ -9,6 +9,37 @@ export interface StoreChatCustomer {
   hasUnread: boolean;
   lastMessageAt: string | null;
   customer: { firstName: string | null; lastName: string | null; phone: string | null } | null;
+  /** Latest real message (the automatic welcome is skipped). Missing on store servers not yet updated. */
+  lastMessage?: {
+    senderType: 'CUSTOMER' | 'EMPLOYEE';
+    content: string;
+    createdAt: string;
+    senderName: string | null;
+  } | null;
+}
+
+export type ChatState = 'unread' | 'needsReply' | 'replied';
+
+/**
+ * unread: the customer wrote and nobody opened it yet.
+ * needsReply: opened, but the last real message is still the customer's.
+ * replied: the team answered last.
+ */
+export function chatState(c: StoreChatCustomer): ChatState {
+  if (c.unreadCount > 0) return 'unread';
+  if (c.lastMessage === undefined) return 'replied'; // older store server: only read/unread is known
+  return c.lastMessage?.senderType === 'CUSTOMER' ? 'needsReply' : 'replied';
+}
+
+/** "5د" / "3س" / "2ي" since a date, for the waiting badge. */
+export function formatWait(value: string | null | undefined, now = Date.now()) {
+  if (!value) return '';
+  const minutes = Math.max(0, Math.floor((now - new Date(value).getTime()) / 60000));
+  if (minutes < 1) return 'الآن';
+  if (minutes < 60) return `${minutes}د`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}س`;
+  return `${Math.floor(hours / 24)}ي`;
 }
 
 export interface StoreChatMessage {
