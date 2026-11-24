@@ -60,8 +60,14 @@ export class ProductSearchService {
 
   async stores(): Promise<ErpStore[]> {
     if (this.storesCache && Date.now() - this.storesCache.at < STORES_TTL_MS) return this.storesCache.stores;
-    const data = await this.odata<{ value: { StoreID: string; StoreName: string }[] }>('Store', {});
+    // Only branches that actually have items in RawItem; most ERP stores are empty.
+    const [data, stocked] = await Promise.all([
+      this.odata<{ value: { StoreID: string; StoreName: string }[] }>('Store', {}),
+      this.odata<{ StoreID: string }[] | { value: { StoreID: string }[] }>('RawItem', { $apply: 'groupby((StoreID))' }),
+    ]);
+    const stockedIds = new Set((Array.isArray(stocked) ? stocked : stocked.value || []).map((s) => String(s.StoreID)));
     const stores = (data.value || [])
+      .filter((s) => stockedIds.has(String(s.StoreID)))
       .map((s) => ({ id: String(s.StoreID), name: String(s.StoreName || '').trim() }))
       .sort((a, b) => Number(a.id) - Number(b.id));
     this.storesCache = { at: Date.now(), stores };

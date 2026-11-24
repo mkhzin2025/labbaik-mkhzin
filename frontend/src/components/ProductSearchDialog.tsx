@@ -43,7 +43,12 @@ export default function ProductSearchDialog({ open, onClose }: { open: boolean; 
   useEffect(() => {
     if (!open || stores) return;
     storeChatApi.productStores()
-      .then((list) => { setStores(list); setStoresError(false); })
+      .then((list) => {
+        setStores(list);
+        setStoresError(false);
+        // A remembered branch that no longer has items falls back to the first available one.
+        setStoreId((current) => (list.some((s) => s.id === current) ? current : list[0]?.id ?? ''));
+      })
       .catch(() => setStoresError(true));
   }, [open, stores]);
 
