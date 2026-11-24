@@ -145,12 +145,25 @@ export interface ReturnsPage extends Paged<StoreReturn> {
 }
 
 export interface StoreBranch { key: string; label: string }
-export interface StoreChatStatus { enabled: boolean; branches: StoreBranch[] }
+export interface StoreChatStatus { enabled: boolean; branches: StoreBranch[]; productSearch: boolean }
+
+/** ERP product search (top bar). Prices include VAT. */
+export interface ErpStore { id: string; name: string }
+export interface ProductUnit { productId: string; unitName: string; equivalent: number; qty: number; price: number; barcodes: string[] }
+export interface Product { sku: string; name: string; categoryName: string | null; units: ProductUnit[] }
+export interface ProductPage { total: number; page: number; pageSize: number; totalPages: number; result: Product[] }
 
 /** Every call names the branch (store server) it goes to; the backend holds each branch's URL. */
 export const storeChatApi = {
   status: () =>
-    api.get<StoreChatStatus>('/store-chat/status').then((r) => ({ enabled: Boolean(r.data?.enabled), branches: Array.isArray(r.data?.branches) ? r.data.branches : [] })),
+    api.get<StoreChatStatus>('/store-chat/status').then((r) => ({
+      enabled: Boolean(r.data?.enabled),
+      branches: Array.isArray(r.data?.branches) ? r.data.branches : [],
+      productSearch: Boolean(r.data?.productSearch),
+    })),
+  productStores: () => api.get<ErpStore[]>('/store-chat/products/stores').then((r) => (Array.isArray(r.data) ? r.data : [])),
+  products: (storeId: string, q: string, page: number, signal?: AbortSignal) =>
+    api.get<ProductPage>('/store-chat/products', { params: { storeId, q, page }, signal }).then((r) => r.data),
   unreadTotal: (branch: string) =>
     api.get<{ unreadTotalCount: number }>('/store-chat/unread-total-count', { params: { branch } }).then((r) => r.data.unreadTotalCount ?? 0),
   customers: (branch: string) =>

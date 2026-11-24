@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useCallback, useState, useEffect, useRef } from 'react';
 import { useNavigate, Link, useLocation, Navigate } from 'react-router-dom';
 import { io, Socket } from 'socket.io-client';
 import {
@@ -17,6 +17,7 @@ import {
   Users,
   GitBranch,
   Moon,
+  PackageSearch,
   Sun,
   MessageSquareText,
   WalletCards,
@@ -40,6 +41,7 @@ import UnfinishedConversationsDialog from './UnfinishedConversations';
 import { fetchUnfinished, holdsSignOut } from '../lib/unfinished';
 import type { UnfinishedConversation } from '../lib/unfinished';
 import { storeChatApi } from '../lib/store-chat';
+import ProductSearchDialog from './ProductSearchDialog';
 
 interface NavItem {
   icon: React.ReactNode;
@@ -141,9 +143,27 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   // Store chats appear only for the organizations the backend enables them for.
   const [storeChatEnabled, setStoreChatEnabled] = useState(false);
+  const [productSearchEnabled, setProductSearchEnabled] = useState(false);
+  const [productSearchOpen, setProductSearchOpen] = useState(false);
+  const closeProductSearch = useCallback(() => setProductSearchOpen(false), []);
   useEffect(() => {
-    storeChatApi.status().then((s) => setStoreChatEnabled(s.enabled)).catch(() => setStoreChatEnabled(false));
+    storeChatApi.status()
+      .then((s) => { setStoreChatEnabled(s.enabled); setProductSearchEnabled(s.productSearch); })
+      .catch(() => { setStoreChatEnabled(false); setProductSearchEnabled(false); });
   }, [access?.organization.id]);
+
+  // Ctrl/⌘+K opens the product search from any page.
+  useEffect(() => {
+    if (!productSearchEnabled) return;
+    const onKey = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        setProductSearchOpen(true);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [productSearchEnabled]);
 
   // Close the mobile drawer and the user menu on Escape (links close them on click).
   useEffect(() => {
@@ -336,6 +356,17 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </div>
 
           <div className="flex items-center gap-2">
+            {productSearchEnabled && (
+              <button
+                type="button"
+                onClick={() => setProductSearchOpen(true)}
+                className={iconButton}
+                aria-label="البحث عن منتج"
+                title="البحث عن منتج (Ctrl+K)"
+              >
+                <PackageSearch size={18} />
+              </button>
+            )}
             <button
               type="button"
               onClick={toggleTheme}
@@ -394,6 +425,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </div>
         </main>
       </div>
+      {productSearchEnabled && <ProductSearchDialog open={productSearchOpen} onClose={closeProductSearch} />}
       {unfinished && (
         <UnfinishedConversationsDialog items={unfinished} onChange={setUnfinished} onClose={() => setUnfinished(null)} onSignOut={signOut} />
       )}

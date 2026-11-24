@@ -5,6 +5,7 @@ import { Repository } from 'typeorm';
 import { Access } from '../organizations/access';
 import { User } from '../users/entities/user.entity';
 import { StoreChatService } from './store-chat.service';
+import { ProductSearchService } from './product-search.service';
 
 /** Mkhzin store chats inside the platform, for the organizations allowed in MKHZIN_STORE_ORG_IDS. */
 @ApiTags('Store chat')
@@ -14,6 +15,7 @@ import { StoreChatService } from './store-chat.service';
 export class StoreChatController {
   constructor(
     private readonly storeChat: StoreChatService,
+    private readonly products: ProductSearchService,
     @InjectRepository(User) private readonly users: Repository<User>,
   ) {}
 
@@ -22,7 +24,28 @@ export class StoreChatController {
   status(@Request() req) {
     const enabled = this.storeChat.isEnabledFor(req.user.organizationId);
     // Labels and keys only; the branch URLs stay on the server
-    return { enabled, branches: enabled ? this.storeChat.branches.map(({ key, label }) => ({ key, label })) : [] };
+    return {
+      enabled,
+      branches: enabled ? this.storeChat.branches.map(({ key, label }) => ({ key, label })) : [],
+      productSearch: this.products.isEnabledFor(req.user.organizationId),
+    };
+  }
+
+  @Get('products/stores')
+  @ApiOperation({ summary: 'ERP stores/branches to search products in' })
+  productStores(@Request() req) {
+    this.products.assertEnabled(req.user.organizationId);
+    return this.products.stores();
+  }
+
+  @Get('products')
+  @ApiOperation({ summary: 'Search products of one ERP store by name, SKU or barcode (prices include VAT)' })
+  searchProducts(@Request() req, @Query() query: Record<string, string>) {
+    this.products.assertEnabled(req.user.organizationId);
+    const storeId = String(query.storeId || '').trim();
+    if (!/^\d{1,6}$/.test(storeId)) throw new HttpException('اختر الفرع أولاً', 400);
+    const page = Math.min(10000, Math.max(1, Math.trunc(Number(query.page) || 1)));
+    return this.products.search(storeId, String(query.q || '').slice(0, 200), page);
   }
 
   @Get('unread-total-count')
