@@ -107,6 +107,7 @@ export class ProductSearchService {
     const result: Product[] = skus.map((sku) => {
       const units = rows.filter((r) => r.SKU === sku).sort((a, b) => a.Equivalent - b.Equivalent);
       const first = units[0];
+      const baseQty = ProductSearchService.baseQty(units);
       return {
         sku,
         name: first?.Name || products.find((p) => p.SKU === sku)?.Name || sku,
@@ -115,12 +116,24 @@ export class ProductSearchService {
           productId: u.ProductID,
           unitName: u.UnitName,
           equivalent: Number(u.Equivalent) || 1,
-          qty: Number(u.StoreQty) || 0,
+          qty: ProductSearchService.unitQty(baseQty, Number(u.Equivalent) || 1),
           price: round2((Number(u.StorePrice) || 0) * (1 + VAT_RATE)),
           barcodes: String(u.Barcodes || '').split(',').map((b) => b.replace(/\|/g, '').trim()).filter(Boolean),
         })),
       };
     });
     return { total, page, pageSize: PAGE_SIZE, totalPages: Math.max(1, Math.ceil(total / PAGE_SIZE)), result };
+  }
+
+  /** The ERP keeps stock only on the base unit (Equivalent 1, the smallest); larger units report 0. */
+  static baseQty(units: { Equivalent: number; StoreQty: number }[]): number {
+    const base = units.find((u) => Number(u.Equivalent) === 1) ?? units[0];
+    return base ? Number(base.StoreQty) || 0 : 0;
+  }
+
+  /** Whole units of this size that the base stock covers, e.g. 45 pieces → 4 cartons of 10. */
+  static unitQty(baseQty: number, equivalent: number): number {
+    if (equivalent <= 1) return baseQty;
+    return Math.max(0, Math.floor(baseQty / equivalent));
   }
 }

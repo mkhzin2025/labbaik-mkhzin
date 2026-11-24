@@ -13,3 +13,21 @@ describe('product search filter', () => {
     expect(ProductSearchService.filterFor('7', "o'reo")).toBe("StoreID eq '7' and contains(Name,'o''reo')");
   });
 });
+
+describe('product search unit quantities', () => {
+  const units = [
+    { Equivalent: 1, StoreQty: 45 },
+    { Equivalent: 10, StoreQty: 0 },
+  ];
+
+  it('takes stock from the base unit', () => {
+    expect(ProductSearchService.baseQty(units)).toBe(45);
+  });
+
+  it('gives larger units the whole count the base stock covers', () => {
+    expect(ProductSearchService.unitQty(45, 10)).toBe(4);
+    expect(ProductSearchService.unitQty(120, 24)).toBe(5);
+    expect(ProductSearchService.unitQty(5, 12)).toBe(0);
+    expect(ProductSearchService.unitQty(45, 1)).toBe(45);
+  });
+});
