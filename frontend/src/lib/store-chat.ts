@@ -46,6 +46,7 @@ export interface StoreFulfillment {
   checkerName?: string | null;
   activeSubstitutions?: number;
   shortageReturns?: number;
+  itemsCount?: number;
 }
 
 export interface StoreShipment {
@@ -60,18 +61,30 @@ export interface StoreShipment {
   isScheduledOrder?: boolean;
   address?: { city: string | null; district: string | null; street: string | null };
   fulfillment?: StoreFulfillment | null;
+  customerFirstName?: string | null;
+  customerPhone?: string | null;
+  customerDeliveredOrdersCount?: number;
+  /** grams */
+  weight?: number;
+  distanceKm?: number | null;
 }
 
 export interface StoreReturnItem { productName: string; sku: string; quantity: number; total: number }
 
 export interface StoreReturn {
   returnRequestId: string;
+  orderId?: string | null;
   orderNumber: string | null;
   status: 'PENDING_REVIEW' | 'APPROVED' | 'REJECTED' | 'REFUND_PROCESSED' | string;
   statusAr: string;
+  source?: string;
   sourceAr: string;
+  reason?: string | null;
   reasonAr: string | null;
+  notes?: string | null;
+  reviewNotes?: string | null;
   requestedAt: string;
+  createdAt?: string;
   itemsCount: number;
   totalQuantity: number;
   totalAmount: number;
@@ -160,6 +173,29 @@ export function fulfillmentStage(f?: StoreFulfillment | null): { label: string; 
   }
   return { label: 'بانتظار التجهيز', cls: neutral };
 }
+
+export const PICKING_LABELS: Record<PickingStatus, string> = {
+  PENDING: 'بانتظار التجهيز',
+  IN_PROGRESS: 'قيد التجهيز',
+  COMPLETED: 'مكتمل',
+  COMPLETED_WITH_SHORTAGE: 'مكتمل مع نواقص',
+  CANCELLED: 'ملغي',
+};
+
+export const CHECKING_LABELS: Record<CheckingStatus, string> = {
+  PENDING: 'بانتظار التشييك',
+  IN_PROGRESS: 'قيد التشييك',
+  COMPLETED: 'مكتمل',
+  COMPLETED_WITH_ISSUES: 'مكتمل مع ملاحظات',
+  CANCELLED: 'ملغي',
+};
+
+export const REVIEW_LABELS: Record<ReviewStatus, string> = {
+  NOT_REQUIRED: 'لا تحتاج مراجعة',
+  PENDING: 'بانتظار المراجعة',
+  APPROVED: 'معتمدة',
+  REJECTED: 'مرفوضة',
+};
 
 /** Axios error → the server's Arabic message when there is one. */
 export const errorMessage = (error: unknown, fallback: string) => {

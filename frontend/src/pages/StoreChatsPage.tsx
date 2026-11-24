@@ -1,4 +1,5 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { createPortal } from 'react-dom';
 import { format, isToday, isYesterday } from 'date-fns';
 import { ar } from 'date-fns/locale';
 import {
@@ -17,6 +18,7 @@ import {
 } from 'lucide-react';
 import CustomerAvatar from '../components/CustomerAvatar';
 import Composer from '../components/conversations/Composer';
+import { ReturnDetailsDialog, ShipmentDetailsDialog } from '../components/store-chat/StoreDetailsDialogs';
 import { useToast } from '../components/Toast';
 import { formatNumber } from '@/lib/utils';
 import {
@@ -29,7 +31,7 @@ import {
   saveBranch,
   storeChatApi,
 } from '../lib/store-chat';
-import type { ReturnsPage, Paged, StoreBranch, StoreChatCustomer, StoreChatMessage, StoreShipment } from '../lib/store-chat';
+import type { ReturnsPage, Paged, StoreBranch, StoreChatCustomer, StoreChatMessage, StoreReturn, StoreShipment } from '../lib/store-chat';
 
 const LIST_REFRESH_MS = 20_000;
 const THREAD_REFRESH_MS = 10_000;
@@ -69,6 +71,12 @@ function usePolling(callback: () => void, ms: number, enabled = true) {
 }
 
 const chip = 'inline-flex items-center h-5 px-1.5 rounded-md text-[11px] font-bold whitespace-nowrap';
+const clickableCard = 'w-full text-right rounded-xl border border-labbaik-border bg-labbaik-surface p-3 space-y-2 transition-colors cursor-pointer hover:border-labbaik-blue/40 hover:bg-labbaik-blue/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-labbaik-blue/40';
+
+/** Enter/Space open a card that is a div (it holds its own buttons, so it cannot be a <button>). */
+const activateOnKey = (open: () => void) => (event: KeyboardEvent) => {
+  if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); open(); }
+};
 const outlineButton = 'h-9 px-4 rounded-lg border border-labbaik-border text-sm font-bold text-neutral-800 dark:text-neutral-100 hover:border-labbaik-blue/40 cursor-pointer';
 
 export default function StoreChatsPage() {
@@ -549,6 +557,7 @@ const PanelEmpty = ({ icon: Icon, text }: { icon: typeof Package; text: string }
 
 function CustomerOrders({ branch, customerId }: { branch: string; customerId: string }) {
   const { page, setPage, data, error, loading } = usePaged<Paged<StoreShipment>>((p) => storeChatApi.shipments(branch, customerId, p), `${branch}:${customerId}`);
+  const [opened, setOpened] = useState<StoreShipment | null>(null);
 
   if (loading && !data) return <PanelSkeleton />;
   if (error) return <p className="py-8 text-center text-sm font-bold text-red-700 dark:text-red-300">تعذر تحميل الطلبات</p>;
@@ -562,7 +571,7 @@ function CustomerOrders({ branch, customerId }: { branch: string; customerId: st
         const stage = fulfillmentStage(s.fulfillment);
         const address = [s.address?.city, s.address?.district].filter(Boolean).join('، ');
         return (
-          <div key={s.shipmentId} className="rounded-xl border border-labbaik-border bg-labbaik-surface p-3 space-y-2">
+          <button key={s.shipmentId} type="button" onClick={() => setOpened(s)} title="عرض تفاصيل الطلب" className={clickableCard}>
             <div className="flex items-center justify-between gap-2">
               <span className="text-sm font-black text-labbaik-blue dark:text-purple-300 tabular-nums" dir="ltr">{s.orderNumber || '—'}</span>
               <span className={`${chip} ${status.cls}`}>{status.label}</span>
@@ -580,10 +589,11 @@ function CustomerOrders({ branch, customerId }: { branch: string; customerId: st
                 {s.itemsCount > 0 && `${formatNumber(s.itemsCount)} قطعة`}{address && s.itemsCount > 0 ? ' · ' : ''}{address}
               </p>
             )}
-          </div>
+          </button>
         );
       })}
       <Pager page={page} totalPages={data.totalPages} onChange={setPage} />
+      {opened && <ShipmentDetailsDialog shipment={opened} onClose={() => setOpened(null)} />}
     </div>
   );
 }
@@ -591,6 +601,7 @@ function CustomerOrders({ branch, customerId }: { branch: string; customerId: st
 function CustomerReturns({ branch, customerId }: { branch: string; customerId: string }) {
   const { page, setPage, data, error, loading } = usePaged<ReturnsPage>((p) => storeChatApi.returns(branch, customerId, p), `${branch}:${customerId}`);
   const [preview, setPreview] = useState<string | null>(null);
+  const [opened, setOpened] = useState<StoreReturn | null>(null);
 
   if (loading && !data) return <PanelSkeleton />;
   if (error) return <p className="py-8 text-center text-sm font-bold text-red-700 dark:text-red-300">تعذر تحميل المرتجعات</p>;
@@ -610,7 +621,15 @@ function CustomerReturns({ branch, customerId }: { branch: string; customerId: s
       </div>
 
       {data.data.map((r) => (
-        <div key={r.returnRequestId} className="rounded-xl border border-labbaik-border bg-labbaik-surface p-3 space-y-2">
+        <div
+          key={r.returnRequestId}
+          role="button"
+          tabIndex={0}
+          title="عرض تفاصيل المرتجع"
+          onClick={() => setOpened(r)}
+          onKeyDown={activateOnKey(() => setOpened(r))}
+          className={clickableCard}
+        >
           <div className="flex items-center justify-between gap-2">
             <span className="text-sm font-black text-labbaik-blue dark:text-purple-300 tabular-nums" dir="ltr">{r.orderNumber || '—'}</span>
             <span className={`${chip} ${RETURN_STATUS_CLS[r.status] || 'bg-labbaik-page text-labbaik-text-muted'}`}>{r.statusAr}</span>
@@ -642,7 +661,7 @@ function CustomerReturns({ branch, customerId }: { branch: string; customerId: s
           {r.attachments.length > 0 && (
             <div className="flex gap-2">
               {r.attachments.map((url) => (
-                <button key={url} type="button" onClick={() => setPreview(url)} className="h-14 w-14 overflow-hidden rounded-lg border border-labbaik-border cursor-zoom-in" aria-label="عرض صورة المرتجع">
+                <button key={url} type="button" onClick={(e) => { e.stopPropagation(); setPreview(url); }} className="h-14 w-14 overflow-hidden rounded-lg border border-labbaik-border cursor-zoom-in" aria-label="عرض صورة المرتجع">
                   <img src={url} alt="صورة المرتجع" loading="lazy" className="h-full w-full object-cover" />
                 </button>
               ))}
@@ -654,7 +673,9 @@ function CustomerReturns({ branch, customerId }: { branch: string; customerId: s
       ))}
       <Pager page={page} totalPages={data.totalPages} onChange={setPage} />
 
-      {preview && (
+      {opened && <ReturnDetailsDialog item={opened} onClose={() => setOpened(null)} onPreview={setPreview} />}
+
+      {preview && createPortal(
         <div role="dialog" aria-modal="true" aria-label="صورة المرتجع" className="fixed inset-0 z-[200] grid place-items-center bg-black/80 p-4" onClick={() => setPreview(null)}>
           <div className="relative" onClick={(e) => e.stopPropagation()}>
             <img src={preview} alt="صورة المرتجع" className="max-h-[85vh] max-w-[92vw] rounded-lg object-contain shadow-2xl" />
@@ -662,7 +683,8 @@ function CustomerReturns({ branch, customerId }: { branch: string; customerId: s
               <ExternalLink size={13} /> فتح
             </a>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

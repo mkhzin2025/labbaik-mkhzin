@@ -83,7 +83,8 @@ const SidebarItem = ({ item, active, isCollapsed, onNavigate }: { item: NavItem;
     }`}
   >
     <span className={`shrink-0 ${active ? '' : 'text-labbaik-blue dark:text-purple-300'}`}>{item.icon}</span>
-    <span className={`truncate ${isCollapsed ? 'lg:sr-only' : ''}`}>{item.label}</span>
+    {/* truncate clips overflow; the padding keeps Arabic descenders (ر، و، ي) inside the box. */}
+    <span className={`truncate py-1 leading-normal ${isCollapsed ? 'lg:sr-only' : ''}`}>{item.label}</span>
   </Link>
 );
 
