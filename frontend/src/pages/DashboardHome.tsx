@@ -1,6 +1,9 @@
 import { useState, useEffect } from 'react';
 import api from '../api/client';
 import { readCachedAccess } from '../lib/access';
+import UnfinishedConversationsDialog from '../components/UnfinishedConversations';
+import { fetchUnfinished, holdsSignOut } from '../lib/unfinished';
+import type { UnfinishedConversation } from '../lib/unfinished';
 import { currentUser, formatDuration, localDay, type MemberActivity } from '../lib/team';
 import {
   MessageSquare,
@@ -15,7 +18,8 @@ import {
   Timer,
   MessageSquareReply,
   CheckCircle2,
-  Clock
+  Clock,
+  MessageSquareWarning
 } from 'lucide-react';
 import {
   AreaChart,
@@ -64,6 +68,17 @@ export default function DashboardHome() {
   const [agentFilter, setAgentFilter] = useState('');
   const [members, setMembers] = useState<{ userId: string; fullName: string; email: string }[]>([]);
   const [myDay, setMyDay] = useState<MemberActivity | null>(null);
+  const [unfinished, setUnfinished] = useState<UnfinishedConversation[]>([]);
+  const [showUnfinished, setShowUnfinished] = useState(false);
+
+  // Read once when the page opens (no polling): conversations the member still owes an answer.
+  useEffect(() => {
+    if (!holdsSignOut(access)) return;
+    let live = true;
+    void fetchUnfinished().then((items) => { if (live && items) setUnfinished(items); });
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     let live = true;
@@ -142,6 +157,26 @@ export default function DashboardHome() {
 
   return (
     <div className="space-y-8 animate-fade-in" dir="rtl">
+      {unfinished.length > 0 && (
+        <button
+          type="button"
+          onClick={() => setShowUnfinished(true)}
+          className="flex w-full items-center gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-start hover:bg-amber-500/15 cursor-pointer"
+        >
+          <MessageSquareWarning size={20} className="shrink-0 text-amber-700 dark:text-amber-300" />
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-black text-amber-950 dark:text-amber-100">
+              {unfinished.length === 1 ? 'محادثة تنتظر ردك' : `${unfinished.length} محادثات تنتظر ردك`}
+            </span>
+            <span className="block text-xs text-amber-900/80 dark:text-amber-200/80">العميل رد ولم ترد عليه. لا يمكنك تسجيل الخروج حتى ترد عليها أو تغلقها.</span>
+          </span>
+          <span className="shrink-0 text-xs font-black text-amber-900 dark:text-amber-200">عرض</span>
+        </button>
+      )}
+      {showUnfinished && (
+        <UnfinishedConversationsDialog items={unfinished} onChange={setUnfinished} onClose={() => setShowUnfinished(false)} />
+      )}
+
       {/* Welcome Header */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
         <div>

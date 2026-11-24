@@ -10,7 +10,7 @@ import type { FlowState } from './flow-engine';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { OrganizationsService } from '../organizations/organizations.service';
 import { examples, ids } from '../../common/swagger/api-examples';
-import { Access } from '../organizations/access';
+import { Access, EditsFlows } from '../organizations/access';
 
 @ApiTags('Flows')
 @ApiBearerAuth()
@@ -57,6 +57,7 @@ export class FlowsController {
 
   /** Stores a file to send from a flow message; it is uploaded to Meta when a customer reaches the node. */
   @Post('media')
+  @EditsFlows()
   @ApiOperation({ summary: 'Upload an image, video, audio or document for a flow message' })
   @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 16 * 1024 * 1024 } }))
   uploadMedia(@UploadedFile() file: UploadedFlowFile) {
@@ -86,6 +87,7 @@ export class FlowsController {
   }
 
   @Post()
+  @EditsFlows()
   @ApiOperation({ summary: 'Create an automation flow' })
   @ApiBody({ schema: { type: 'object' }, examples: { default: { value: examples.flow.create } } })
   @ApiResponse({ status: 201, description: 'Flow created.', schema: { example: examples.flow.item } })
@@ -97,6 +99,7 @@ export class FlowsController {
   }
 
   @Patch(':id')
+  @EditsFlows()
   @ApiOperation({ summary: 'Update an automation flow' })
   @ApiParam({ name: 'id', example: ids.flow })
   @ApiBody({ schema: { type: 'object' }, examples: { default: { value: examples.flow.update } } })
@@ -109,6 +112,7 @@ export class FlowsController {
   }
 
   @Delete(':id')
+  @EditsFlows()
   @ApiOperation({ summary: 'Delete an automation flow' })
   @ApiParam({ name: 'id', example: ids.flow })
   @ApiResponse({ status: 200, description: 'Deleted flow.', schema: { example: examples.flow.item } })

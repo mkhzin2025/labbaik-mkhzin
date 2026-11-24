@@ -7,7 +7,7 @@ import { Organization } from './entities/organization.entity';
 import { OrganizationMember, OrganizationRole } from './entities/organization-member.entity';
 import { StoreMember, StoreMemberRole } from './entities/store-member.entity';
 import { User, UserRole } from '../users/entities/user.entity';
-import { MEMBER_ROLES, memberRoleOf, sectionsFor, seesAllBranches } from './roles';
+import { editsFlows, MEMBER_ROLES, memberRoleOf, sectionsFor, seesAllBranches } from './roles';
 import type { MemberRole } from './roles';
 import { Store } from '../stores/entities/store.entity';
 import { normalizePhoneNumber } from '../../common/utils/phone.util';
@@ -232,7 +232,7 @@ export class OrganizationsService {
   /** The caller's role and the dashboard sections it opens; the frontend shapes navigation from it. */
   async getAccess(userId: string, organizationId?: string) {
     const { organization, membership } = await this.getMembership(userId, organizationId);
-    return { organization: { id: organization.id, name: organization.name }, role: memberRoleOf(membership.role), sections: sectionsFor(membership.role) };
+    return { organization: { id: organization.id, name: organization.name }, role: memberRoleOf(membership.role), sections: sectionsFor(membership.role), canEditFlows: editsFlows(membership) };
   }
 
   async listMembers(actorUserId: string, organizationId?: string) {
@@ -248,6 +248,7 @@ export class OrganizationsService {
       email: member.user?.email || '',
       phoneNumber: member.user?.phoneNumber || null,
       role: memberRoleOf(member.role),
+      canEditFlows: editsFlows(member),
       // null = every branch (owners and admins)
       storeIds: seesAllBranches(member.role)
         ? null
@@ -261,7 +262,7 @@ export class OrganizationsService {
    * Creates the member's login (the admin sets the first password) and gives them their branches.
    * An email that already has an account is refused: logins resolve to a single organization.
    */
-  async addMember(actorUserId: string, organizationId: string | undefined, dto: { fullName?: string; email?: string; password?: string; phoneNumber?: string; role?: string; storeIds?: string[] }) {
+  async addMember(actorUserId: string, organizationId: string | undefined, dto: { fullName?: string; email?: string; password?: string; phoneNumber?: string; role?: string; canEditFlows?: boolean; storeIds?: string[] }) {
     const { organization } = await this.assertCanManageMembers(actorUserId, organizationId);
     const fullName = String(dto.fullName || '').trim();
     const email = String(dto.email || '').trim().toLowerCase();
@@ -287,7 +288,7 @@ export class OrganizationsService {
         phoneNumber,
         role: UserRole.EMPLOYEE,
       }));
-      await manager.save(manager.create(OrganizationMember, { organizationId: organization.id, userId: user.id, role }));
+      await manager.save(manager.create(OrganizationMember, { organizationId: organization.id, userId: user.id, role, canEditFlows: dto.canEditFlows === true }));
       if (storeIds.length) {
         await manager.save(storeIds.map((storeId) => manager.create(StoreMember, { storeId, userId: user.id, role: StoreMemberRole.AGENT })));
       }
@@ -296,7 +297,7 @@ export class OrganizationsService {
     return (await this.listMembers(actorUserId, organization.id)).find((member) => member.userId === userId);
   }
 
-  async updateMember(actorUserId: string, organizationId: string | undefined, targetUserId: string, dto: { fullName?: string; password?: string; phoneNumber?: string; role?: string; storeIds?: string[] }) {
+  async updateMember(actorUserId: string, organizationId: string | undefined, targetUserId: string, dto: { fullName?: string; password?: string; phoneNumber?: string; role?: string; canEditFlows?: boolean; storeIds?: string[] }) {
     const { organization } = await this.assertCanManageMembers(actorUserId, organizationId);
     const member = await this.memberRepository.findOne({ where: { userId: targetUserId, organizationId: organization.id }, relations: ['user'] });
     if (!member) throw new NotFoundException('العضو غير موجود في فريقك.');
@@ -313,7 +314,7 @@ export class OrganizationsService {
     const storeIds = branchesChange ? await this.resolveMemberStores(organization.id, role, dto.storeIds) : [];
 
     await this.memberRepository.manager.transaction(async (manager) => {
-      await manager.update(OrganizationMember, { id: member.id }, { role });
+      await manager.update(OrganizationMember, { id: member.id }, { role, ...(dto.canEditFlows !== undefined ? { canEditFlows: dto.canEditFlows === true } : {}) });
       const userPatch: Partial<User> = {};
       if (fullName) userPatch.fullName = fullName;
       if (dto.password !== undefined) userPatch.password = await bcrypt.hash(String(dto.password), 10);

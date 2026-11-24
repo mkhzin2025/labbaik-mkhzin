@@ -21,6 +21,10 @@ export class Flow {
   @Column({ default: true })
   isActive: boolean;
 
+  /** A core flow the business relies on: it can be edited and switched off, but not deleted. Set in the database. */
+  @Column({ default: false })
+  isProtected: boolean;
+
   @ManyToOne(() => Store)
   store: Store;
 

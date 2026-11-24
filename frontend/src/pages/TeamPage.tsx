@@ -16,6 +16,8 @@ interface Member {
   email: string;
   phoneNumber: string | null;
   role: MemberRole;
+  /** Support members only: may add and change flows instead of only viewing them. */
+  canEditFlows?: boolean;
   storeIds: string[] | null;
   isYou: boolean;
 }
@@ -27,7 +29,7 @@ interface Branch {
 
 const ROLE_OPTIONS: { value: AssignableRole; sees: string }[] = [
   { value: 'admin', sees: 'كل الأقسام والفروع، بما فيها الإعدادات والفوترة وإدارة الفريق.' },
-  { value: 'support', sees: 'الرئيسية، المحادثات، التقييمات، والتدفقات.' },
+  { value: 'support', sees: 'الرئيسية، المحادثات، التقييمات، والتدفقات (عرض فقط إلا إذا سمحت له بالتعديل).' },
   { value: 'marketing', sees: 'التدفقات، وقوالب وحملات واتساب.' },
 ];
 
@@ -150,6 +152,18 @@ function PhoneField({ value, onChange, role }: { value: string; onChange: (value
   );
 }
 
+function FlowEditingField({ checked, onChange }: { checked: boolean; onChange: (checked: boolean) => void }) {
+  return (
+    <label className="flex max-w-md items-start gap-2.5 cursor-pointer">
+      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} className="mt-0.5 h-4 w-4 shrink-0 rounded accent-[#643B89] cursor-pointer" />
+      <span>
+        <span className="block text-sm font-bold text-neutral-900 dark:text-white">يعدّل التدفقات</span>
+        <span className="block text-xs leading-relaxed text-labbaik-text-muted">بدونها يفتح التدفقات ويجربها فقط، بلا إضافة أو تعديل أو حذف أو تفعيل.</span>
+      </span>
+    </label>
+  );
+}
+
 function CredentialsNote({ email, password, onClose }: { email: string; password: string; onClose: () => void }) {
   const [copied, setCopied] = useState(false);
   const text = `رابط الدخول: ${window.location.origin}/login\nالبريد: ${email}\nكلمة المرور: ${password}`;
@@ -180,6 +194,7 @@ function AddMemberForm({ branches, onAdded, onCancel }: { branches: Branch[]; on
   const [password, setPassword] = useState(generatePassword);
   const [role, setRole] = useState<AssignableRole>('support');
   const [phoneNumber, setPhoneNumber] = useState('');
+  const [canEditFlows, setCanEditFlows] = useState(false);
   const [storeIds, setStoreIds] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
 
@@ -187,7 +202,7 @@ function AddMemberForm({ branches, onAdded, onCancel }: { branches: Branch[]; on
     event.preventDefault();
     setSaving(true);
     try {
-      const { data } = await api.post<Member>('/organizations/members', { fullName, email, password, phoneNumber, role, storeIds: role === 'admin' ? [] : storeIds });
+      const { data } = await api.post<Member>('/organizations/members', { fullName, email, password, phoneNumber, role, canEditFlows: role === 'support' && canEditFlows, storeIds: role === 'admin' ? [] : storeIds });
       onAdded(data, password);
     } catch (error) {
       showToast(errorMessage(error, 'تعذر إضافة العضو.'), 'error');
@@ -223,6 +238,7 @@ function AddMemberForm({ branches, onAdded, onCancel }: { branches: Branch[]; on
       <div className="max-w-md">
         <PhoneField value={phoneNumber} onChange={setPhoneNumber} role={role} />
       </div>
+      {role === 'support' && <FlowEditingField checked={canEditFlows} onChange={setCanEditFlows} />}
       {role !== 'admin' && <BranchPicker branches={branches} value={storeIds} onChange={setStoreIds} />}
       <div className="flex gap-2 pt-1">
         <button type="submit" disabled={saving} className="inline-flex h-10 items-center gap-2 rounded-lg bg-labbaik-blue px-4 text-sm font-black text-labbaik-on-accent hover:bg-[#553174] disabled:opacity-50 cursor-pointer">
@@ -241,6 +257,7 @@ function EditMember({ member, branches, onSaved, onCancel }: { member: Member; b
   const [storeIds, setStoreIds] = useState<string[]>(member.storeIds && member.storeIds.length < branches.length ? member.storeIds : []);
   const [password, setPassword] = useState('');
   const [phoneNumber, setPhoneNumber] = useState(localPhone(member.phoneNumber));
+  const [canEditFlows, setCanEditFlows] = useState(member.role === 'support' && Boolean(member.canEditFlows));
   const [saving, setSaving] = useState(false);
 
   const save = async () => {
@@ -250,6 +267,7 @@ function EditMember({ member, branches, onSaved, onCancel }: { member: Member; b
       const body: Record<string, unknown> = { storeIds: role === 'admin' ? [] : storeIds };
       if (fullName.trim() !== member.fullName) body.fullName = fullName.trim();
       if (!member.isYou) body.role = role;
+      if (!member.isYou) body.canEditFlows = role === 'support' && canEditFlows;
       if (password) body.password = password;
       if (phoneNumber.trim() !== localPhone(member.phoneNumber)) body.phoneNumber = phoneNumber.trim();
       const { data } = await api.patch<Member>(`/organizations/members/${member.userId}`, body);
@@ -278,6 +296,7 @@ function EditMember({ member, branches, onSaved, onCancel }: { member: Member; b
       <div className="max-w-md">
         <PhoneField value={phoneNumber} onChange={setPhoneNumber} role={role} />
       </div>
+      {role === 'support' && !member.isYou && <FlowEditingField checked={canEditFlows} onChange={setCanEditFlows} />}
       {role !== 'admin' && <BranchPicker branches={branches} value={storeIds} onChange={setStoreIds} />}
       <div className="max-w-md">
         <PasswordField label="كلمة مرور جديدة (اختياري)" value={password} onChange={setPassword} />
@@ -391,6 +410,7 @@ export default function TeamPage() {
                       <span className="font-bold text-neutral-900 dark:text-white">{member.fullName || member.email}</span>
                       {member.isYou && <span className="h-5 rounded bg-labbaik-page px-1.5 text-[11px] font-bold leading-5 text-labbaik-text-muted">أنت</span>}
                       <span className={`h-5 rounded px-1.5 text-[11px] font-bold leading-5 ${ROLE_TONES[member.role]}`}>{ROLE_LABELS[member.role]}</span>
+                      {member.role === 'support' && member.canEditFlows && <span className="h-5 rounded bg-labbaik-blue/10 px-1.5 text-[11px] font-bold leading-5 text-labbaik-blue dark:text-purple-200">يعدّل التدفقات</span>}
                     </div>
                     <p className="text-xs text-labbaik-text-muted">
                       <span dir="ltr">{member.email}</span>

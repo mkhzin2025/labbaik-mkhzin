@@ -45,6 +45,15 @@ export type QuotedMessage = { messageId: string; whatsappMessageId: string | nul
 /** Closes kept per conversation for the activity reports. */
 const CLOSURES_KEPT = 50;
 
+/** Minutes after the team's reply without an answer from the customer before the conversation closes; 0 turns it off. */
+function autoCloseMinutes() {
+  const raw = process.env.CONVERSATION_AUTO_CLOSE_MINUTES;
+  const minutes = raw === undefined || raw.trim() === '' ? 10 : Number(raw);
+  return Number.isFinite(minutes) && minutes > 0 ? minutes : 0;
+}
+const AUTO_CLOSE_POLL_MS = 60 * 1000;
+const AUTO_CLOSE_BATCH = 200;
+
 /** Sent when the team closes a WhatsApp conversation; the reply button ids carry the rating. */
 const RATING_PROMPT = 'قيّم تجربتك معنا 🙏';
 const RATING_REPLY_PREFIX = 'rating:';
@@ -61,10 +70,6 @@ const ACKNOWLEDGEMENTS = new Set([
   'يعطيكم العافيه', 'جزاك الله خير', 'جزاكم الله خير', 'الله يجزاك خير', 'الله يسعدك', 'تمام', 'طيب', 'اوكي', 'اوك',
   'حلو', 'ممتاز', 'زين', 'العفو', 'عفوا', 'ok', 'okay', 'thanks', 'thank you', 'thx', 'تم', 'خلاص', 'وصل', 'تمام شكرا',
 ]);
-/** How long automation gets to answer before an unanswered customer message counts as the team's to reply to. */
-const BOT_GRACE_MS = 2 * 60 * 1000;
-/** WhatsApp (and Messenger) allow free-form replies only within 24h of the customer's last message. */
-const REPLY_WINDOW_MS = 24 * 3600 * 1000;
 /** A customer is asked to rate at most once in this period, however often the conversation is closed. */
 const RATING_COOLDOWN_MS = 24 * 3600 * 1000;
 
@@ -145,6 +150,7 @@ export class ConversationsService implements OnModuleInit {
   private readonly analyticsCache = new TtlCache<any>(REPORT_CACHE_TTL_MS, 200, REPORT_SERVE_STALE_MS);
   private readonly reportSlot = concurrencyLimit(REPORT_MAX_CONCURRENT);
   private readonly snoozeWakes = new Map<string, { at: number; done: Promise<void> }>();
+  private autoClosing = false;
 
   constructor(
     @InjectModel(Conversation.name)
@@ -161,6 +167,90 @@ export class ConversationsService implements OnModuleInit {
     // Each of these scans the whole collection. They used to be awaited here, which held the app (and every
     // webhook) until they finished; now they run once the API is up.
     setTimeout(() => void this.runStartupMaintenance(), STARTUP_MAINTENANCE_DELAY_MS).unref?.();
+    if (autoCloseMinutes() > 0) setInterval(() => void this.closeUnansweredConversations(), AUTO_CLOSE_POLL_MS).unref?.();
+  }
+
+  /** True when the thread's last message is a reply typed by a team member (the customer owes the next word). */
+  static endsWithTeamReply(message?: { from?: string; isManual?: boolean } | null) {
+    return Boolean(message && message.from === 'me' && message.isManual === true);
+  }
+
+  /**
+   * Closes open conversations where a team member's reply has gone unanswered for CONVERSATION_AUTO_CLOSE_MINUTES.
+   * Runs every minute but reads only the partial `awaitingCustomerSince` index, which holds just the conversations
+   * waiting on the customer: when none is due it touches no conversation document. The close is credited to the
+   * member handling the conversation (the one who replied), like a close by hand. Each close is conditional on the
+   * wait being unchanged, so a customer writing meanwhile keeps it open, and more than one replica closes it once.
+   */
+  async closeUnansweredConversations(now = Date.now()) {
+    const afterMs = autoCloseMinutes() * 60 * 1000;
+    if (!afterMs || this.autoClosing) return;
+    this.autoClosing = true;
+    try {
+      const due = await this.conversationModel.find(
+        { awaitingCustomerSince: { $lte: new Date(now - afterMs) } },
+        { awaitingCustomerSince: 1, status: 1, blockedAt: 1, agentId: 1, agentName: 1 },
+      ).limit(AUTO_CLOSE_BATCH).lean().exec();
+
+      for (const candidate of due) {
+        try {
+          if (candidate.blockedAt || (candidate.status !== 'open' && candidate.status !== 'pending')) {
+            // Snoozed or blocked: not closed automatically, and dropped from the sweep's index.
+            await this.conversationModel.updateOne({ _id: candidate._id, awaitingCustomerSince: candidate.awaitingCustomerSince }, { $set: { awaitingCustomerSince: null } });
+            continue;
+          }
+          await this.autoClose(String(candidate._id), candidate.awaitingCustomerSince as Date, candidate.agentId, candidate.agentName);
+        } catch (error) {
+          this.logger.warn(`Auto-close of ${candidate._id} failed: ${error?.message}`);
+        }
+      }
+    } catch (error) {
+      this.logger.error('Closing unanswered conversations failed', error?.stack);
+    } finally {
+      this.autoClosing = false;
+    }
+  }
+
+  private async autoClose(id: string, waitingSince: Date, agentId: string | null, agentName: string | null) {
+    const now = new Date();
+    const update: Record<string, any> = { $set: { status: 'closed', statusUpdatedAt: now, snoozedUntil: null, unreadCount: 0, awaitingCustomerSince: null, awaitingReply: false } };
+    if (agentId) {
+      update.$set.closedById = agentId;
+      update.$set.closedByName = agentName || '';
+      update.$push = { closures: { $each: [{ by: agentId, name: agentName || '', at: now, auto: true }], $slice: -CLOSURES_KEPT } };
+    }
+    const closed = await this.conversationModel.findOneAndUpdate(
+      { _id: id, status: { $in: ['open', 'pending'] }, awaitingCustomerSince: waitingSince },
+      update,
+      { projection: { storeId: 1, platform: 1 } },
+    ).lean().exec();
+    if (!closed) return; // the customer (or anyone) wrote in the meantime
+
+    this.logger.log(`Auto-closed conversation ${id}: no customer reply for ${autoCloseMinutes()} minutes`);
+    await this.startOverOnNextMessage(id);
+    if (closed.platform === 'whatsapp') {
+      void this.sendRatingRequest(id).catch((error) => this.logger.warn(`Rating request for ${id} failed: ${error?.message}`));
+    }
+    this.invalidateCounts(closed.storeId);
+    this.eventsGateway.server.to(`store_${closed.storeId}`).emit('conversation_status', { conversationId: id, status: 'closed', snoozedUntil: null });
+  }
+
+  /**
+   * After a close the customer's next message is a fresh start: the flow they were in is dropped, the pause left by a
+   * team reply or a handoff ends, and the flows run again as for a new conversation. A pause the team set by hand stays.
+   */
+  private async startOverOnNextMessage(id: string) {
+    await this.conversationModel.updateOne({ _id: id }, { $set: { restartFlow: true, currentFlowId: null, currentFlowNodeId: null, flowInvalidReplies: 0 } });
+    await this.conversationModel.updateOne(
+      { _id: id, aiPausedReason: { $in: ['agent_reply', 'handoff'] } },
+      { $set: { aiEnabled: true, aiDisabledUntil: null, aiPausedReason: null } },
+    );
+  }
+
+  /** Takes the fresh start a close left for this conversation; true once per close. */
+  async consumeFlowRestart(id: string) {
+    const result = await this.conversationModel.updateOne({ _id: id, restartFlow: true }, { $set: { restartFlow: false } });
+    return result.modifiedCount === 1;
   }
 
   async runStartupMaintenance() {
@@ -173,6 +263,7 @@ export class ConversationsService implements OnModuleInit {
     await this.runOnce('remove-ai-failure-notes-v1', () => this.removeAiFailureNotes());
     await this.runOnce('backfill-awaiting-reply-v1', () => this.backfillAwaitingReply());
     await this.runOnce('clear-acknowledgement-waits-v1', () => this.clearAcknowledgementWaits());
+    await this.runOnce('needs-reply-handoff-only-v1', () => this.limitNeedsReplyToHandoffs());
   }
 
   /** Runs a one-off data repair unless it already completed; a failed run is retried at the next start. */
@@ -216,6 +307,26 @@ export class ConversationsService implements OnModuleInit {
       })), { ordered: false });
       this.logger.log(`Cleared awaitingReply on ${result.modifiedCount} conversation(s) ending with a thanks or emoji`);
     }
+  }
+
+  /**
+   * One-off for the new meaning of "needs a reply" (handed to an employee by a flow and not answered yet): keeps
+   * only open conversations still in a flow handoff whose last message is not a team reply; clears the rest.
+   */
+  private async limitNeedsReplyToHandoffs() {
+    const now = new Date();
+    const result = await this.conversationModel.updateMany({ $or: [{ awaitingReply: true }, { aiPausedReason: 'handoff' }] }, [{
+      $set: {
+        awaitingReply: {
+          $and: [
+            { $eq: ['$aiPausedReason', 'handoff'] },
+            { $gt: ['$aiDisabledUntil', now] },
+            { $ne: ['$status', 'closed'] },
+          ],
+        },
+      },
+    }]).exec();
+    this.logger.log(`Needs-reply limited to flow handoffs (${result.modifiedCount} conversation(s) updated)`);
   }
 
   /** One-off for conversations stored before `awaitingReply` existed: derive it from the last message. */
@@ -337,8 +448,6 @@ export class ConversationsService implements OnModuleInit {
       $set: {
         lastMessage: messageData.text,
         lastMessageAt: new Date(),
-        // A closing "thanks" / "👍" still reopens the thread, but nobody owes an answer to it.
-        awaitingReply: !quiet && ConversationsService.isCustomerMessage(messageData) && !ConversationsService.isAcknowledgement(messageData.text),
       }
     };
 
@@ -355,6 +464,13 @@ export class ConversationsService implements OnModuleInit {
     if (fromCustomer && !quiet) {
       updateQuery.$set.status = 'open';
       updateQuery.$set.snoozedUntil = null;
+      updateQuery.$set.awaitingCustomerSince = null;
+    }
+    // A reply typed by the team starts (or restarts) the wait that closes the conversation if the customer goes quiet.
+    if (ConversationsService.endsWithTeamReply(messageData)) {
+      updateQuery.$set.awaitingCustomerSince = new Date();
+      // The team answered: a conversation the flow handed over no longer needs a reply.
+      updateQuery.$set.awaitingReply = false;
     }
 
     // One thread per customer: match it whatever its status, so closing never spawns a duplicate conversation.
@@ -550,7 +666,11 @@ export class ConversationsService implements OnModuleInit {
       statusUpdatedAt: now,
       snoozedUntil: status === 'snoozed' ? snoozedUntil : null,
     };
-    if (status === 'closed') update.unreadCount = 0;
+    if (status === 'closed') { update.unreadCount = 0; update.awaitingReply = false; }
+    // Closed or snoozed by hand: the team decided, so the automatic close no longer applies.
+    if (status === 'closed' || status === 'snoozed') update.awaitingCustomerSince = null;
+    // Reopened by the team: it carries on where it was rather than starting over.
+    else update.restartFlow = false;
     const before = await this.conversationModel.findByIdAndUpdate(id, { $set: update }, { returnDocument: 'before', projection: { status: 1, platform: 1 } }).lean().exec();
     if (!before) throw new NotFoundException('Conversation not found');
     // Closing an open conversation is credited to whoever closed it (closing it again changes nothing).
@@ -560,6 +680,7 @@ export class ConversationsService implements OnModuleInit {
         $push: { closures: { $each: [{ by: agent.id, name: agent.name, at: now }], $slice: -CLOSURES_KEPT } },
       } as any);
     }
+    if (status === 'closed' && before.status !== 'closed') await this.startOverOnNextMessage(id);
     if (status === 'closed' && before.status !== 'closed' && before.platform === 'whatsapp') {
       void this.sendRatingRequest(id).catch((error) => this.logger.warn(`Rating request for ${id} failed: ${error?.message}`));
     }
@@ -711,21 +832,12 @@ export class ConversationsService implements OnModuleInit {
   }
 
   /**
-   * "Needs a reply" for the team: the customer's last message is unanswered and automation is not going to
-   * answer it, either because automatic replies are paused for this conversation or because nothing has replied
-   * within BOT_GRACE_MS. Messages the bot is about to answer stay out of the team's list.
+   * "Needs a reply" for the team: a flow handed the conversation to an employee (a "transfer to employee" step,
+   * e.g. the customer chose complaint / suggestion / inquiry) and no team member has replied yet. Set by
+   * markHandedOff; cleared by a team reply or by closing. Nothing else puts a conversation here.
    */
   private static needsTeamReplyQuery() {
-    const now = Date.now();
-    return {
-      awaitingReply: true,
-      // Past 24h a free-form reply is no longer allowed (only a template), so it is not a reply the team owes.
-      lastMessageAt: { $gt: new Date(now - REPLY_WINDOW_MS) },
-      $or: [
-        { lastMessageAt: { $lte: new Date(now - BOT_GRACE_MS) } },
-        { aiEnabled: false, aiDisabledUntil: { $gt: new Date(now) } },
-      ],
-    };
+    return { awaitingReply: true };
   }
 
   /**
@@ -825,6 +937,33 @@ export class ConversationsService implements OnModuleInit {
       query.$and = [{ $or: [{ customerName: pattern }, { customerPhone: pattern }, { lastMessage: pattern }] }];
     }
     return query;
+  }
+
+  /**
+   * The conversations a member still owes an answer: they handle it, it is open, and the customer had the last
+   * word (a reaction or a system note does not count). The member cannot sign out until these are closed. Read only
+   * when asked (signing out, the home page), never on a timer.
+   */
+  async findUnfinishedFor(agentId: string, storeIds: string[]) {
+    if (!agentId || !storeIds.length) return [];
+    const rows = await this.conversationModel.find(
+      { storeId: { $in: storeIds }, agentId, status: { $in: ['open', 'pending'] }, blockedAt: null },
+      { customerName: 1, customerPhone: 1, customerId: 1, platform: 1, storeId: 1, lastMessage: 1, lastMessageAt: 1, messages: { $slice: -10 } },
+    ).sort({ lastMessageAt: -1 }).limit(100).lean().exec();
+    const unfinished = rows
+      .filter((row: any) => ConversationsService.customerHasLastWord(row.messages || []))
+      .map(({ messages, _id, ...row }: any) => ({ ...row, id: String(_id) }));
+    return this.withCustomerNames(unfinished);
+  }
+
+  /** True when, ignoring reactions and system notes, the latest message is the customer's. */
+  static customerHasLastWord(messages: { from?: string; type?: string }[]) {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const message = messages[i];
+      if (message.from === 'system' || message.type === 'system_error' || message.type === 'reaction') continue;
+      return ConversationsService.isCustomerMessage(message);
+    }
+    return false;
   }
 
   /** Inbox row for a single conversation: no messages, customer name and CRM labels resolved. */
@@ -1303,6 +1442,8 @@ export class ConversationsService implements OnModuleInit {
       aiEnabled: enabled,
       aiDisabledUntil: enabled ? null : new Date(Date.now() + 24 * 60 * 60 * 1000),
       aiPausedReason: enabled ? null : reason,
+      // A flow's "transfer to employee" step is what puts a conversation in the team's "needs a reply" list.
+      ...(!enabled && reason === 'handoff' ? { awaitingReply: true } : {}),
     }, { returnDocument: 'after' });
     // "Needs a reply" depends on whether automatic replies are paused.
     this.invalidateCounts(conversation?.storeId);
@@ -1451,7 +1592,7 @@ export class ConversationsService implements OnModuleInit {
     const now = new Date();
     await this.conversationModel.updateMany(filter, {
       $set: blocked
-        ? { blockedAt: now, status: 'closed', snoozedUntil: null, statusUpdatedAt: now, unreadCount: 0, awaitingReply: false }
+        ? { blockedAt: now, status: 'closed', snoozedUntil: null, statusUpdatedAt: now, unreadCount: 0, awaitingReply: false, awaitingCustomerSince: null }
         : { blockedAt: null },
     });
     const affected = await this.conversationModel.find(filter, { storeId: 1, status: 1 }).lean().exec();
@@ -1544,7 +1685,7 @@ export class ConversationsService implements OnModuleInit {
     };
     await this.addMessage(conversation.customerPhone, storeId, conversation.platform, messageData);
     // Same as a typed reply: the team has taken over, so automatic replies pause for a while.
-    await this.conversationModel.findByIdAndUpdate(conversationId, { aiEnabled: false, aiDisabledUntil: new Date(Date.now() + 30 * 60 * 1000), aiPausedReason: 'agent_reply' });
+    await this.conversationModel.findByIdAndUpdate(conversationId, { aiEnabled: false, aiDisabledUntil: new Date(Date.now() + 30 * 60 * 1000), aiPausedReason: 'agent_reply', restartFlow: false });
     if (agent) await this.assignAgent(conversationId, agent);
     this.eventsGateway.server.to(`store_${storeId}`).emit('new_message', { ...messageData, customerPhone: conversation.customerPhone, platform: conversation.platform, storeId });
     return { status: 'sent', message: messageData };
@@ -1619,7 +1760,7 @@ export class ConversationsService implements OnModuleInit {
     };
     await this.addMessage(conversation.customerPhone, storeId, conversation.platform, messageData);
     const thirtyMinutesFromNow = new Date(Date.now() + 30 * 60 * 1000);
-    await this.conversationModel.findByIdAndUpdate(conversationId, { aiEnabled: false, aiDisabledUntil: thirtyMinutesFromNow, aiPausedReason: 'agent_reply' });
+    await this.conversationModel.findByIdAndUpdate(conversationId, { aiEnabled: false, aiDisabledUntil: thirtyMinutesFromNow, aiPausedReason: 'agent_reply', restartFlow: false });
     if (agent) await this.assignAgent(conversationId, agent);
     const store = await this.channelsService.getStoreContext(storeId);
     const ownerId = store.owner?.id || (typeof store.owner === 'string' ? store.owner : null);

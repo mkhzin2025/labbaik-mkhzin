@@ -464,8 +464,11 @@ export class WebhooksService {
       return false;
     }
 
+    // The conversation was closed since the customer last wrote: this message starts over, like a new conversation.
+    const restart = Boolean(conversation?.restartFlow) && await this.conversationsService.consumeFlowRestart(String(conversation._id));
+
     let releasedFlowId: string | null = null;
-    if (conversation.currentFlowId && conversation.currentFlowNodeId) {
+    if (!restart && conversation.currentFlowId && conversation.currentFlowNodeId) {
       const flow = await this.flowsService.findLive(conversation.currentFlowId, storeId, store?.organizationId);
       if (flow) {
         const step = continueFlow(flow, { nodeId: conversation.currentFlowNodeId, invalidReplies: conversation.flowInvalidReplies || 0 }, text, replyId);
@@ -479,7 +482,7 @@ export class WebhooksService {
       await this.conversationsService.updateFlowState(conversation._id, null, null);
     }
 
-    const flow = await this.flowsService.findTriggered(storeId, store?.organizationId, text, this.isNewConversation(conversation));
+    const flow = await this.flowsService.findTriggered(storeId, store?.organizationId, text, restart || this.isNewConversation(conversation));
     // A customer who just left a flow by ignoring its options is not pulled straight back into it.
     if (flow && flow.id !== releasedFlowId) {
       this.logger.log(`Starting flow ${flow.id} for ${from}`);

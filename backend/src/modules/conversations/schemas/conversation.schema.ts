@@ -143,6 +143,15 @@ export class Conversation extends Document {
   @Prop({ nullable: true })
   currentFlowNodeId: string;
 
+  // When a team member's typed reply started waiting on the customer; cleared by the customer's next message or a
+  // close. Only these conversations are in the index the auto-close sweep reads, so the sweep costs next to nothing.
+  @Prop({ type: Date, default: null })
+  awaitingCustomerSince: Date | null;
+
+  // Set when the conversation is closed: the customer's next message starts the flows over, as a new conversation.
+  @Prop({ default: false })
+  restartFlow: boolean;
+
   // Replies in a row that matched none of the waiting question's options; the flow lets go after a few.
   @Prop({ default: 0 })
   flowInvalidReplies: number;
@@ -166,6 +175,8 @@ ConversationSchema.index({ customerPhone: 1, storeId: 1, platform: 1, lastMessag
 // Webhook dedupe and delivery-status updates (sent/delivered/read) match by message id.
 ConversationSchema.index({ 'messages.metadata.whatsappMessageId': 1 });
 ConversationSchema.index({ storeId: 1, status: 1, lastMessageAt: -1, _id: -1 });
+// The auto-close sweep: a partial index holding only the conversations waiting on the customer.
+ConversationSchema.index({ awaitingCustomerSince: 1 }, { partialFilterExpression: { awaitingCustomerSince: { $type: 'date' } } });
 // Inbox filter by the customer's rating.
 ConversationSchema.index({ storeId: 1, rating: 1, lastMessageAt: -1 });
 // A team member's activity report and satisfaction score.

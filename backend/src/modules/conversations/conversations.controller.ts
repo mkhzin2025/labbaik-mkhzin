@@ -164,6 +164,14 @@ export class ConversationsController {
     return this.conversationsService.countInbox(storeIds, this.toFilters(query, req));
   }
 
+  /** The caller's conversations where the customer is waiting on them; signing out is held until they are closed. */
+  @Get('mine/unfinished')
+  @Access('home', 'conversations')
+  async getUnfinished(@Request() req: any) {
+    const storeIds = await this.resolveStoreIds(req, 'organization');
+    return this.conversationsService.findUnfinishedFor(req.user.id, storeIds);
+  }
+
   @Get('stats')
   @Access('home', 'conversations')
   async getStats(@Request() req: any, @Query('storeId') storeId?: string) {

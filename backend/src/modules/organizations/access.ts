@@ -1,20 +1,24 @@
 import { applyDecorators, ExecutionContext, ForbiddenException, Injectable, SetMetadata, UseGuards } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { AuthGuard } from '@nestjs/passport';
-import { sectionsFor } from './roles';
+import { editsFlows, sectionsFor } from './roles';
 import type { Section } from './roles';
 import { OrganizationsService } from './organizations.service';
 
-export { SECTIONS, MEMBER_ROLES, memberRoleOf, sectionsFor } from './roles';
+export { SECTIONS, MEMBER_ROLES, editsFlows, memberRoleOf, sectionsFor } from './roles';
 export type { Section, MemberRole } from './roles';
 
 const SECTIONS_KEY = 'access:sections';
+const EDITS_FLOWS_KEY = 'access:editsFlows';
 
 /**
  * Authenticated route open to members whose role covers any of `sections`. Usable on a controller or a
  * method; a method's sections replace its controller's.
  */
 export const Access = (...sections: Section[]) => applyDecorators(SetMetadata(SECTIONS_KEY, sections), UseGuards(SectionsGuard));
+
+/** Marks a route inside an `@Access` controller that changes flows: refused to members who see flows read-only. */
+export const EditsFlows = () => SetMetadata(EDITS_FLOWS_KEY, true);
 
 /** Checks the JWT itself, so it does not depend on the order guards are declared in. */
 @Injectable()
@@ -35,6 +39,9 @@ export class SectionsGuard extends AuthGuard('jwt') {
     request.orgSections = allowed;
     if (!sections.some((section) => allowed.includes(section))) {
       throw new ForbiddenException('ليست لديك صلاحية للوصول إلى هذا القسم.');
+    }
+    if (this.reflector.getAllAndOverride<boolean>(EDITS_FLOWS_KEY, [context.getHandler(), context.getClass()]) && !editsFlows(membership)) {
+      throw new ForbiddenException('صلاحيتك على التدفقات للعرض فقط.');
     }
     return true;
   }

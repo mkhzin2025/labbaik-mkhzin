@@ -21,13 +21,14 @@ import {
 import type { Connection, EdgeChange, EdgeProps, NodeChange } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import {
-  AlertTriangle, ArrowRight, Check, CheckCircle2, ChevronDown, Columns3, FlaskConical, LayoutGrid, Loader2, Maximize2, Minimize2,
+  AlertTriangle, ArrowRight, Check, CheckCircle2, ChevronDown, Columns3, Eye, FlaskConical, LayoutGrid, Loader2, Maximize2, Minimize2,
   PanelRightClose, PanelRightOpen, Rows3, Save, X,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import api from '../api/client';
 import { useToast } from '../components/Toast';
 import { useTheme } from '../context/ThemeContext';
+import { useFlowEditing } from '../lib/useFlowEditing';
 import FlowNodeCard from '../components/flows/FlowNodes';
 import NodeSettings from '../components/flows/NodeSettings';
 import FlowTester from '../components/flows/FlowTester';
@@ -100,6 +101,7 @@ function Editor() {
   const navigate = useNavigate();
   const { showToast } = useToast();
   const { theme } = useTheme();
+  const canEdit = useFlowEditing();
   const { screenToFlowPosition, setCenter, fitView, getNode } = useReactFlow();
 
   const [nodes, setNodes] = useState<FlowNode[]>([]);
@@ -201,6 +203,8 @@ function Editor() {
     issues.forEach((issue) => issue.nodeId && byNode.set(issue.nodeId, [...(byNode.get(issue.nodeId) || []), issue]));
     return nodes.map((node) => (byNode.has(node.id) || node.data.issues ? { ...node, data: { ...node.data, issues: byNode.get(node.id) } } : node));
   }, [nodes, issues]);
+
+  const displayEdges = useMemo(() => (canEdit ? edges : edges.map((edge) => ({ ...edge, selectable: false }))), [edges, canEdit]);
 
   const selectedNode = displayNodes.find((node) => node.id === selectedId) || null;
 
@@ -344,6 +348,7 @@ function Editor() {
   };
 
   const save = async () => {
+    if (!canEdit) return;
     if (isActive && errors.length) {
       setIssuesOpen(true);
       showToast('التدفق مفعّل، فلا يُحفظ وفيه مشاكل تمنع عمله. أصلحها أو أوقف التدفق أولًا.', 'error');
@@ -394,6 +399,7 @@ function Editor() {
         <input
           value={name}
           onChange={(e) => { setName(e.target.value); setDirty(true); }}
+          readOnly={!canEdit}
           aria-label="اسم التدفق"
           className="h-9 min-w-0 flex-1 basis-40 rounded-lg border-transparent! bg-transparent px-2 text-base font-black text-neutral-900 hover:border-[color:var(--color-input-border)]! focus:border-[color:var(--color-input-border)]! focus:outline-none dark:text-white sm:max-w-80"
         />
@@ -433,6 +439,12 @@ function Editor() {
             <FlaskConical size={15} /> تجربة
           </button>
           <span className="mx-0.5 hidden h-6 w-px bg-labbaik-border sm:block" />
+          {!canEdit ? (
+            <>
+              <span className={`inline-flex h-8 items-center rounded-full px-3 text-xs font-bold ${isActive ? 'bg-emerald-500/12 text-emerald-800 dark:text-emerald-300' : 'bg-labbaik-page text-labbaik-text-muted'}`}>{isActive ? 'مفعّل' : 'مسودة'}</span>
+              <span title="صلاحيتك على التدفقات للعرض فقط" className="inline-flex h-8 items-center gap-1.5 rounded-full bg-labbaik-page px-3 text-xs font-bold text-labbaik-text-muted"><Eye size={14} /> عرض فقط</span>
+            </>
+          ) : (<>
           <button
             type="button"
             role="switch"
@@ -449,11 +461,13 @@ function Editor() {
           <button type="button" onClick={() => void save()} disabled={saving || !dirty} title="Ctrl+S" className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-labbaik-blue px-4 text-sm font-black text-labbaik-on-accent hover:bg-[#553174] disabled:opacity-50 cursor-pointer disabled:cursor-default">
             {saving ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />} {dirty ? 'حفظ' : 'محفوظ'}
           </button>
+          </>)}
         </div>
       </header>
 
       <div className="relative flex min-h-0 flex-1 flex-col lg:flex-row">
         {/* Palette */}
+        {canEdit && (<>
         <aside
           style={{ '--palette-w': `${paletteWidth}px` } as CSSProperties}
           className={`flex shrink-0 gap-1 overflow-x-auto border-b border-labbaik-border bg-labbaik-surface p-2 lg:w-(--palette-w) lg:flex-col lg:gap-0 lg:overflow-x-hidden lg:overflow-y-auto lg:border-b-0 lg:border-l custom-scrollbar ${paletteCompact ? 'lg:px-2 lg:py-3' : 'lg:p-3'}`}
@@ -521,13 +535,14 @@ function Editor() {
         >
           <span className="mx-auto block h-full w-0.5 transition-colors group-hover:bg-labbaik-blue/50 group-focus-visible:bg-labbaik-blue/70 group-active:bg-labbaik-blue" />
         </div>
+        </>)}
 
         {/* Canvas */}
-        <div ref={canvasRef} className="relative min-h-0 flex-1" dir="ltr" onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; }} onDrop={onDrop}>
+        <div ref={canvasRef} className="relative min-h-0 flex-1" dir="ltr" onDragOver={canEdit ? (event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; } : undefined} onDrop={canEdit ? onDrop : undefined}>
           <FlowLayoutContext.Provider value={layout}>
           <ReactFlow<FlowNode, FlowEdge>
             nodes={displayNodes}
-            edges={edges}
+            edges={displayEdges}
             nodeTypes={nodeTypes}
             edgeTypes={edgeTypes}
             onNodesChange={onNodesChange}
@@ -536,7 +551,9 @@ function Editor() {
             isValidConnection={isValidConnection}
             onNodeClick={(_, node) => selectNode(node.id)}
             onPaneClick={() => { setSelectedId(null); setIssuesOpen(false); setArrangeOpen(false); if (panel === 'settings') setPanel(null); }}
-            deleteKeyCode={['Backspace', 'Delete']}
+            deleteKeyCode={canEdit ? ['Backspace', 'Delete'] : null}
+            nodesDraggable={canEdit}
+            nodesConnectable={canEdit}
             colorMode={theme === 'dark' ? 'dark' : 'light'}
             defaultEdgeOptions={edgeDefaults}
             fitView
@@ -555,7 +572,7 @@ function Editor() {
 
           {/* Canvas view controls */}
           <div className="absolute top-3 right-3 flex items-center gap-1.5" dir="rtl">
-            <div className="relative">
+            {canEdit && <div className="relative">
               <div className="inline-flex h-8 overflow-hidden rounded-lg border border-labbaik-border bg-labbaik-surface shadow-[0_1px_2px_rgba(15,10,30,0.06)]">
                 <button type="button" onClick={() => arrange()} title={`ترتيب ${LAYOUTS.find((item) => item.value === layout)?.label}`} className="inline-flex items-center gap-1.5 px-2.5 text-xs font-bold text-labbaik-text hover:bg-labbaik-page cursor-pointer">
                   <LayoutGrid size={14} /> ترتيب تلقائي
@@ -581,7 +598,7 @@ function Editor() {
                   })}
                 </div>
               )}
-            </div>
+            </div>}
 
             {theme !== 'dark' && (
               <div role="radiogroup" aria-label="لون خلفية الكانفس" className="inline-flex h-8 items-center gap-0.5 rounded-lg border border-labbaik-border bg-labbaik-surface p-0.5 shadow-[0_1px_2px_rgba(15,10,30,0.06)]">
@@ -624,6 +641,7 @@ function Editor() {
                 <NodeSettings
                   key={selectedNode.id}
                   node={selectedNode}
+                  readOnly={!canEdit}
                   onChange={(patch) => updateNodeData(selectedNode.id, patch)}
                   onDelete={() => deleteNode(selectedNode.id)}
                   onClose={() => { setPanel(null); setSelectedId(null); }}

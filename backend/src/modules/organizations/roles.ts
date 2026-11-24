@@ -26,5 +26,9 @@ export function sectionsFor(role: OrganizationRole): readonly Section[] {
   return ROLE_SECTIONS[memberRoleOf(role)];
 }
 
+/** Support staff see flows read-only unless the member was given flow editing. */
+export const editsFlows = (member: { role: OrganizationRole; canEditFlows?: boolean | null }) =>
+  memberRoleOf(member.role) !== 'support' || Boolean(member.canEditFlows);
+
 /** Owners and admins see every branch; other roles only the branches assigned to them. */
 export const seesAllBranches = (role: OrganizationRole) => role === OrganizationRole.OWNER || role === OrganizationRole.ADMIN;

@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import api from '../api/client';
-import { Copy, GitBranch, Loader2, Pencil, Plus, Trash2, X } from 'lucide-react';
+import { Copy, Eye, GitBranch, Loader2, Pencil, Plus, Trash2, X } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { ar } from 'date-fns/locale';
 import { toEnglishDigits } from '@/lib/utils';
 import { useToast } from '../components/Toast';
+import { useFlowEditing } from '../lib/useFlowEditing';
 import { errorMessage, FLOW_TEMPLATES, serializeGraph, triggerSummary } from '../components/flows/flowModel';
 import type { FlowEdge, FlowNode, FlowTrigger } from '../components/flows/flowModel';
 
@@ -13,6 +14,8 @@ interface Flow {
   id: string;
   name: string;
   isActive: boolean;
+  /** A core flow: it cannot be deleted. */
+  isProtected?: boolean;
   updatedAt: string;
   trigger?: FlowTrigger;
   nodes?: FlowNode[];
@@ -31,6 +34,7 @@ export default function FlowsPage() {
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const navigate = useNavigate();
   const { showToast } = useToast();
+  const canEdit = useFlowEditing();
 
   const fetchFlows = useCallback(async () => {
     try {
@@ -138,12 +142,16 @@ export default function FlowsPage() {
           <h1 className="text-2xl font-black text-neutral-900 dark:text-white">التدفقات</h1>
           <p className="mt-1 text-sm text-labbaik-text-muted">ردود آلية بأزرار وقوائم وملفات تبدأ حسب محفّز تحدده: محادثة جديدة، أو كلمة مفتاحية.</p>
         </div>
-        {!picking && flows.length > 0 && (
+        {canEdit && !picking && flows.length > 0 && (
           <button type="button" onClick={() => setPicking(true)} className="inline-flex items-center justify-center gap-2 h-10 px-4 rounded-lg bg-labbaik-blue text-labbaik-on-accent text-sm font-black hover:bg-[#553174] cursor-pointer">
             <Plus size={16} /> تدفق جديد
           </button>
         )}
       </div>
+
+      {!canEdit && (
+        <p className="rounded-lg bg-labbaik-page px-3 py-2.5 text-sm text-labbaik-text-muted">صلاحيتك على التدفقات للعرض فقط: تستطيع فتح التدفقات وتجربتها، والإضافة والتعديل لمدير الحساب.</p>
+      )}
 
       {!loading && flows.length > 0 && (
         <p className={`rounded-lg px-3 py-2.5 text-sm ${liveCount ? 'bg-emerald-500/10 text-emerald-900 dark:text-emerald-200' : 'bg-amber-500/15 text-amber-900 dark:text-amber-200'}`}>
@@ -153,7 +161,11 @@ export default function FlowsPage() {
         </p>
       )}
 
-      {(picking || (!loading && flows.length === 0)) && templatePicker}
+      {canEdit && (picking || (!loading && flows.length === 0)) && templatePicker}
+
+      {!canEdit && !loading && flows.length === 0 && (
+        <p className="rounded-xl border border-labbaik-border bg-labbaik-surface px-4 py-8 text-center text-sm text-labbaik-text-muted">لا توجد تدفقات بعد.</p>
+      )}
 
       {loading ? (
         <div className="rounded-xl border border-labbaik-border bg-labbaik-surface divide-y divide-labbaik-border" aria-hidden="true">
@@ -186,6 +198,13 @@ export default function FlowsPage() {
                   </p>
                 </div>
 
+                {!canEdit ? (
+                  <div className="flex items-center gap-2">
+                    <Link to={`/dashboard/flows/${flow.id}`} className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-xs font-bold text-neutral-800 dark:text-neutral-100 border border-labbaik-border hover:border-labbaik-blue/40 hover:text-labbaik-blue">
+                      <Eye size={13} /> عرض
+                    </Link>
+                  </div>
+                ) : (
                 <div className="flex items-center gap-1">
                   {confirmDelete === flow.id ? (
                     <>
@@ -201,9 +220,11 @@ export default function FlowsPage() {
                       <button type="button" disabled={busy} onClick={() => void duplicate(flow)} aria-label={`نسخ ${flow.name}`} title="نسخ" className="grid h-8 w-8 place-items-center rounded-md text-labbaik-text-muted hover:text-labbaik-blue hover:bg-labbaik-blue/10 disabled:opacity-50 cursor-pointer">
                         <Copy size={15} />
                       </button>
-                      <button type="button" onClick={() => setConfirmDelete(flow.id)} aria-label={`حذف ${flow.name}`} title="حذف" className="grid h-8 w-8 place-items-center rounded-md text-labbaik-text-muted hover:text-red-600 hover:bg-red-500/10 cursor-pointer">
-                        <Trash2 size={15} />
-                      </button>
+                      {!flow.isProtected && (
+                        <button type="button" onClick={() => setConfirmDelete(flow.id)} aria-label={`حذف ${flow.name}`} title="حذف" className="grid h-8 w-8 place-items-center rounded-md text-labbaik-text-muted hover:text-red-600 hover:bg-red-500/10 cursor-pointer">
+                          <Trash2 size={15} />
+                        </button>
+                      )}
                     </>
                   )}
                   <span className="mx-1 h-5 w-px bg-labbaik-border" />
@@ -220,6 +241,7 @@ export default function FlowsPage() {
                     <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-all ${flow.isActive ? 'right-0.5' : 'right-5.5'}`} />
                   </button>
                 </div>
+                )}
               </li>
             );
           })}

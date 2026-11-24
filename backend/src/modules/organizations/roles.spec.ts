@@ -1,5 +1,5 @@
 import { OrganizationRole } from './entities/organization-member.entity';
-import { memberRoleOf, SECTIONS, sectionsFor, seesAllBranches } from './roles';
+import { editsFlows, memberRoleOf, SECTIONS, sectionsFor, seesAllBranches } from './roles';
 
 describe('team roles', () => {
   it('gives owners and admins every section and every branch', () => {
@@ -17,5 +17,13 @@ describe('team roles', () => {
   it('limits campaign staff to flows and WhatsApp templates and campaigns', () => {
     expect([...sectionsFor(OrganizationRole.MARKETING)]).toEqual(['flows', 'whatsapp']);
     expect(sectionsFor(OrganizationRole.MARKETING)).not.toContain('team');
+  });
+
+  it('shows flows read-only to support staff unless they were given flow editing', () => {
+    expect(editsFlows({ role: OrganizationRole.AGENT, canEditFlows: false })).toBe(false);
+    expect(editsFlows({ role: OrganizationRole.SUPERVISOR })).toBe(false);
+    expect(editsFlows({ role: OrganizationRole.AGENT, canEditFlows: true })).toBe(true);
+    expect(editsFlows({ role: OrganizationRole.MARKETING, canEditFlows: false })).toBe(true);
+    expect(editsFlows({ role: OrganizationRole.ADMIN, canEditFlows: false })).toBe(true);
   });
 });

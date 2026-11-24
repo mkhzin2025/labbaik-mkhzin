@@ -31,13 +31,13 @@ export class OrganizationsController {
 
   @Post('members')
   @Access('team')
-  async addMember(@Request() req: any, @Body() body: { fullName?: string; email?: string; password?: string; phoneNumber?: string; role?: string; storeIds?: string[] }) {
+  async addMember(@Request() req: any, @Body() body: { fullName?: string; email?: string; password?: string; phoneNumber?: string; role?: string; canEditFlows?: boolean; storeIds?: string[] }) {
     return this.organizationsService.addMember(req.user.id, req.user.organizationId, body);
   }
 
   @Patch('members/:userId')
   @Access('team')
-  async updateMember(@Request() req: any, @Param('userId') userId: string, @Body() body: { fullName?: string; password?: string; phoneNumber?: string; role?: string; storeIds?: string[] }) {
+  async updateMember(@Request() req: any, @Param('userId') userId: string, @Body() body: { fullName?: string; password?: string; phoneNumber?: string; role?: string; canEditFlows?: boolean; storeIds?: string[] }) {
     return this.organizationsService.updateMember(req.user.id, req.user.organizationId, userId, body);
   }
 

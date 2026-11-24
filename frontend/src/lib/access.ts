@@ -8,6 +8,8 @@ export interface Access {
   organization: { id: string; name: string };
   role: MemberRole;
   sections: Section[];
+  /** False for support staff who see flows read-only; missing on older backends (editable). */
+  canEditFlows?: boolean;
 }
 
 export const ROLE_LABELS: Record<MemberRole, string> = {

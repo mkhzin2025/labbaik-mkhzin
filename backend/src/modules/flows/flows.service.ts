@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -105,6 +105,7 @@ export class FlowsService {
 
   async delete(id: string, storeId: string, organizationId?: string | null) {
     const flow = await this.findEntity(id, storeId, organizationId);
+    if (flow.isProtected) throw new ForbiddenException('هذا تدفق أساسي ولا يمكن حذفه.');
     return this.flowRepository.remove(flow);
   }
 

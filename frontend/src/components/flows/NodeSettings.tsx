@@ -289,8 +289,10 @@ const TRIGGER_HINTS: Record<TriggerType, string> = {
   keyword: 'عندما تطابق رسالة العميل كلمة تحددها، مثل «العروض» أو «الأسعار».',
 };
 
-export default function NodeSettings({ node, onChange, onDelete, onClose, sharedOptions = 0, onSplitShared }: {
+export default function NodeSettings({ node, readOnly = false, onChange, onDelete, onClose, sharedOptions = 0, onSplitShared }: {
   node: FlowNode;
+  /** Shows the settings without letting them change. */
+  readOnly?: boolean;
   onChange: (data: Partial<FlowNodeData>) => void;
   onDelete: () => void;
   onClose: () => void;
@@ -326,6 +328,7 @@ export default function NodeSettings({ node, onChange, onDelete, onClose, shared
             ))}
           </ul>
         )}
+        <fieldset disabled={readOnly} className="m-0 min-w-0 space-y-5 border-0 p-0">
 
         {type === 'start' && (
           <>
@@ -428,9 +431,10 @@ export default function NodeSettings({ node, onChange, onDelete, onClose, shared
             ينتهي التدفق هنا. الرسالة التالية من العميل يرد عليها الذكاء الاصطناعي أو تبدأ تدفقًا آخر حسب محفّزه.
           </p>
         )}
+        </fieldset>
       </div>
 
-      {type !== 'start' && (
+      {type !== 'start' && !readOnly && (
         <div className="border-t border-labbaik-border px-5 py-3">
           <button type="button" onClick={onDelete} className="inline-flex h-9 items-center gap-1.5 rounded-lg px-3 text-sm font-bold text-red-600 hover:bg-red-500/10 dark:text-red-400 cursor-pointer">
             <Trash2 size={15} /> حذف الخطوة

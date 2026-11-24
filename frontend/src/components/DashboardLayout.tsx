@@ -35,6 +35,9 @@ import api from '../api/client';
 import { useTheme } from '../context/ThemeContext';
 import { ALL_SECTIONS, cacheAccess, firstAllowedPath, readCachedAccess, ROLE_LABELS, sectionOf } from '../lib/access';
 import type { Access, Section } from '../lib/access';
+import UnfinishedConversationsDialog from './UnfinishedConversations';
+import { fetchUnfinished, holdsSignOut } from '../lib/unfinished';
+import type { UnfinishedConversation } from '../lib/unfinished';
 
 interface NavItem {
   icon: React.ReactNode;
@@ -195,12 +198,32 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   const currentPage = navGroups.flatMap((group) => group.items).find((item) => isActivePath(location.pathname, item.path));
 
-  const handleLogout = () => {
+  const [unfinished, setUnfinished] = useState<UnfinishedConversation[] | null>(null);
+  const [checkingLogout, setCheckingLogout] = useState(false);
+
+  const signOut = () => {
     localStorage.removeItem('access_token');
     localStorage.removeItem('user');
     localStorage.removeItem('organization');
     cacheAccess(null);
     navigate('/login');
+  };
+
+  // A member who still owes customers an answer must reply to or close those conversations first.
+  // If the check itself fails (offline, older backend) signing out is not held.
+  const handleLogout = async () => {
+    if (checkingLogout) return;
+    if (!holdsSignOut(access)) { signOut(); return; }
+    setCheckingLogout(true);
+    const pending = await fetchUnfinished();
+    setCheckingLogout(false);
+    if (pending && pending.length) {
+      setUserMenuOpen(false);
+      setSidebarOpen(false);
+      setUnfinished(pending);
+      return;
+    }
+    signOut();
   };
 
   const iconButton = 'grid h-10 w-10 place-items-center rounded-lg border border-labbaik-border text-neutral-600 dark:text-neutral-300 hover:text-labbaik-blue hover:border-labbaik-blue/40 dark:hover:text-white transition-colors cursor-pointer';
@@ -273,7 +296,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <div className="shrink-0 border-t border-labbaik-border p-3">
           <button
             type="button"
-            onClick={handleLogout}
+            onClick={() => void handleLogout()}
+            disabled={checkingLogout}
             title={isCollapsed ? 'تسجيل الخروج' : undefined}
             className={`w-full flex h-10 items-center rounded-lg text-sm font-medium text-neutral-700 dark:text-neutral-200 hover:text-red-600 hover:bg-red-500/10 dark:hover:text-red-400 transition-colors cursor-pointer ${isCollapsed ? 'lg:justify-center gap-3 px-3 lg:px-0' : 'gap-3 px-3'}`}
           >
@@ -339,7 +363,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                   {can('billing') && <Link role="menuitem" onClick={() => setUserMenuOpen(false)} to="/dashboard/billing" className="flex items-center gap-2.5 h-9 px-3 rounded-lg text-sm text-neutral-700 dark:text-neutral-200 hover:bg-labbaik-page">
                     <WalletCards size={16} className="text-labbaik-text-muted" /> الباقات والفوترة
                   </Link>}
-                  <button role="menuitem" type="button" onClick={handleLogout} className="w-full flex items-center gap-2.5 h-9 px-3 rounded-lg text-sm text-red-600 dark:text-red-400 hover:bg-red-500/10 cursor-pointer">
+                  <button role="menuitem" type="button" onClick={() => void handleLogout()} disabled={checkingLogout} className="w-full flex items-center gap-2.5 h-9 px-3 rounded-lg text-sm text-red-600 dark:text-red-400 hover:bg-red-500/10 cursor-pointer">
                     <LogOut size={16} className="-scale-x-100" /> تسجيل الخروج
                   </button>
                 </div>
@@ -358,6 +382,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </div>
         </main>
       </div>
+      {unfinished && (
+        <UnfinishedConversationsDialog items={unfinished} onChange={setUnfinished} onClose={() => setUnfinished(null)} onSignOut={signOut} />
+      )}
     </div>
   );
 }

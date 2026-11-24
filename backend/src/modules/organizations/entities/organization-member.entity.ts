@@ -33,6 +33,10 @@ export class OrganizationMember {
   @Column({ type: 'enum', enum: OrganizationRole, default: OrganizationRole.OWNER })
   role: OrganizationRole;
 
+  /** Lets a support member add and change flows; support staff otherwise see flows read-only. */
+  @Column({ default: false })
+  canEditFlows: boolean;
+
   @CreateDateColumn()
   createdAt: Date;
 

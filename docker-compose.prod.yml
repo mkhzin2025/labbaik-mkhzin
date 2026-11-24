@@ -90,6 +90,7 @@ services:
       MSEGAT_USERNAME: ${MSEGAT_USERNAME:-}
       MSEGAT_SENDER: ${MSEGAT_SENDER:-}
       MSEGAT_BASE_URL: ${MSEGAT_BASE_URL:-https://www.msegat.com/gw/sendsms.php}
+      CONVERSATION_AUTO_CLOSE_MINUTES: ${CONVERSATION_AUTO_CLOSE_MINUTES:-10}
       UPLOADS_DIR: /app/uploads
     volumes:
       - backend_uploads:/app/uploads

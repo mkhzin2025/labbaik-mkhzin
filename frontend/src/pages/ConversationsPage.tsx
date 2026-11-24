@@ -132,8 +132,6 @@ interface MessagesPage { messages: Message[]; total: number; start: number; hasM
 const LIST_PAGE_SIZE = 30;
 /** WhatsApp allows free-form replies only within 24h of the customer's last message; after that, a template. */
 const REPLY_WINDOW_MS = 24 * 3600 * 1000;
-/** Time automation gets to answer before a waiting customer counts as the team's to reply to (as on the server). */
-const BOT_GRACE_MS = 2 * 60 * 1000;
 const MESSAGES_PAGE_SIZE = 30;
 const SEARCH_DEBOUNCE_MS = 350;
 /**
@@ -559,6 +557,16 @@ export default function ConversationsPage() {
   // Ticks once a minute so relative times ("منذ 5 دقائق") stay current without a reload.
   const [now, setNow] = useState(() => Date.now());
   const navigate = useNavigate();
+  // ?c=<id> (from the "waiting on you" list) opens that conversation.
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get('c');
+    if (!id) return;
+    navigate('/dashboard/conversations', { replace: true });
+    api.get<Conversation>(`/conversations/${id}`)
+      .then(({ data }) => { setSelectedChat({ ...data, unreadCount: 0 }); setShowMobileList(false); })
+      .catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), MINUTE);
     return () => window.clearInterval(timer);
@@ -859,7 +867,7 @@ export default function ConversationsPage() {
   };
 
   // Socket listeners are bound once; they call through this ref so they always see the current render.
-  const socketHandlersRef = useRef<Record<'message' | 'status' | 'convStatus' | 'blocked' | 'agent' | 'reconnect', (payload: unknown) => void>>(null!);
+  const socketHandlersRef = useRef<Record<'message' | 'status' | 'convStatus' | 'blocked' | 'agent' | 'handoff' | 'reconnect', (payload: unknown) => void>>(null!);
 
   const setupSocket = () => {
     const token = localStorage.getItem('access_token');
@@ -875,6 +883,8 @@ export default function ConversationsPage() {
     socketRef.current.on('conversation_blocked', (payload) => socketHandlersRef.current.blocked(payload));
     // A teammate took, released or replied in a conversation.
     socketRef.current.on('conversation_agent', (payload) => socketHandlersRef.current.agent(payload));
+    // A flow handed a conversation to the team: it now needs a reply.
+    socketRef.current.on('flow_handoff', (payload) => socketHandlersRef.current.handoff(payload));
     // Events sent while the connection was down are not replayed: catch up once it is back (not on the first connect).
     socketRef.current.io.on('reconnect', () => socketHandlersRef.current.reconnect(null));
   };
@@ -950,7 +960,7 @@ export default function ConversationsPage() {
   const handleConversationStatus = (payload: { conversationId?: string; status?: string; snoozedUntil?: string | null } | null) => {
     if (!payload?.conversationId) return;
     const id = payload.conversationId;
-    const patch = { status: payload.status || 'open', snoozedUntil: payload.snoozedUntil || null };
+    const patch = { status: payload.status || 'open', snoozedUntil: payload.snoozedUntil || null, ...(payload.status === 'closed' ? { awaitingReply: false } : {}) };
     setConversations((prev) => prev.map((c) => (c._id === id ? { ...c, ...patch } : c)));
     setSelectedChat((current) => (current && current._id === id ? { ...current, ...patch } : current));
     scheduleRealtimeSync(false);
@@ -1052,7 +1062,8 @@ export default function ConversationsPage() {
           customerName: current.customerName || payload.customerName,
           tags: Array.from(new Set([...(current.tags || []), ...(payload.tags || [])])),
           messages: [newMessage],
-          awaitingReply: !quiet && isCustomerMessage(newMessage),
+          // Only a team member's typed reply answers a handoff; other messages leave "needs a reply" as it was.
+          awaitingReply: payload.from === 'me' && payload.isManual ? false : current.awaitingReply,
           unreadCount: (!isOwnOrSystem && !quiet && !isCurrentlyOpen) ? (current.unreadCount || 0) + 1 : (current.unreadCount || 0),
           ...(ratingTap ? { rating: ratingTap, lastSentiment: ratingTap } : {}),
           ...reopen,
@@ -1088,6 +1099,13 @@ export default function ConversationsPage() {
       applyAgent(event.conversationId, { agentId: event.agentId || null, agentName: event.agentName || null, agentAssignedAt: event.agentAssignedAt || null });
       // Taking a conversation moves it between open and someone's list: refresh the badges, and pull it in if it is new here.
       scheduleRealtimeSync(!conversationsRef.current.some((c) => c._id === event.conversationId));
+    },
+    handoff: (payload) => {
+      const id = (payload as { conversationId?: string } | null)?.conversationId;
+      if (!id) return;
+      setConversations((prev) => prev.map((c) => (c._id === id ? { ...c, awaitingReply: true } : c)));
+      setSelectedChat((prev) => (prev?._id === id ? { ...prev, awaitingReply: true } : prev));
+      scheduleRealtimeSync(!conversationsRef.current.some((c) => c._id === id));
     },
     reconnect: () => scheduleRealtimeSync(true),
   };
@@ -1260,13 +1278,8 @@ export default function ConversationsPage() {
     if (statusView === 'mine') return s !== 'closed' && (searching || owner);
     return s === 'closed' && (searching || owner);
   };
-  // Mirrors the server's "needs a reply": unanswered, still inside the 24h reply window, and either the bot had
-  // its two minutes to answer or automatic replies are off for this conversation.
-  const needsReply = (c: Conversation) => {
-    const waiting = c.awaitingReply ?? isCustomerMessage(c.messages?.[c.messages.length - 1]);
-    const age = now - new Date(c.lastMessageAt).getTime();
-    return waiting && age < REPLY_WINDOW_MS && (age >= BOT_GRACE_MS || c.aiEnabled === false);
-  };
+  // As on the server: a flow handed the conversation to an employee and nobody from the team has replied yet.
+  const needsReply = (c: Conversation) => c.awaitingReply === true;
   // The server already filtered every loaded row; this only drops rows that local changes
   // (status change, read, realtime update) moved out of the current view. Search stays server-side.
   const filteredConversations = conversations.filter((c) =>
