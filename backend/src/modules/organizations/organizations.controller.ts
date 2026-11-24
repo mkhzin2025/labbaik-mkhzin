@@ -23,6 +23,19 @@ export class OrganizationsController {
     return this.organizationsService.getAccess(req.user.id, req.user.organizationId);
   }
 
+  /** Organization-wide conversation settings (when to ask customers for a rating). */
+  @Get('me/settings')
+  @Access('settings')
+  async settings(@Request() req: any) {
+    return this.organizationsService.getSettings(req.user.id, req.user.organizationId);
+  }
+
+  @Patch('me/settings')
+  @Access('settings')
+  async updateSettings(@Request() req: any, @Body() body: { ratingFrequency?: string; ratingScope?: string }) {
+    return this.organizationsService.updateSettings(req.user.id, req.user.organizationId, body);
+  }
+
   @Get('members')
   @Access('team')
   async listMembers(@Request() req: any) {

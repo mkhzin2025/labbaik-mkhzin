@@ -71,7 +71,7 @@ export class ChannelsService {
   async getStoreContext(storeId: string) {
     const store = await this.storeRepository.findOne({ 
       where: { id: storeId },
-      relations: ['owner']
+      relations: ['owner', 'organization']
     });
     if (!store) throw new NotFoundException('Store not found');
     return store;

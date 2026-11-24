@@ -2,6 +2,8 @@ import { Injectable, Logger, NotFoundException, InternalServerErrorException, On
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { CONVERSATION_RATINGS, Conversation, ConversationRating, ConversationStatus } from './schemas/conversation.schema';
+import { RATING_COOLDOWN_MS, ratingFrequencyOf, ratingScopeOf } from '../organizations/rating-policy';
+import type { RatingFrequency, RatingScope } from '../organizations/rating-policy';
 import { MessagingService } from '../channels/messaging.service';
 import { ChannelsService } from '../channels/channels.service';
 import { CustomersService } from '../customers/customers.service';
@@ -70,8 +72,6 @@ const ACKNOWLEDGEMENTS = new Set([
   'يعطيكم العافيه', 'جزاك الله خير', 'جزاكم الله خير', 'الله يجزاك خير', 'الله يسعدك', 'تمام', 'طيب', 'اوكي', 'اوك',
   'حلو', 'ممتاز', 'زين', 'العفو', 'عفوا', 'ok', 'okay', 'thanks', 'thank you', 'thx', 'تم', 'خلاص', 'وصل', 'تمام شكرا',
 ]);
-/** A customer is asked to rate at most once in this period, however often the conversation is closed. */
-const RATING_COOLDOWN_MS = 24 * 3600 * 1000;
 
 const INBOX_PAGE_DEFAULT = 30;
 const INBOX_PAGE_MAX = 100;
@@ -1448,7 +1448,7 @@ export class ConversationsService implements OnModuleInit {
       aiDisabledUntil: enabled ? null : new Date(Date.now() + 24 * 60 * 60 * 1000),
       aiPausedReason: enabled ? null : reason,
       // A flow's "transfer to employee" step is what puts a conversation in the team's "needs a reply" list.
-      ...(!enabled && reason === 'handoff' ? { awaitingReply: true } : {}),
+      ...(!enabled && reason === 'handoff' ? { awaitingReply: true, handedOffAt: new Date() } : {}),
     }, { returnDocument: 'after' });
     // "Needs a reply" depends on whether automatic replies are paused.
     this.invalidateCounts(conversation?.storeId);
@@ -1470,15 +1470,40 @@ export class ConversationsService implements OnModuleInit {
   }
 
   /**
+   * Whether closing should ask for a rating, by the organization's settings: only conversations a flow handed to
+   * the team (when so chosen), and at most once per period for the same customer.
+   */
+  static ratingAllowed(policy: { frequency: RatingFrequency; scope: RatingScope }, handedOff: boolean) {
+    return policy.scope === 'all' || handedOff;
+  }
+
+  /** Cutoff for the last rating request: asked again only once the customer wrote since, and the period passed. */
+  static ratingCutoff(frequency: RatingFrequency, lastCustomerAt: number, now = Date.now()) {
+    return new Date(Math.min(lastCustomerAt, now - RATING_COOLDOWN_MS[frequency]));
+  }
+
+  private async ratingPolicy(storeId: string) {
+    const store = await this.channelsService.getStoreContext(storeId).catch(() => null);
+    return { frequency: ratingFrequencyOf(store?.organization?.ratingFrequency), scope: ratingScopeOf(store?.organization?.ratingScope) };
+  }
+
+  /**
    * Asks the customer to rate the conversation, as WhatsApp reply buttons, once the team closes it.
-   * Skipped when the 24h window for free-form messages has passed, or when the customer was asked in the last
-   * 24 hours or has not written since the last request.
+   * Skipped when the 24h window for free-form messages has passed, when the organization's settings leave this
+   * conversation out (only handed-over ones, or once a day/week/month), or when the customer has not written since
+   * the last request.
    */
   async sendRatingRequest(conversationId: string) {
+    // The handover mark belongs to this close: it is cleared whether or not a rating goes out.
     const conversation = await this.conversationModel
-      .findById(conversationId, { storeId: 1, platform: 1, customerPhone: 1, metaConnectionId: 1, messages: { $slice: -50 } })
+      .findByIdAndUpdate(conversationId, { $set: { handedOffAt: null } }, {
+        returnDocument: 'before',
+        projection: { storeId: 1, platform: 1, customerPhone: 1, metaConnectionId: 1, handedOffAt: 1, messages: { $slice: -50 } },
+      })
       .lean().exec();
     if (!conversation || conversation.platform !== 'whatsapp') return;
+    const policy = await this.ratingPolicy(conversation.storeId);
+    if (!ConversationsService.ratingAllowed(policy, Boolean(conversation.handedOffAt))) return;
     const lastCustomerAt = Math.max(0, ...(conversation.messages || [])
       .filter((m: any) => ConversationsService.isCustomerMessage(m))
       .map((m: any) => (typeof m.timestamp === 'number' ? m.timestamp : new Date(m.timestamp).getTime()) || 0));
@@ -1491,7 +1516,7 @@ export class ConversationsService implements OnModuleInit {
         _id: conversationId,
         $or: [
           { ratingRequestedAt: null },
-          { ratingRequestedAt: { $lt: new Date(Math.min(lastCustomerAt, Date.now() - RATING_COOLDOWN_MS)) } },
+          { ratingRequestedAt: { $lt: ConversationsService.ratingCutoff(policy.frequency, lastCustomerAt) } },
         ],
       },
       { $set: { ratingRequestedAt: new Date() } },

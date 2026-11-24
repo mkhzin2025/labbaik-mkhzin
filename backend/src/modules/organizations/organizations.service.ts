@@ -10,6 +10,8 @@ import { User, UserRole } from '../users/entities/user.entity';
 import { editsFlows, MEMBER_ROLES, memberRoleOf, sectionsFor, seesAllBranches } from './roles';
 import type { MemberRole } from './roles';
 import { Store } from '../stores/entities/store.entity';
+import { RATING_FREQUENCIES, RATING_SCOPES, ratingFrequencyOf, ratingScopeOf } from './rating-policy';
+import type { RatingFrequency, RatingScope } from './rating-policy';
 import { normalizePhoneNumber } from '../../common/utils/phone.util';
 
 const SUPPORT_PHONE_REQUIRED = 'موظف دعم العملاء يحتاج رقم جوال، لأن رمز التحقق يصله برسالة نصية عند كل تسجيل دخول.';
@@ -85,6 +87,26 @@ export class OrganizationsService {
       return membership.organization;
     }
     return this.ensureForUser(userId);
+  }
+
+  async getSettings(userId: string, organizationId?: string) {
+    const organization = await this.getForUser(userId, organizationId);
+    return { ratingFrequency: ratingFrequencyOf(organization.ratingFrequency), ratingScope: ratingScopeOf(organization.ratingScope) };
+  }
+
+  async updateSettings(userId: string, organizationId: string | undefined, body: { ratingFrequency?: string; ratingScope?: string }) {
+    const organization = await this.getForUser(userId, organizationId);
+    const update: Partial<Organization> = {};
+    if (body?.ratingFrequency !== undefined) {
+      if (!(RATING_FREQUENCIES as readonly string[]).includes(body.ratingFrequency)) throw new BadRequestException('تكرار التقييم غير صالح.');
+      update.ratingFrequency = body.ratingFrequency as RatingFrequency;
+    }
+    if (body?.ratingScope !== undefined) {
+      if (!(RATING_SCOPES as readonly string[]).includes(body.ratingScope)) throw new BadRequestException('نطاق التقييم غير صالح.');
+      update.ratingScope = body.ratingScope as RatingScope;
+    }
+    if (Object.keys(update).length) await this.organizationRepository.update(organization.id, update);
+    return this.getSettings(userId, organization.id);
   }
 
   async getMembership(userId: string, organizationId?: string) {

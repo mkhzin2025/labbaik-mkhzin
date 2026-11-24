@@ -101,6 +101,10 @@ export class Conversation extends Document {
   @Prop({ type: Date, default: null })
   ratingRequestedAt: Date | null;
 
+  // Set when a flow hands the conversation to the team; read (and cleared) when it is closed, to decide on a rating.
+  @Prop({ type: Date, default: null })
+  handedOffAt: Date | null;
+
   // Who the rating counts for: the team member who closed the conversation (else the one handling it).
   @Prop({ type: String, default: null })
   ratedAgentId: string | null;

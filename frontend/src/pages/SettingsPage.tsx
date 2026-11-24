@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import api from '../api/client';
 import { useToast } from '../components/Toast';
 import MetaWhatsAppSettingsPanel from '../components/settings/MetaWhatsAppSettingsPanel';
+import RatingSettingsPanel from '../components/settings/RatingSettingsPanel';
 import { ArrowLeft, Bell, Building2, Check, Loader2, MapPin, Phone, Plus, Save, X } from 'lucide-react';
 
 interface BranchItem {
@@ -14,7 +15,7 @@ interface BranchItem {
   createdAt?: string;
 }
 
-type Tab = 'profile' | 'branches' | 'meta' | 'kb' | 'ai';
+type Tab = 'profile' | 'branches' | 'meta' | 'kb' | 'ai' | 'conversations';
 
 const TABS: { key: Tab; label: string }[] = [
   { key: 'profile', label: 'المتجر والحساب' },
@@ -22,6 +23,7 @@ const TABS: { key: Tab; label: string }[] = [
   { key: 'meta', label: 'ربط واتساب' },
   { key: 'kb', label: 'قاعدة المعرفة' },
   { key: 'ai', label: 'الرد الآلي' },
+  { key: 'conversations', label: 'المحادثات والتقييم' },
 ];
 
 const DAYS = [
@@ -224,6 +226,7 @@ export default function SettingsPage() {
         ))}
       </div>
 
+      {activeTab === 'conversations' && <RatingSettingsPanel />}
       {activeTab === 'meta' && <div className="grid grid-cols-1 lg:grid-cols-3 gap-4"><MetaWhatsAppSettingsPanel /></div>}
 
       {activeTab === 'profile' && (
