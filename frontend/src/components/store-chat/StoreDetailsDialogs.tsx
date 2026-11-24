@@ -196,7 +196,7 @@ export function ReturnDetailsDialog({ item: r, onClose, onPreview }: { item: Sto
         <span className={`${chip} ${RETURN_STATUS_CLS[r.status] || muted}`}>{r.statusAr}</span>
         <span className={`${chip} ${muted}`}>{r.sourceAr}</span>
         {r.reasonAr && <span className={`${chip} ${muted}`}>{r.reasonAr}</span>}
-        {r.deliveryReceived && <span className={`${chip} bg-emerald-500/15 text-emerald-800 dark:text-emerald-300`}>استلمه المندوب</span>}
+        {r.deliveryReceived && <span className={`${chip} bg-emerald-500/15 text-emerald-800 dark:text-emerald-300`}>تم الاسترداد بنجاح</span>}
       </div>
 
       <div className="grid grid-cols-3 gap-2">
@@ -218,7 +218,7 @@ export function ReturnDetailsDialog({ item: r, onClose, onPreview }: { item: Sto
         {r.createdAt && r.createdAt !== r.requestedAt && <Row label="تاريخ الإنشاء" value={dateTime(r.createdAt)} />}
         <Row label="المصدر" value={r.sourceAr} />
         <Row label="السبب" value={r.reasonAr} />
-        <Row label="استلام المندوب" value={r.deliveryReceived ? 'تم الاستلام' : 'لم يُستلم بعد'} />
+        <Row label="الاسترداد" value={r.deliveryReceived ? 'تم الاسترداد بنجاح' : 'لم يتم بعد'} />
       </Section>
 
       {(r.notes || r.reviewNotes) && (
