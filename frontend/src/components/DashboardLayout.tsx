@@ -24,6 +24,7 @@ import {
   Trash2,
   UserCog,
   Loader2,
+  Store,
 } from 'lucide-react';
 
 import LogoImage from '../assets/logos/tael-bot-glyph-white.svg';
@@ -38,6 +39,7 @@ import type { Access, Section } from '../lib/access';
 import UnfinishedConversationsDialog from './UnfinishedConversations';
 import { fetchUnfinished, holdsSignOut } from '../lib/unfinished';
 import type { UnfinishedConversation } from '../lib/unfinished';
+import { storeChatApi } from '../lib/store-chat';
 
 interface NavItem {
   icon: React.ReactNode;
@@ -95,7 +97,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const userMenuRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
   const location = useLocation();
-  const isConversationsPage = location.pathname === '/dashboard/conversations';
+  const isConversationsPage = location.pathname === '/dashboard/conversations' || location.pathname === '/dashboard/store-chats';
   // Full-bleed workspaces that manage their own scrolling.
   const isFullBleed = isConversationsPage || /^\/dashboard\/flows\/[^/]+$/.test(location.pathname);
   const user = JSON.parse(localStorage.getItem('user') || '{}');
@@ -136,6 +138,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     api.get('/billing/admin/me').then(() => setPlatformAdmin(true)).catch(() => setPlatformAdmin(false));
   }, []);
 
+  // Store chats appear only for the organizations the backend enables them for.
+  const [storeChatEnabled, setStoreChatEnabled] = useState(false);
+  useEffect(() => {
+    storeChatApi.status().then((s) => setStoreChatEnabled(s.enabled)).catch(() => setStoreChatEnabled(false));
+  }, [access?.organization.id]);
+
   // Close the mobile drawer and the user menu on Escape (links close them on click).
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -160,6 +168,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       items: [
         { icon: <LayoutDashboard size={18} />, label: 'الرئيسية', path: '/dashboard', section: 'home' },
         { icon: <MessageSquare size={18} />, label: 'المحادثات', path: '/dashboard/conversations', section: 'conversations' },
+        ...(storeChatEnabled
+          ? [{ icon: <Store size={18} />, label: 'محادثات المتجر', path: '/dashboard/store-chats', section: 'conversations' as Section }]
+          : []),
         { icon: <Users size={18} />, label: 'العملاء', path: '/dashboard/customers', section: 'customers' },
         { icon: <Star size={18} />, label: 'التقييمات', path: '/dashboard/reviews', section: 'reviews' },
       ],

@@ -21,6 +21,7 @@ export const ROLE_LABELS: Record<MemberRole, string> = {
 
 const PATH_SECTIONS: [string, Section][] = [
   ['/dashboard/conversations', 'conversations'],
+  ['/dashboard/store-chats', 'conversations'],
   ['/dashboard/customers', 'customers'],
   ['/dashboard/reviews', 'reviews'],
   ['/dashboard/flows', 'flows'],

@@ -43,6 +43,7 @@ import { BillingPayment } from './modules/billing/entities/billing-payment.entit
 import { PricingRule } from './modules/billing/entities/pricing-rule.entity';
 import { AccountDeletionModule } from './modules/account-deletion/account-deletion.module';
 import { AccountDeletionRequest } from './modules/account-deletion/entities/account-deletion-request.entity';
+import { StoreChatModule } from './modules/store-chat/store-chat.module';
 
 
 @Module({
@@ -88,6 +89,7 @@ import { AccountDeletionRequest } from './modules/account-deletion/entities/acco
     CustomersModule,
     FlowsModule,
     AccountDeletionModule,
+    StoreChatModule,
   ],
 })
 export class AppModule {}
