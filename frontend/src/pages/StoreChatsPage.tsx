@@ -601,6 +601,14 @@ const PanelSkeleton = () => (
   </div>
 );
 
+/** A status chip with its kind written before it, so shipping and preparation are told apart at a glance. */
+const LabeledChip = ({ label, text, cls }: { label: string; text: string; cls: string }) => (
+  <span className="inline-flex items-center gap-1">
+    <span className="text-[11px] font-bold text-labbaik-text-muted">{label}:</span>
+    <span className={`${chip} ${cls}`}>{text}</span>
+  </span>
+);
+
 const PanelEmpty = ({ icon: Icon, text }: { icon: typeof Package; text: string }) => (
   <div className="py-10 flex flex-col items-center gap-2 text-labbaik-text-muted">
     <Icon size={30} />
@@ -627,10 +635,10 @@ function CustomerOrders({ branch, customerId }: { branch: string; customerId: st
           <button key={s.shipmentId} type="button" onClick={() => setOpened(s)} title="عرض تفاصيل الطلب" className={clickableCard}>
             <div className="flex items-center justify-between gap-2">
               <span className="text-sm font-black text-labbaik-blue dark:text-purple-300 tabular-nums" dir="ltr">{s.orderNumber || '—'}</span>
-              <span className={`${chip} ${status.cls}`}>{status.label}</span>
             </div>
-            <div className="flex flex-wrap items-center gap-1.5">
-              <span className={`${chip} ${stage.cls}`} title="حالة التجهيز">{stage.label}</span>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+              <LabeledChip label="الشحن" text={status.label} cls={status.cls} />
+              <LabeledChip label="التجهيز" text={stage.label} cls={stage.cls} />
               {s.isScheduledOrder && <span className={`${chip} bg-labbaik-page text-labbaik-text-muted`}>مجدول</span>}
             </div>
             <div className="flex items-center justify-between gap-2 text-[11px] font-bold text-labbaik-text-muted">
@@ -708,7 +716,7 @@ function CustomerReturns({ branch, customerId }: { branch: string; customerId: s
           <div className="flex flex-wrap items-center gap-1.5">
             {r.reasonAr && <span className={`${chip} bg-labbaik-page text-labbaik-text-muted`}>{r.reasonAr}</span>}
             <span className={`${chip} bg-labbaik-page text-labbaik-text-muted`}>{r.sourceAr}</span>
-            {r.deliveryReceived && <span className={`${chip} bg-emerald-500/15 text-emerald-800 dark:text-emerald-300`}>استلمه المندوب</span>}
+            {r.deliveryReceived && <span className={`${chip} bg-emerald-500/15 text-emerald-800 dark:text-emerald-300`}>تم الاسترداد بنجاح</span>}
           </div>
 
           {r.attachments.length > 0 && (
