@@ -247,6 +247,11 @@ export class ConversationsService implements OnModuleInit {
     );
   }
 
+  /** The customer reached the end of a flow: their next message starts the flows over, as for a new conversation. */
+  async restartFlowOnNextMessage(id: string) {
+    await this.conversationModel.updateOne({ _id: id }, { $set: { restartFlow: true } });
+  }
+
   /** Takes the fresh start a close left for this conversation; true once per close. */
   async consumeFlowRestart(id: string) {
     const result = await this.conversationModel.updateOne({ _id: id, restartFlow: true }, { $set: { restartFlow: false } });

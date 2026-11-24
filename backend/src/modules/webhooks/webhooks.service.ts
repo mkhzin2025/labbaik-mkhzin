@@ -617,6 +617,9 @@ export class WebhooksService {
     if (step.handoff) {
       await this.conversationsService.toggleAi(String(conversation._id), false, 'handoff');
       this.eventsGateway.server.to(`store_${storeId}`).emit('flow_handoff', { storeId, conversationId: String(conversation._id), customerPhone: from, flowId: flow.id });
+    } else if (!step.state) {
+      // The flow finished (e.g. "end conversation"): whatever the customer writes next starts it from the beginning.
+      await this.conversationsService.restartFlowOnNextMessage(String(conversation._id));
     }
   }
 

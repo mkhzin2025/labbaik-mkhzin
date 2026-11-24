@@ -71,7 +71,7 @@ export default function FlowTester({ nodes, edges, trigger, onClose, onFocusNode
       } else {
         data.send.forEach((node) => added.push({ id: next(), kind: 'bot', node }));
         if (data.handoff) added.push({ id: next(), kind: 'note', text: 'حُوّلت المحادثة لموظف وتوقف الرد الآلي.' });
-        else if (!data.state) added.push({ id: next(), kind: 'note', text: 'انتهى التدفق.' });
+        else if (!data.state) added.push({ id: next(), kind: 'note', text: 'انتهى التدفق. الرسالة التالية تعيده من البداية.' });
       }
       if (data.send[0]) onFocusNode(data.send[data.send.length - 1].id);
       setItems((current) => [...current, ...added]);
