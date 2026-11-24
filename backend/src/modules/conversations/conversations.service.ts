@@ -1685,7 +1685,7 @@ export class ConversationsService implements OnModuleInit {
     };
     await this.addMessage(conversation.customerPhone, storeId, conversation.platform, messageData);
     // Same as a typed reply: the team has taken over, so automatic replies pause for a while.
-    await this.conversationModel.findByIdAndUpdate(conversationId, { aiEnabled: false, aiDisabledUntil: new Date(Date.now() + 30 * 60 * 1000), aiPausedReason: 'agent_reply', restartFlow: false });
+    await this.afterTeamSend(conversation);
     if (agent) await this.assignAgent(conversationId, agent);
     this.eventsGateway.server.to(`store_${storeId}`).emit('new_message', { ...messageData, customerPhone: conversation.customerPhone, platform: conversation.platform, storeId });
     return { status: 'sent', message: messageData };
@@ -1710,6 +1710,21 @@ export class ConversationsService implements OnModuleInit {
       type: message.type,
       text: String(message.text || '').slice(0, 300),
     };
+  }
+
+  /**
+   * After the team sends a message: automatic replies pause while they handle the customer. A message sent to a
+   * closed conversation (a closing note) leaves it closed, so the customer's next message still starts the flow over
+   * and no auto-close wait begins.
+   */
+  private async afterTeamSend(conversation: { _id: any; status?: string }) {
+    if (conversation.status === 'closed') {
+      await this.conversationModel.updateOne({ _id: conversation._id }, { $set: { awaitingCustomerSince: null } });
+      return;
+    }
+    await this.conversationModel.updateOne({ _id: conversation._id }, {
+      $set: { aiEnabled: false, aiDisabledUntil: new Date(Date.now() + 30 * 60 * 1000), aiPausedReason: 'agent_reply', restartFlow: false },
+    });
   }
 
   async sendMessage(conversationId: string, storeId: string, text: string, agent?: Agent, replyTo?: string) {
@@ -1759,8 +1774,7 @@ export class ConversationsService implements OnModuleInit {
       },
     };
     await this.addMessage(conversation.customerPhone, storeId, conversation.platform, messageData);
-    const thirtyMinutesFromNow = new Date(Date.now() + 30 * 60 * 1000);
-    await this.conversationModel.findByIdAndUpdate(conversationId, { aiEnabled: false, aiDisabledUntil: thirtyMinutesFromNow, aiPausedReason: 'agent_reply', restartFlow: false });
+    await this.afterTeamSend(conversation);
     if (agent) await this.assignAgent(conversationId, agent);
     const store = await this.channelsService.getStoreContext(storeId);
     const ownerId = store.owner?.id || (typeof store.owner === 'string' ? store.owner : null);
