@@ -48,6 +48,13 @@ export class StoreChatController {
     return this.products.search(storeId, String(query.q || '').slice(0, 200), page);
   }
 
+  @Get('needs-reply-count')
+  @ApiOperation({ summary: 'Store chats waiting on a reply, summed over all branches (sidebar badge)' })
+  needsReplyCount(@Request() req) {
+    this.storeChat.assertEnabled(req.user.organizationId);
+    return this.storeChat.needsReplyCount();
+  }
+
   @Get('unread-total-count')
   unreadTotal(@Request() req, @Query('branch') branch?: string) {
     this.storeChat.assertEnabled(req.user.organizationId);

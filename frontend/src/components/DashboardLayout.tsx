@@ -40,7 +40,7 @@ import type { Access, Section } from '../lib/access';
 import UnfinishedConversationsDialog from './UnfinishedConversations';
 import { fetchUnfinished, holdsSignOut } from '../lib/unfinished';
 import type { UnfinishedConversation } from '../lib/unfinished';
-import { storeChatApi } from '../lib/store-chat';
+import { STORE_CHAT_CHANGED, storeChatApi } from '../lib/store-chat';
 import ProductSearchDialog from './ProductSearchDialog';
 
 interface NavItem {
@@ -49,6 +49,8 @@ interface NavItem {
   path: string;
   /** Hidden from members whose role does not cover it; platform pages have none. */
   section?: Section;
+  /** Count shown beside the label (a dot on the icon when the sidebar is collapsed). */
+  badge?: number;
 }
 
 interface NavGroup {
@@ -78,7 +80,7 @@ const SidebarItem = ({ item, active, isCollapsed, onNavigate }: { item: NavItem;
     onClick={onNavigate}
     title={isCollapsed ? item.label : undefined}
     aria-current={active ? 'page' : undefined}
-    className={`flex h-10 items-center gap-3 px-3 rounded-lg text-sm transition-colors ${isCollapsed ? 'lg:justify-center lg:px-0' : ''} ${
+    className={`relative flex h-10 items-center gap-3 px-3 rounded-lg text-sm transition-colors ${isCollapsed ? 'lg:justify-center lg:px-0' : ''} ${
       active
         ? 'bg-labbaik-blue text-labbaik-on-accent font-bold'
         : 'font-medium text-neutral-700 dark:text-neutral-200 hover:bg-labbaik-blue/10 hover:text-labbaik-blue dark:hover:text-white'
@@ -87,6 +89,21 @@ const SidebarItem = ({ item, active, isCollapsed, onNavigate }: { item: NavItem;
     <span className={`shrink-0 ${active ? '' : 'text-labbaik-blue dark:text-purple-300'}`}>{item.icon}</span>
     {/* truncate clips overflow; the padding keeps Arabic descenders (ر، و، ي) inside the box. */}
     <span className={`truncate py-1 leading-normal ${isCollapsed ? 'lg:sr-only' : ''}`}>{item.label}</span>
+    {Boolean(item.badge) && (
+      <>
+        <span
+          aria-label={`${item.badge} تحتاج رداً`}
+          className={`ms-auto grid h-5 min-w-5 shrink-0 place-items-center rounded-full px-1.5 text-[11px] font-bold tabular-nums ${isCollapsed ? 'lg:hidden' : ''} ${
+            active ? 'bg-white/25 text-labbaik-on-accent' : 'bg-labbaik-blue text-labbaik-on-accent'
+          }`}
+        >
+          {item.badge! > 99 ? '99+' : item.badge}
+        </span>
+        {isCollapsed && (
+          <span aria-hidden className={`hidden lg:block absolute top-1.5 end-2 h-2 w-2 rounded-full ring-2 ring-labbaik-surface ${active ? 'bg-white' : 'bg-labbaik-blue'}`} />
+        )}
+      </>
+    )}
   </Link>
 );
 
@@ -152,6 +169,27 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       .catch(() => { setStoreChatEnabled(false); setProductSearchEnabled(false); });
   }, [access?.organization.id]);
 
+  // Store chats waiting on a reply, summed over all branches, for the sidebar badge.
+  const [storeChatPending, setStoreChatPending] = useState(0);
+  useEffect(() => {
+    if (!storeChatEnabled) return;
+    let cancelled = false;
+    const refresh = () => {
+      if (document.visibilityState !== 'visible') return;
+      storeChatApi.needsReplyCount().then((n) => { if (!cancelled) setStoreChatPending(n); }).catch(() => { /* keep the last count */ });
+    };
+    refresh();
+    const id = window.setInterval(refresh, 30_000);
+    window.addEventListener(STORE_CHAT_CHANGED, refresh);
+    document.addEventListener('visibilitychange', refresh);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+      window.removeEventListener(STORE_CHAT_CHANGED, refresh);
+      document.removeEventListener('visibilitychange', refresh);
+    };
+  }, [storeChatEnabled]);
+
   // Ctrl/⌘+K opens the product search from any page.
   useEffect(() => {
     if (!productSearchEnabled) return;
@@ -190,7 +228,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         { icon: <LayoutDashboard size={18} />, label: 'الرئيسية', path: '/dashboard', section: 'home' },
         { icon: <MessageSquare size={18} />, label: 'المحادثات', path: '/dashboard/conversations', section: 'conversations' },
         ...(storeChatEnabled
-          ? [{ icon: <Store size={18} />, label: 'محادثات المتجر', path: '/dashboard/store-chats', section: 'conversations' as Section }]
+          ? [{ icon: <Store size={18} />, label: 'محادثات المتجر', path: '/dashboard/store-chats', section: 'conversations' as Section, badge: storeChatPending }]
           : []),
         { icon: <Users size={18} />, label: 'العملاء', path: '/dashboard/customers', section: 'customers' },
         { icon: <Star size={18} />, label: 'التقييمات', path: '/dashboard/reviews', section: 'reviews' },

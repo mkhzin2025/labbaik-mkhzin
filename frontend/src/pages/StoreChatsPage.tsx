@@ -36,6 +36,7 @@ import {
   readSavedBranch,
   saveBranch,
   scheduleInfo,
+  STORE_CHAT_CHANGED,
   storeChatApi,
 } from '../lib/store-chat';
 import type { ChatState, ReturnsPage, Paged, StoreBranch, StoreChatCustomer, StoreChatMessage, StoreReturn, StoreShipment } from '../lib/store-chat';
@@ -154,6 +155,7 @@ export default function StoreChatsPage() {
       setUnreadTotal(total);
       setBranchUnread((counts) => ({ ...counts, [requested]: total }));
       setListError(false);
+      window.dispatchEvent(new Event(STORE_CHAT_CHANGED));
     } catch {
       if (requested === branchRef.current) setListError(true);
     }

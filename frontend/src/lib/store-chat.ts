@@ -164,6 +164,8 @@ export const storeChatApi = {
   productStores: () => api.get<ErpStore[]>('/store-chat/products/stores').then((r) => (Array.isArray(r.data) ? r.data : [])),
   products: (storeId: string, q: string, page: number, signal?: AbortSignal) =>
     api.get<ProductPage>('/store-chat/products', { params: { storeId, q, page }, signal }).then((r) => r.data),
+  needsReplyCount: () =>
+    api.get<{ total: number }>('/store-chat/needs-reply-count').then((r) => Number(r.data?.total) || 0),
   unreadTotal: (branch: string) =>
     api.get<{ unreadTotalCount: number }>('/store-chat/unread-total-count', { params: { branch } }).then((r) => r.data.unreadTotalCount ?? 0),
   customers: (branch: string) =>
@@ -177,6 +179,9 @@ export const storeChatApi = {
   returns: (branch: string, customerId: string, page = 1) =>
     api.get<ReturnsPage>('/store-chat/customer-returns', { params: { branch, customerId, page, pageSize: 10 } }).then((r) => r.data),
 };
+
+/** Fired by the store chats page after it refreshes, so the sidebar badge catches up without waiting. */
+export const STORE_CHAT_CHANGED = 'store-chat:changed';
 
 const BRANCH_KEY = 'store_chat_branch';
 export const readSavedBranch = () => { try { return localStorage.getItem(BRANCH_KEY); } catch { return null; } };
