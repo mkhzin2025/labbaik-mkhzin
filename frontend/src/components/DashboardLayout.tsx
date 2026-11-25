@@ -255,7 +255,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           ? [{ icon: <Store size={18} />, label: 'محادثات المتجر', path: '/dashboard/store-chats', section: 'conversations' as Section, badge: storeChatPending }]
           : []),
         ...(trialRequests.enabled
-          ? [{ icon: <UserPlus size={18} />, label: 'طلبات الاشتراك', path: '/dashboard/trial-requests', badge: trialRequests.newCount }]
+          ? [{ icon: <UserPlus size={18} />, label: 'طلبات الاشتراك', path: '/dashboard/trial-requests', section: 'team' as Section, badge: trialRequests.newCount }]
           : []),
         { icon: <Users size={18} />, label: 'العملاء', path: '/dashboard/customers', section: 'customers' },
         { icon: <Star size={18} />, label: 'التقييمات', path: '/dashboard/reviews', section: 'reviews' },
