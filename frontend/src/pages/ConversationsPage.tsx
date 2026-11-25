@@ -874,7 +874,7 @@ export default function ConversationsPage() {
   };
 
   // Socket listeners are bound once; they call through this ref so they always see the current render.
-  const socketHandlersRef = useRef<Record<'message' | 'status' | 'convStatus' | 'blocked' | 'agent' | 'handoff' | 'reconnect', (payload: unknown) => void>>(null!);
+  const socketHandlersRef = useRef<Record<'message' | 'status' | 'convStatus' | 'blocked' | 'agent' | 'handoff' | 'read' | 'reconnect', (payload: unknown) => void>>(null!);
 
   const setupSocket = () => {
     const token = localStorage.getItem('access_token');
@@ -892,6 +892,8 @@ export default function ConversationsPage() {
     socketRef.current.on('conversation_agent', (payload) => socketHandlersRef.current.agent(payload));
     // A flow handed a conversation to the team: it now needs a reply.
     socketRef.current.on('flow_handoff', (payload) => socketHandlersRef.current.handoff(payload));
+    // The flow or AI answered the customer: the conversation no longer counts as unread.
+    socketRef.current.on('conversation_read', (payload) => socketHandlersRef.current.read(payload));
     // Events sent while the connection was down are not replayed: catch up once it is back (not on the first connect).
     socketRef.current.io.on('reconnect', () => socketHandlersRef.current.reconnect(null));
   };
@@ -1113,6 +1115,12 @@ export default function ConversationsPage() {
       setConversations((prev) => prev.map((c) => (c._id === id ? { ...c, awaitingReply: true } : c)));
       setSelectedChat((prev) => (prev?._id === id ? { ...prev, awaitingReply: true } : prev));
       scheduleRealtimeSync(!conversationsRef.current.some((c) => c._id === id));
+    },
+    read: (payload) => {
+      const id = (payload as { conversationId?: string } | null)?.conversationId;
+      if (!id) return;
+      setConversations((prev) => prev.map((c) => (c._id === id ? { ...c, unreadCount: 0 } : c)));
+      scheduleRealtimeSync(false);
     },
     reconnect: () => scheduleRealtimeSync(true),
   };

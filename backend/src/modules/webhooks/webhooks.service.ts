@@ -474,6 +474,7 @@ export class WebhooksService {
         const step = continueFlow(flow, { nodeId: conversation.currentFlowNodeId, invalidReplies: conversation.flowInvalidReplies || 0 }, text, replyId);
         if (!step.released) {
           await this.runFlowStep(step, flow, from, storeId, platform, conversation);
+          await this.conversationsService.markReadByBot(String(conversation._id));
           return true;
         }
         this.logger.log(`Flow ${flow.id} released ${from} after repeated replies outside its options`);
@@ -487,13 +488,15 @@ export class WebhooksService {
     if (flow && flow.id !== releasedFlowId) {
       this.logger.log(`Starting flow ${flow.id} for ${from}`);
       await this.runFlowStep(startFlow(flow), flow, from, storeId, platform, conversation);
+      await this.conversationsService.markReadByBot(String(conversation._id));
       return true;
     }
 
     if (pause === 'ai_error') return false;
     const aiScheduledAllowed = this.shouldAiRespond(store);
     if (aiScheduledAllowed) {
-      await this.processAiResponse(from, text, storeId, platform, store, String(ownerId), conversation);
+      const answered = await this.processAiResponse(from, text, storeId, platform, store, String(ownerId), conversation);
+      if (answered && conversation?._id) await this.conversationsService.markReadByBot(String(conversation._id));
       return true;
     }
 
@@ -792,7 +795,7 @@ export class WebhooksService {
       // AI failed on our side: silently stop auto-reply for this conversation and leave it to a human agent.
       this.logger.warn(`AI reply failed for ${from} (store ${storeId}); auto-reply disabled for this conversation`);
       if (conversation?._id) await this.conversationsService.toggleAi(String(conversation._id), false, 'ai_error');
-      return;
+      return false;
     }
     const availableChannels = await this.channelsService.findAllByStore(storeId, { maskCredentials: false });
     const channel = availableChannels.find(c => c.type === platform && (!conversation?.metaConnectionId || c.credentials?.metaConnectionId === conversation.metaConnectionId))
@@ -825,6 +828,7 @@ export class WebhooksService {
     };
     await this.conversationsService.addMessage(from, storeId, platform, messageData);
     this.eventsGateway.server.to(`store_${storeId}`).emit('new_message', { ...messageData, platform, customerPhone: from, storeId });
+    return Boolean(channel);
   }
 
   private async aiResponse(text: string, store: any) {

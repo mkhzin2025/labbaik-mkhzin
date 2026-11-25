@@ -283,6 +283,7 @@ export class ConversationsService implements OnModuleInit {
     await this.runOnce('backfill-awaiting-reply-v1', () => this.backfillAwaitingReply());
     await this.runOnce('clear-acknowledgement-waits-v1', () => this.clearAcknowledgementWaits());
     await this.runOnce('needs-reply-handoff-only-v1', () => this.limitNeedsReplyToHandoffs());
+    await this.runOnce('clear-bot-answered-unread-v1', () => this.clearBotAnsweredUnread());
   }
 
   /** Runs a one-off data repair unless it already completed; a failed run is retried at the next start. */
@@ -295,6 +296,26 @@ export class ConversationsService implements OnModuleInit {
     } catch (error) {
       this.logger.error(`Start-up task ${task} failed`, error?.stack);
     }
+  }
+
+  /**
+   * Unread counts piled up from before markReadByBot: customer messages the flow or AI already answered
+   * (mostly campaign replies). A thread stays unread when it was handed to the team, someone handles it, or the
+   * customer still has the last word (nothing answered them).
+   */
+  private async clearBotAnsweredUnread() {
+    const result = await this.conversationModel.updateMany(
+      { unreadCount: { $gt: 0 }, awaitingReply: { $ne: true }, agentId: null, 'messages.from': 'me' },
+      [{
+        $set: {
+          unreadCount: {
+            $cond: [{ $eq: [{ $arrayElemAt: ['$messages.from', -1] }, 'me'] }, 0, '$unreadCount'],
+          },
+        },
+      }],
+      { updatePipeline: true },
+    );
+    this.logger.log(`Cleared unread on ${result.modifiedCount} conversations the flow or AI had answered`);
   }
 
   /** Removes the old "AI reply failed" system notes; auto-reply now stops silently instead. */
@@ -793,6 +814,22 @@ export class ConversationsService implements OnModuleInit {
   /** Status callers only need the store and the updated message, not the whole thread. */
   private statusUpdateProjection(whatsappMessageId: string) {
     return { storeId: 1, messages: { $elemMatch: { 'metadata.whatsappMessageId': whatsappMessageId } } };
+  }
+
+  /**
+   * The flow or the AI answered the customer, so the message needs nobody from the team: it stops counting as
+   * unread. Not when the flow handed the conversation to the team (it needs a reply) or a member handles it
+   * (they should see what the customer wrote).
+   */
+  async markReadByBot(id: string) {
+    const conversation = await this.conversationModel.findOneAndUpdate(
+      { _id: id, unreadCount: { $gt: 0 }, awaitingReply: { $ne: true }, agentId: null },
+      { $set: { unreadCount: 0 } },
+      { projection: { storeId: 1 } },
+    ).lean().exec();
+    if (!conversation) return;
+    this.invalidateCounts(conversation.storeId);
+    this.eventsGateway.server.to(`store_${conversation.storeId}`).emit('conversation_read', { storeId: conversation.storeId, conversationId: String(conversation._id) });
   }
 
   async markAsRead(id: string) {
