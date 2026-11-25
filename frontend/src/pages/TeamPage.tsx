@@ -311,6 +311,20 @@ function EditMember({ member, branches, onSaved, onCancel }: { member: Member; b
   );
 }
 
+interface Presence { online: string[]; lastSeen: Record<string, string> }
+/** How often the team list re-reads who is online. */
+const PRESENCE_REFRESH_MS = 15_000;
+
+/** "منذ 5 دقائق" style, for the last time a member had the platform open. */
+function sinceLabel(iso: string, now = Date.now()) {
+  const minutes = Math.max(0, Math.round((now - new Date(iso).getTime()) / 60_000));
+  if (minutes < 1) return 'قبل لحظات';
+  if (minutes < 60) return `منذ ${minutes} د`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `منذ ${hours} س`;
+  return `منذ ${Math.round(hours / 24)} ي`;
+}
+
 export default function TeamPage() {
   const { showToast } = useToast();
   const [members, setMembers] = useState<Member[]>([]);
@@ -322,6 +336,22 @@ export default function TeamPage() {
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [activityOf, setActivityOf] = useState<Member | null>(null);
+  const [presence, setPresence] = useState<Presence | null>(null);
+
+  // Online = the member has the platform open in at least one tab right now.
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = () => {
+      if (document.visibilityState !== 'visible') return;
+      api.get<Presence>('/presence')
+        .then(({ data }) => { if (!cancelled) setPresence({ online: data?.online || [], lastSeen: data?.lastSeen || {} }); })
+        .catch(() => { /* the dots just stay as they were */ });
+    };
+    refresh();
+    const id = window.setInterval(refresh, PRESENCE_REFRESH_MS);
+    document.addEventListener('visibilitychange', refresh);
+    return () => { cancelled = true; window.clearInterval(id); document.removeEventListener('visibilitychange', refresh); };
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -401,14 +431,27 @@ export default function TeamPage() {
           {members.map((member) => {
             const busy = busyId === member.userId;
             const editable = member.role !== 'owner';
+            const online = Boolean(presence?.online.includes(member.userId));
+            const seenAt = presence?.lastSeen[member.userId];
             return (
               <li key={member.userId}>
                 <div className="flex flex-wrap items-center gap-3 px-4 py-3">
-                  <CustomerAvatar name={member.fullName} seed={member.email} size={36} className="rounded-full" />
+                  <span className="relative shrink-0">
+                    <CustomerAvatar name={member.fullName} seed={member.email} size={36} className="rounded-full" />
+                    {presence && (
+                      <span
+                        title={online ? 'متصل الآن' : 'غير متصل'}
+                        className={`absolute -bottom-0.5 -left-0.5 h-3 w-3 rounded-full ring-2 ring-labbaik-surface ${online ? 'bg-emerald-500' : 'bg-neutral-300 dark:bg-neutral-600'}`}
+                      />
+                    )}
+                  </span>
                   <div className="min-w-48 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="font-bold text-neutral-900 dark:text-white">{member.fullName || member.email}</span>
                       {member.isYou && <span className="h-5 rounded bg-labbaik-page px-1.5 text-[11px] font-bold leading-5 text-labbaik-text-muted">أنت</span>}
+                      {presence && (online
+                        ? <span className="h-5 rounded bg-emerald-500/15 px-1.5 text-[11px] font-bold leading-5 text-emerald-700 dark:text-emerald-300">متصل الآن</span>
+                        : seenAt && <span className="h-5 rounded bg-labbaik-page px-1.5 text-[11px] font-bold leading-5 text-labbaik-text-muted">آخر ظهور {sinceLabel(seenAt)}</span>)}
                       <span className={`h-5 rounded px-1.5 text-[11px] font-bold leading-5 ${ROLE_TONES[member.role]}`}>{ROLE_LABELS[member.role]}</span>
                       {member.role === 'support' && member.canEditFlows && <span className="h-5 rounded bg-labbaik-blue/10 px-1.5 text-[11px] font-bold leading-5 text-labbaik-blue dark:text-purple-200">يعدّل التدفقات</span>}
                     </div>

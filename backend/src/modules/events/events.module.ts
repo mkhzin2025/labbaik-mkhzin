@@ -2,6 +2,7 @@ import { Module, Global } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { EventsGateway } from './events.gateway';
+import { PresenceController } from './presence.controller';
 import { OrganizationsModule } from '../organizations/organizations.module';
 
 @Global()
@@ -19,6 +20,7 @@ import { OrganizationsModule } from '../organizations/organizations.module';
       }),
     }),
   ],
+  controllers: [PresenceController],
   providers: [EventsGateway],
   exports: [EventsGateway],
 })
