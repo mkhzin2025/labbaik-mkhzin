@@ -34,7 +34,7 @@ describe('closing conversations the customer stopped answering', () => {
     const { service, model } = setup([]);
     await service.closeUnansweredConversations(NOW);
     const [query] = model.find.mock.calls[0] as any[];
-    expect(query).toEqual({ awaitingCustomerSince: { $lte: new Date(NOW - 10 * MIN) } });
+    expect(query).toEqual({ awaitingCustomerSince: { $type: 'date', $lte: new Date(NOW - 10 * MIN) } });
   });
 
   it('closes after 10 silent minutes, credits the handling member and sets up a fresh start', async () => {

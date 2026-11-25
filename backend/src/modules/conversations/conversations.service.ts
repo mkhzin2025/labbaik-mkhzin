@@ -194,7 +194,9 @@ export class ConversationsService implements OnModuleInit {
     this.autoClosing = true;
     try {
       const due = await this.conversationModel.find(
-        { awaitingCustomerSince: { $lte: new Date(now - afterMs) } },
+        // $type repeats the partial index's filter: without it the planner cannot tell the index covers the
+        // query and reads every conversation each minute.
+        { awaitingCustomerSince: { $type: 'date', $lte: new Date(now - afterMs) } },
         { awaitingCustomerSince: 1, status: 1, blockedAt: 1, agentId: 1, agentName: 1 },
       ).limit(AUTO_CLOSE_BATCH).lean().exec();
 
