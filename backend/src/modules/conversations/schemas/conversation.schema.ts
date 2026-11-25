@@ -181,6 +181,10 @@ ConversationSchema.index({ 'messages.metadata.whatsappMessageId': 1 });
 ConversationSchema.index({ storeId: 1, status: 1, lastMessageAt: -1, _id: -1 });
 // Inbox badge counts group a whole branch by status and handler; this lets them read the index alone.
 ConversationSchema.index({ storeId: 1, status: 1, agentId: 1 });
+// The unread and needs-reply badges: partial, so they hold only those threads (tens of thousands of unread
+// campaign replies, a handful awaiting a reply) instead of filtering every open thread of the branch.
+ConversationSchema.index({ storeId: 1, agentId: 1, status: 1 }, { partialFilterExpression: { unreadCount: { $gt: 0 } } });
+ConversationSchema.index({ storeId: 1, awaitingReply: 1, agentId: 1, status: 1 }, { partialFilterExpression: { awaitingReply: true } });
 // The auto-close sweep: a partial index holding only the conversations waiting on the customer.
 ConversationSchema.index({ awaitingCustomerSince: 1 }, { partialFilterExpression: { awaitingCustomerSince: { $type: 'date' } } });
 // Inbox filter by the customer's rating.

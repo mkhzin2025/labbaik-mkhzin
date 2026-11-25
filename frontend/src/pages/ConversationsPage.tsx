@@ -146,6 +146,9 @@ const COUNTS_MIN_INTERVAL_MS = 5_000;
 const HEAD_SYNC_DELAY_MS = 400;
 /** ...and the first page is fetched again at most this often during a steady stream. */
 const HEAD_SYNC_MIN_INTERVAL_MS = 2_000;
+/** Stands in for a badge count while the first counts load (same height as the number, so nothing shifts). */
+const CountPlaceholder = () => <span aria-hidden className="my-[3px] block h-3.5 w-10 rounded bg-current opacity-15 animate-pulse" />;
+
 const EMPTY_COUNTS: InboxCounts = { active: 0, mine: 0, closed: 0, unread: 0, needsReply: 0 };
 
 const fetchListPage = (params: Record<string, string | undefined>, cursor?: string) =>
@@ -595,6 +598,8 @@ export default function ConversationsPage() {
   const [listError, setListError] = useState<'first' | 'more' | null>(null);
   const [listReloadKey, setListReloadKey] = useState(0);
   const [counts, setCounts] = useState<InboxCounts>(EMPTY_COUNTS);
+  // Until the first counts arrive the badges show a placeholder, not a misleading 0.
+  const [countsReady, setCountsReady] = useState(false);
   const [debouncedSearch, setDebouncedSearch] = useState('');
 
   // The open thread: a window [messagesStart, end) of the stored messages, grown upwards on scroll.
@@ -696,7 +701,7 @@ export default function ConversationsPage() {
     // Counts cover every tab of the current status view, so the tab itself is not sent.
     const filters = { ...listParamsRef.current, tab: undefined };
     api.get<InboxCounts>('/conversations/counts', { params: filters })
-      .then(({ data }) => { if (request === countsRequestRef.current) setCounts(data); })
+      .then(({ data }) => { if (request === countsRequestRef.current) { setCounts(data); setCountsReady(true); } })
       .catch(() => { /* badges keep their last values */ });
   }, []);
 
@@ -1470,7 +1475,7 @@ export default function ConversationsPage() {
                 onClick={() => { setStatusView(key); if (key === 'closed' && listTab === 'pending') setListTab('all'); }}
                 className={`py-1.5 rounded-md flex flex-col items-center justify-center leading-tight transition-colors cursor-pointer ${statusView === key ? 'bg-labbaik-surface text-labbaik-blue dark:text-purple-200 shadow-sm' : 'text-labbaik-text-muted hover:text-neutral-900 dark:hover:text-white'}`}
               >
-                <CountUp className="tabular-nums text-sm font-black" value={statusCounts[key]} />
+                {countsReady ? <CountUp className="tabular-nums text-sm font-black" value={statusCounts[key]} /> : <CountPlaceholder />}
                 <span className="text-[11px] font-bold whitespace-nowrap">{label}</span>
               </button>
             ))}
@@ -1491,7 +1496,7 @@ export default function ConversationsPage() {
                 onClick={() => setListTab(key)}
                 className={`py-1.5 px-2 rounded-lg flex flex-col items-center justify-center leading-tight transition-colors cursor-pointer ${listTab === key ? 'bg-labbaik-blue text-labbaik-on-accent' : 'bg-labbaik-page text-labbaik-text-muted hover:text-labbaik-blue'}`}
               >
-                <CountUp className="tabular-nums text-sm font-black" value={count} />
+                {countsReady ? <CountUp className="tabular-nums text-sm font-black" value={count} /> : <CountPlaceholder />}
                 <span className="text-[11px] font-bold whitespace-nowrap">{label}</span>
               </button>
             ))}
