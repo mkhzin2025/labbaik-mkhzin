@@ -24,7 +24,6 @@ import {
   Send,
   ShieldCheck,
   Sun,
-  Sparkles,
   Trash2,
   Users,
   Zap,
@@ -473,7 +472,7 @@ function TrialSection({ t }: { t: TrialCopy }) {
               </button>
             </div>
           ) : (
-            <form onSubmit={submit} className="space-y-4" noValidate={false}>
+            <form onSubmit={submit} className="relative space-y-4">
               <label className="block">
                 <span className="mb-1.5 block text-sm font-bold">{t.name}</span>
                 <input required minLength={2} maxLength={120} autoComplete="name" value={form.name} onChange={set('name')} className={fieldClass} />
@@ -502,7 +501,7 @@ function TrialSection({ t }: { t: TrialCopy }) {
                 <textarea maxLength={500} rows={3} placeholder={t.messageHint} value={form.message} onChange={set('message')} className={`${fieldClass} h-auto py-3 resize-none`} />
               </label>
               {/* Left empty by people; bots that fill every field are dropped by the server. */}
-              <input type="text" name="website" tabIndex={-1} autoComplete="off" aria-hidden="true" value={form.website} onChange={set('website')} className="absolute -left-[9999px] h-0 w-0 opacity-0" />
+              <input type="text" name="website" tabIndex={-1} autoComplete="off" aria-hidden="true" value={form.website} onChange={set('website')} className="pointer-events-none absolute top-0 start-0 -z-10 h-px w-px overflow-hidden opacity-0" />
               {error && <p role="alert" className="text-sm font-bold text-red-600 dark:text-red-400">{error}</p>}
               <button
                 type="submit"
@@ -557,7 +556,7 @@ export default function LandingPage() {
     <div
       dir={isAr ? 'rtl' : 'ltr'}
       lang={lang}
-      className="landing min-h-screen flex flex-col bg-labbaik-page text-neutral-900 dark:text-white transition-colors duration-300 overflow-x-hidden scroll-smooth"
+      className="landing relative min-h-screen flex flex-col bg-labbaik-page text-neutral-900 dark:text-white transition-colors duration-300 overflow-x-hidden scroll-smooth"
     >
       {/* Header */}
       <header className="sticky top-0 z-40 bg-white/75 dark:bg-[#0a192f]/75 backdrop-blur-xl border-b border-labbaik-border">
@@ -633,7 +632,6 @@ export default function LandingPage() {
                   href="#trial"
                   className="w-full sm:w-auto inline-flex items-center justify-center gap-2 h-12 px-7 rounded-2xl bg-labbaik-blue text-white text-base font-black hover:bg-[#553174] transition-colors"
                 >
-                  <Sparkles size={18} />
                   {t.hero.primary}
                   <Arrow size={18} />
                 </a>
