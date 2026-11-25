@@ -13,6 +13,7 @@ import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsInt, IsISO8601, IsOptional, I
 import { Type } from 'class-transformer';
 import { CONVERSATION_RATINGS, CONVERSATION_STATUSES } from './schemas/conversation.schema';
 import type { ConversationRating, ConversationStatus } from './schemas/conversation.schema';
+import { INBOX_VIEWS } from './conversations.service';
 import type { InboxFilters, InboxTab, InboxView, UploadedChatFile } from './conversations.service';
 import { Access, sectionsFor } from '../organizations/access';
 import { writeMemberActivityPdf } from './member-activity-pdf';
@@ -24,7 +25,7 @@ export class InboxFilterQueryDto {
   @IsOptional() @IsString()
   storeId?: string;
 
-  @IsOptional() @IsIn(['active', 'mine', 'closed'])
+  @IsOptional() @IsIn(INBOX_VIEWS)
   view?: InboxView;
 
   /** Owners and admins: whose conversations "mine" and "closed" show (a member id, or `all`). Others always see their own. */

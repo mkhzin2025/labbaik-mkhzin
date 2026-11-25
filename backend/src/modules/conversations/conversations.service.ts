@@ -27,7 +27,13 @@ export type UploadedChatFile = { buffer: Buffer; mimetype: string; originalname:
  * active: open conversations nobody has taken yet. mine: the ones `agentId` handles (not closed, snoozed included).
  * closed: closed ones `agentId` handled. A search ignores who handles a conversation, so any customer can be found.
  */
-export type InboxView = 'active' | 'mine' | 'closed';
+/**
+ * all = active + pending + closed (each counted once). active is the unassigned queue without the parked
+ * (pending) ones; pending and closed are the member's (or anyone's, for an owner viewing everyone).
+ */
+export type InboxView = 'all' | 'active' | 'pending' | 'closed' | 'mine';
+export const INBOX_VIEWS: InboxView[] = ['all', 'active', 'pending', 'closed', 'mine'];
+/** 'pending' is kept for older open pages; it is now a view. */
 export type InboxTab = 'all' | 'unread' | 'needs_reply' | 'pending';
 export interface InboxFilters {
   view?: InboxView;
@@ -39,7 +45,7 @@ export interface InboxFilters {
   /** Whose conversations "mine" and "closed" show; unset means every member's. */
   agentId?: string;
 }
-export interface InboxCounts { active: number; mine: number; closed: number; unread: number; needsReply: number; pending: number }
+export interface InboxCounts { all: number; active: number; pending: number; closed: number; mine: number; unread: number; needsReply: number }
 /** The signed-in team member acting on a conversation. */
 export type Agent = { id: string; name: string };
 /** What a reply quotes, stored on the reply as `metadata.replyTo`. */
@@ -859,7 +865,7 @@ export class ConversationsService implements OnModuleInit {
    * cache key: a user never gets counts for branches outside their list.
    */
   async countInbox(storeIds: string[], filters: InboxFilters): Promise<InboxCounts> {
-    if (!storeIds.length) return { active: 0, mine: 0, closed: 0, unread: 0, needsReply: 0, pending: 0 };
+    if (!storeIds.length) return { all: 0, active: 0, pending: 0, closed: 0, mine: 0, unread: 0, needsReply: 0 };
     const stores = [...new Set(storeIds)].sort();
     const key = JSON.stringify([
       stores, filters.view || 'active', filters.platform || null, filters.tag || null, filters.rating || null, filters.search?.trim() || null,
@@ -885,7 +891,7 @@ export class ConversationsService implements OnModuleInit {
    * The view-tab counts in one pass, grouped by status and by who handles the conversation. Separate counts
    * walked the branch once each, and the planner sometimes answered the "active" one ($nin) by reading every
    * document instead of the status index. Threads stored without a status count as open (as $nin did).
-   * Pending is the pending tab inside the current view (open or mine).
+   * The views never overlap, so "all" is exactly active + pending + closed.
    */
   private async countByStatus(match: Record<string, any>, filters: InboxFilters) {
     const unassigned = { $eq: [{ $ifNull: ['$agentId', null] }, null] };
@@ -910,12 +916,16 @@ export class ConversationsService implements OnModuleInit {
     const anyOwner = Boolean(filters.search?.trim());
     const sum = (keep: (status: unknown, owner: string) => boolean) =>
       rows.reduce((total, row) => total + (keep(row._id?.status, row._id?.owner || 'none') ? row.n : 0), 0);
-    const open = (status: unknown) => status !== 'snoozed' && status !== 'closed';
+    const open = (status: unknown) => status !== 'snoozed' && status !== 'closed' && status !== 'pending';
+    const active = sum((status, who) => open(status) && (anyOwner || who === 'none'));
+    const pending = sum((status, who) => status === 'pending' && (anyOwner || who !== 'other'));
+    const closed = sum((status, who) => status === 'closed' && (anyOwner || who === 'match'));
     return {
-      active: sum((status, who) => open(status) && (anyOwner || who === 'none')),
+      all: active + pending + closed,
+      active,
+      pending,
+      closed,
       mine: sum((status, who) => status !== 'closed' && (anyOwner || who === 'match')),
-      closed: sum((status, who) => status === 'closed' && (anyOwner || who === 'match')),
-      pending: sum((status, who) => status === 'pending' && (anyOwner || who === (filters.view === 'mine' ? 'match' : 'none'))),
     };
   }
 
@@ -946,20 +956,31 @@ export class ConversationsService implements OnModuleInit {
     if (filters.tag) query.tags = filters.tag;
     if (filters.rating) query.rating = filters.rating;
     const search = filters.search?.trim();
-    if (filters.view === 'active') query.status = { $nin: ['snoozed', 'closed'] };
-    else if (filters.view === 'mine') query.status = { $ne: 'closed' };
-    else if (filters.view === 'closed') query.status = 'closed';
-    // A search finds a conversation whoever handles it; otherwise open is the unassigned queue.
-    if (filters.view && !search) query.agentId = filters.view === 'active' ? null : filters.agentId || { $ne: null };
+    const and: Record<string, any>[] = [];
+    if (filters.view === 'all') and.push({ $or: (['active', 'pending', 'closed'] as const).map((view) => ConversationsService.viewClause(view, filters.agentId, Boolean(search))) });
+    else if (filters.view) Object.assign(query, ConversationsService.viewClause(filters.view, filters.agentId, Boolean(search)));
     if (filters.tab === 'unread') query.unreadCount = { $gt: 0 };
     else if (filters.tab === 'needs_reply') Object.assign(query, ConversationsService.needsTeamReplyQuery());
-    // Pending conversations the team parked (waiting on the customer or someone else), to come back to.
-    else if (filters.tab === 'pending') query.status = 'pending';
+    else if (filters.tab === 'pending') query.status = 'pending'; // pages opened before pending became a view
     if (search) {
       const pattern = new RegExp(escapeRegex(search), 'i');
-      query.$and = [{ $or: [{ customerName: pattern }, { customerPhone: pattern }, { lastMessage: pattern }] }];
+      and.push({ $or: [{ customerName: pattern }, { customerPhone: pattern }, { lastMessage: pattern }] });
     }
+    if (and.length) query.$and = and;
     return query;
+  }
+
+  /** Status and owner of one view. A search finds a conversation whoever handles it. */
+  private static viewClause(view: Exclude<InboxView, 'all'>, agentId: string | undefined, searching: boolean): Record<string, any> {
+    const owner = (value: unknown) => (searching ? {} : { agentId: value });
+    switch (view) {
+      // The unassigned queue; parked (pending) ones have their own view.
+      case 'active': return { status: { $nin: ['snoozed', 'closed', 'pending'] }, ...owner(null) };
+      // Parked by the member, or by nobody in particular.
+      case 'pending': return { status: 'pending', ...(agentId ? owner({ $in: [null, agentId] }) : {}) };
+      case 'closed': return { status: 'closed', ...owner(agentId || { $ne: null }) };
+      case 'mine': return { status: { $ne: 'closed' }, ...owner(agentId || { $ne: null }) };
+    }
   }
 
   /**

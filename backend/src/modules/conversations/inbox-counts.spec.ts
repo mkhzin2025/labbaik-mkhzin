@@ -36,7 +36,7 @@ describe('ConversationsService.countInbox', () => {
   beforeEach(() => { now = 1_700_000_000_000; jest.spyOn(Date, 'now').mockImplementation(() => now); });
   afterEach(() => jest.restoreAllMocks());
 
-  it('derives the view tabs from one grouped pass; open is the unassigned queue, threads with no status count as open', async () => {
+  it('derives the view tabs from one grouped pass; open is the unassigned queue without parked ones, all adds up the views', async () => {
     const { service, calls } = setup({
       s1: [
         { _id: { status: 'open', owner: 'none' }, n: 5 }, { _id: { owner: 'none' }, n: 2 }, { _id: { status: 'pending', owner: 'none' }, n: 4 },
@@ -45,11 +45,26 @@ describe('ConversationsService.countInbox', () => {
       ],
     });
     const counts = await service.countInbox(['s1'], { view: 'active', tab: 'unread', platform: 'whatsapp', agentId: 'u1' });
-    expect(counts).toEqual({ active: 11, mine: 14, closed: 3, pending: 4, unread: 7, needsReply: 3 });
+    expect(counts).toEqual({ all: 14, active: 7, pending: 4, closed: 3, mine: 14, unread: 7, needsReply: 3 });
     // The grouped pass keeps every filter except the view; unread / needs-reply stay inside the open view.
     expect(calls.aggregate[0][0].$match).toEqual({ storeId: 's1', platform: 'whatsapp' });
     expect(calls.count).toHaveLength(2);
-    for (const query of calls.count) expect(query).toMatchObject({ storeId: 's1', platform: 'whatsapp', status: { $nin: ['snoozed', 'closed'] }, agentId: null });
+    for (const query of calls.count) expect(query).toMatchObject({ storeId: 's1', platform: 'whatsapp', status: { $nin: ['snoozed', 'closed', 'pending'] }, agentId: null });
+  });
+
+  it('lists all as the union of open, pending and closed, each with its own owner rule', async () => {
+    const { service, calls } = setup();
+    await service.countInbox(['s1'], { view: 'all', tab: 'unread', agentId: 'u1' });
+    expect(calls.count[0].$and[0]).toEqual({ $or: [
+      { status: { $nin: ['snoozed', 'closed', 'pending'] }, agentId: null },
+      { status: 'pending', agentId: { $in: [null, 'u1'] } },
+      { status: 'closed', agentId: 'u1' },
+    ] });
+    await service.countInbox(['s1'], { view: 'pending', search: 'ali', agentId: 'u1' });
+    expect(calls.count[2]).toMatchObject({ status: 'pending' });
+    expect(calls.count[2]).not.toHaveProperty('agentId');
+    await service.countInbox(['s1'], { view: 'pending', agentId: undefined });
+    expect(calls.count[4]).not.toHaveProperty('agentId');
   });
 
   it('scopes mine and closed to the member, and a search to nobody', async () => {
@@ -153,7 +168,7 @@ describe('ConversationsService.countInbox', () => {
 
   it('returns zeros without querying when no branch is accessible', async () => {
     const { service, model } = setup();
-    expect(await service.countInbox([], {})).toEqual({ active: 0, mine: 0, closed: 0, unread: 0, needsReply: 0, pending: 0 });
+    expect(await service.countInbox([], {})).toEqual({ all: 0, active: 0, pending: 0, closed: 0, mine: 0, unread: 0, needsReply: 0 });
     expect(model.aggregate).not.toHaveBeenCalled();
     expect(model.updateMany).not.toHaveBeenCalled();
   });

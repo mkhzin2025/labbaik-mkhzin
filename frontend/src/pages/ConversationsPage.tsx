@@ -125,7 +125,7 @@ const RATINGS: { id: Rating; label: string; emoji: string; cls: string }[] = [
 
 interface CustomerLabel { id: string; name: string; color: string }
 
-interface InboxCounts { active: number; mine: number; closed: number; unread: number; needsReply: number; pending?: number }
+interface InboxCounts { all?: number; active: number; pending?: number; closed: number; mine: number; unread: number; needsReply: number }
 interface InboxPage { items: Conversation[]; nextCursor: string | null }
 interface MessagesPage { messages: Message[]; total: number; start: number; hasMore: boolean }
 
@@ -176,7 +176,8 @@ function CustomerLabelChip({ label, kind, size = 'sm' }: { label: CustomerLabel;
 
 type ConvStatus = 'open' | 'pending' | 'snoozed' | 'closed';
 // active: open conversations nobody has taken yet; mine: the ones I handle (snoozed included); closed: closed ones I handled.
-type StatusView = 'active' | 'mine' | 'closed';
+/** all = active + pending + closed; active is the unassigned queue without the parked (pending) ones. */
+type StatusView = 'all' | 'active' | 'pending' | 'closed' | 'mine';
 
 // open/pending stay in the main inbox; snoozed hides until snoozedUntil; closed is done. A new customer message reopens either.
 const STATUS_META: Record<ConvStatus, { label: string; dot: string; chip: string; hint: string }> = {
@@ -554,7 +555,8 @@ export default function ConversationsPage() {
   
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
   const [searchText, setSearchText] = useState('');
-  const [listTab, setListTab] = useState<'all' | 'unread' | 'needs_reply' | 'pending'>('all');
+  /** Narrows the selected view to unread or needs-reply threads; 'all' is no narrowing. */
+  const [listTab, setListTab] = useState<'all' | 'unread' | 'needs_reply'>('all');
   const [statusView, setStatusView] = useState<StatusView>('active');
   const [statusBusy, setStatusBusy] = useState(false);
   // Ticks once a minute so relative times ("منذ 5 دقائق") stay current without a reload.
@@ -1279,9 +1281,14 @@ export default function ConversationsPage() {
     const s = normalizeStatus(c, now);
     const owner = agentFilter === 'all' ? Boolean(c.agentId) : c.agentId === (agentFilter || me);
     const searching = Boolean(debouncedSearch);
-    if (statusView === 'active') return s !== 'snoozed' && s !== 'closed' && (searching || !c.agentId);
+    const active = s === 'open' && (searching || !c.agentId);
+    const pending = s === 'pending' && (searching || !c.agentId || agentFilter === 'all' || c.agentId === (agentFilter || me));
+    const closed = s === 'closed' && (searching || owner);
+    if (statusView === 'all') return active || pending || closed;
+    if (statusView === 'active') return active;
+    if (statusView === 'pending') return pending;
     if (statusView === 'mine') return s !== 'closed' && (searching || owner);
-    return s === 'closed' && (searching || owner);
+    return closed;
   };
   // As on the server: a flow handed the conversation to an employee and nobody from the team has replied yet.
   const needsReply = (c: Conversation) => c.awaitingReply === true;
@@ -1294,9 +1301,14 @@ export default function ConversationsPage() {
     && (!selectedRating || c.rating === selectedRating)
     && (selectedStoreId === 'all' || c.storeId === selectedStoreId)
     && (listTab !== 'unread' || Number(c.unreadCount) > 0)
-    && (listTab !== 'needs_reply' || needsReply(c))
-    && (listTab !== 'pending' || normalizeStatus(c, now) === 'pending'));
-  const statusCounts: Record<StatusView, number> = { active: counts.active, mine: counts.mine, closed: counts.closed };
+    && (listTab !== 'needs_reply' || needsReply(c)));
+  const statusCounts: Record<StatusView, number> = {
+    all: counts.all ?? counts.active + (counts.pending || 0) + counts.closed,
+    active: counts.active,
+    pending: counts.pending || 0,
+    closed: counts.closed,
+    mine: counts.mine,
+  };
   const unreadTotal = counts.unread;
   const needsReplyTotal = counts.needsReply;
 
@@ -1465,39 +1477,37 @@ export default function ConversationsPage() {
               </button>
             )}
           </div>
-          <div className="grid grid-cols-3 gap-1 rounded-lg border border-labbaik-border bg-labbaik-page p-0.5" role="tablist" aria-label="حالة المحادثات">
-            {([['active', 'المفتوحة'], ['mine', 'محادثاتي'], ['closed', 'المغلقة']] as const).map(([key, label]) => (
+          {/* الكل = المفتوحة + معلّقة + المغلقة; محادثاتي is the member's own queue across statuses. */}
+          <div className="grid grid-cols-5 gap-0.5 rounded-lg border border-labbaik-border bg-labbaik-page p-0.5" role="tablist" aria-label="حالة المحادثات">
+            {([['all', 'الكل'], ['active', 'المفتوحة'], ['pending', 'معلّقة'], ['closed', 'المغلقة'], ['mine', 'محادثاتي']] as const).map(([key, label]) => (
               <button
                 type="button"
                 role="tab"
                 aria-selected={statusView === key}
                 key={key}
-                onClick={() => { setStatusView(key); if (key === 'closed' && listTab === 'pending') setListTab('all'); }}
-                className={`py-1.5 rounded-md flex flex-col items-center justify-center leading-tight transition-colors cursor-pointer ${statusView === key ? 'bg-labbaik-surface text-labbaik-blue dark:text-purple-200 shadow-sm' : 'text-labbaik-text-muted hover:text-neutral-900 dark:hover:text-white'}`}
+                onClick={() => setStatusView(key)}
+                className={`min-w-0 py-1.5 rounded-md flex flex-col items-center justify-center leading-tight transition-colors cursor-pointer ${statusView === key ? 'bg-labbaik-surface text-labbaik-blue dark:text-purple-200 shadow-sm' : 'text-labbaik-text-muted hover:text-neutral-900 dark:hover:text-white'}`}
               >
-                {countsReady ? <CountUp className="tabular-nums text-sm font-black" value={statusCounts[key]} /> : <CountPlaceholder />}
+                {countsReady ? <CountUp className="tabular-nums text-[13px] font-black" value={statusCounts[key]} /> : <CountPlaceholder />}
                 <span className="text-[11px] font-bold whitespace-nowrap">{label}</span>
               </button>
             ))}
           </div>
-          <div className={`grid ${statusView !== 'closed' ? 'grid-cols-4' : 'grid-cols-3'} gap-1.5`} role="tablist" aria-label="عرض المحادثات">
+          {/* Narrow the selected tab; a second click clears the filter. */}
+          <div className="grid grid-cols-2 gap-1.5" role="group" aria-label="تصفية المحادثات">
             {([
-              ['all', 'الكل', statusCounts[statusView]],
               ['unread', 'غير مقروءة', unreadTotal],
               ['needs_reply', 'تحتاج رداً', needsReplyTotal],
-              // Parked conversations stay in the open and mine tabs; this brings them back in one click.
-              ...(statusView !== 'closed' ? [['pending', 'معلّقة', counts.pending || 0] as const] : []),
             ] as const).map(([key, label, count]) => (
               <button
                 type="button"
-                role="tab"
-                aria-selected={listTab === key}
+                aria-pressed={listTab === key}
                 key={key}
-                onClick={() => setListTab(key)}
-                className={`py-1.5 px-2 rounded-lg flex flex-col items-center justify-center leading-tight transition-colors cursor-pointer ${listTab === key ? 'bg-labbaik-blue text-labbaik-on-accent' : 'bg-labbaik-page text-labbaik-text-muted hover:text-labbaik-blue'}`}
+                onClick={() => setListTab(listTab === key ? 'all' : key)}
+                className={`py-1.5 px-2 rounded-lg flex items-center justify-center gap-2 leading-tight transition-colors cursor-pointer ${listTab === key ? 'bg-labbaik-blue text-labbaik-on-accent' : 'bg-labbaik-page text-labbaik-text-muted hover:text-labbaik-blue'}`}
               >
-                {countsReady ? <CountUp className="tabular-nums text-sm font-black" value={count} /> : <CountPlaceholder />}
                 <span className="text-[11px] font-bold whitespace-nowrap">{label}</span>
+                {countsReady ? <CountUp className="tabular-nums text-sm font-black" value={count} /> : <CountPlaceholder />}
               </button>
             ))}
           </div>
@@ -1513,7 +1523,7 @@ export default function ConversationsPage() {
             <div className="p-10 text-center space-y-3">
               <MessageCircle size={32} className="mx-auto text-labbaik-text-muted" />
               <p className="text-labbaik-text-muted font-bold text-sm">
-                {statusView === 'mine' && listTab === 'all' && !searchText ? (agentFilter && agentFilter !== me ? 'لا توجد محادثات مستلمة.' : 'لا توجد محادثات مستلمة باسمك.') : statusView === 'closed' && listTab === 'all' ? 'لا توجد محادثات مغلقة.' : listTab === 'unread' ? 'لا توجد محادثات غير مقروءة.' : listTab === 'needs_reply' ? 'لا توجد محادثات تنتظر رداً.' : listTab === 'pending' ? 'لا توجد محادثات معلّقة.' : searchText || hasActiveFilters ? 'لا توجد محادثات تطابق البحث أو التصفية.' : 'لا توجد محادثات بعد.'}
+                {statusView === 'mine' && listTab === 'all' && !searchText ? (agentFilter && agentFilter !== me ? 'لا توجد محادثات مستلمة.' : 'لا توجد محادثات مستلمة باسمك.') : statusView === 'closed' && listTab === 'all' ? 'لا توجد محادثات مغلقة.' : statusView === 'pending' && listTab === 'all' ? 'لا توجد محادثات معلّقة.' : listTab === 'unread' ? 'لا توجد محادثات غير مقروءة.' : listTab === 'needs_reply' ? 'لا توجد محادثات تنتظر رداً.' : searchText || hasActiveFilters ? 'لا توجد محادثات تطابق البحث أو التصفية.' : 'لا توجد محادثات بعد.'}
               </p>
             </div>
           ) : filteredConversations.map((conv) => {
