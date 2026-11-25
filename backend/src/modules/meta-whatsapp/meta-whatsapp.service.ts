@@ -392,7 +392,7 @@ export class MetaWhatsAppService implements OnModuleInit {
       connection.templatesSyncedAt = new Date();
       connection.lastError = null;
       await this.connectionRepository.save(connection);
-      return { synced: remoteTemplates.length, connectionId: connection.id, templates: await this.templateRepository.find({ where: { connectionId: connection.id }, order: { name: 'ASC', language: 'ASC' } }) };
+      return { synced: remoteTemplates.length, connectionId: connection.id, templates: await this.templateRepository.find({ where: { connectionId: connection.id }, order: { createdAt: 'DESC', name: 'ASC', language: 'ASC' } }) };
     } catch (error: any) {
       const message = this.metaErrorMessage(error);
       connection.lastError = message;
@@ -401,9 +401,10 @@ export class MetaWhatsAppService implements OnModuleInit {
     }
   }
 
+  /** Newest first: the templates fetched last from Meta lead the list. */
   async listTemplatesForUser(userId: string, organizationId?: string, options: { connectionId?: string; storeId?: string; scope?: MetaConnectionScope } = {}) {
     const connection = await this.findForUser(userId, organizationId, { ...options, required: true }) as MetaWhatsAppConnection;
-    return this.templateRepository.find({ where: { connectionId: connection.id }, order: { name: 'ASC', language: 'ASC' } });
+    return this.templateRepository.find({ where: { connectionId: connection.id }, order: { createdAt: 'DESC', name: 'ASC', language: 'ASC' } });
   }
 
   async sendTemplateForUser(userId: string, templateId: string, dto: SendWhatsAppTemplateDto, organizationId?: string) {

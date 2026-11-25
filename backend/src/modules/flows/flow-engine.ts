@@ -114,11 +114,14 @@ export function normalizeText(value: string) {
     .trim()
     .toLowerCase()
     .replace(/[ً-ٰٟ]/g, '') // Arabic diacritics
+    // Kashida (شـوف) and invisible marks (zero-width, direction marks) that templates and keyboards slip in
+    .replace(/[\u0640\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, '')
     .replace(/[أإآ]/g, 'ا')
     .replace(/ى/g, 'ي')
     .replace(/ة/g, 'ه')
     .replace(/[٠-٩]/g, (digit) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(digit)))
-    .replace(/\s+/g, ' ');
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 export function keywordMatches(trigger: FlowTrigger, input: string) {

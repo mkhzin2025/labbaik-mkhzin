@@ -91,3 +91,12 @@ describe('flow engine', () => {
     expect(validateFlow(broken).some((issue) => issue.level === 'warning' && issue.nodeId === 'link')).toBe(true);
   });
 });
+
+describe('keyword matching ignores kashida and invisible marks', () => {
+  it('matches a template button written with kashida to the plain keyword', () => {
+    const trigger = { type: 'keyword' as const, keywords: ['شوف وش جهّزنا لك'], match: 'exact' as const };
+    expect(keywordMatches(trigger, 'شـوف وش جهّزنا لك')).toBe(true);
+    expect(keywordMatches(trigger, '\u200Fشوف وش جهزنا لك\u200F')).toBe(true);
+    expect(keywordMatches(trigger, 'شوف العروض')).toBe(false);
+  });
+});
