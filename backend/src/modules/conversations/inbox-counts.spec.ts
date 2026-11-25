@@ -7,7 +7,8 @@ function setup(groups: Record<string, { _id: unknown; n: number }[]> = {}) {
   const model = {
     aggregate: jest.fn((pipeline: any[]) => {
       calls.aggregate.push(pipeline);
-      return { exec: async () => groups[branchOf(pipeline[0].$match)] || [] };
+      const result = { exec: async () => groups[branchOf(pipeline[0].$match)] || [], hint: () => result };
+      return result;
     }),
     countDocuments: jest.fn((query: any) => {
       calls.count.push(query);
@@ -128,9 +129,24 @@ describe('ConversationsService.countInbox', () => {
     expect(model.aggregate).toHaveBeenCalledTimes(6);
   });
 
+  it('counts without the index hint while the index is still being built', async () => {
+    const { service, model } = setup({ s1: [{ _id: { status: 'open', owner: 'none' }, n: 4 }] });
+    const fallback = model.aggregate.getMockImplementation()!;
+    model.aggregate.mockImplementationOnce((pipeline: any[]) => {
+      const unbuilt: any = { exec: async () => ({}) };
+      unbuilt.hint = () => ({ exec: async () => { throw new Error('hint provided does not correspond to an existing index'); } });
+      return unbuilt;
+    }).mockImplementationOnce(fallback);
+    await expect(service.countInbox(['s1'], {})).resolves.toMatchObject({ active: 4 });
+  });
+
   it('does not cache a failure', async () => {
     const { service, model } = setup();
-    model.aggregate.mockImplementationOnce(() => ({ exec: async () => { throw new Error('mongo down'); } }));
+    model.aggregate.mockImplementationOnce(() => {
+      const failing: any = { exec: async () => { throw new Error('mongo down'); } };
+      failing.hint = () => failing;
+      return failing;
+    });
     await expect(service.countInbox(['s1'], {})).rejects.toThrow('mongo down');
     await expect(service.countInbox(['s1'], {})).resolves.toMatchObject({ active: 0 });
   });

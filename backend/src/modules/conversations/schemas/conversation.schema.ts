@@ -179,6 +179,8 @@ ConversationSchema.index({ customerPhone: 1, storeId: 1, platform: 1, lastMessag
 // Webhook dedupe and delivery-status updates (sent/delivered/read) match by message id.
 ConversationSchema.index({ 'messages.metadata.whatsappMessageId': 1 });
 ConversationSchema.index({ storeId: 1, status: 1, lastMessageAt: -1, _id: -1 });
+// Inbox badge counts group a whole branch by status and handler; this lets them read the index alone.
+ConversationSchema.index({ storeId: 1, status: 1, agentId: 1 });
 // The auto-close sweep: a partial index holding only the conversations waiting on the customer.
 ConversationSchema.index({ awaitingCustomerSince: 1 }, { partialFilterExpression: { awaitingCustomerSince: { $type: 'date' } } });
 // Inbox filter by the customer's rating.

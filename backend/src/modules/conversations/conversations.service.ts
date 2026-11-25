@@ -84,12 +84,14 @@ const MESSAGES_PAGE_MAX = 100;
  * refreshing after an event (COUNTS_EVENT_DELAY_MS in ConversationsPage), so the refresh always sees the event.
  */
 const INBOX_COUNTS_TTL_MS = 3_000;
+/** Index name of { storeId, status, agentId } (conversation.schema.ts), used by the badge counts. */
+const STATUS_OWNER_INDEX = 'storeId_1_status_1_agentId_1';
 /**
  * Dashboard and analytics totals walk every stored message of the branch (on a branch of ~800k threads that
  * takes more than a minute); they are all-time or per-day figures, not live ones. Longer than one computation,
  * so a busy dashboard never starts a second full scan while the first is still running.
  */
-const REPORT_CACHE_TTL_MS = 5 * 60_000;
+const REPORT_CACHE_TTL_MS = 30 * 60_000;
 /**
  * Past its TTL a report is still answered at once for this long while one background run refreshes it, so only
  * the very first visit of a branch waits for the full scan (which may outlast a proxy's 60s read timeout).
@@ -105,8 +107,12 @@ const STARTUP_MAINTENANCE_DELAY_MS = 30_000;
 const MAINTENANCE_COLLECTION = 'maintenance_tasks';
 /** Each branch's home page totals, saved so visits (and restarts) never wait for a recount. */
 const STORE_STATS_COLLECTION = 'dashboard_store_stats';
-/** A branch's totals older than this are recounted in the background (the visit still gets them at once). */
-const STORE_STATS_TTL_MS = 5 * 60_000;
+/**
+ * A branch's totals older than this are recounted in the background (the visit still gets them at once).
+ * A recount walks every message of the branch and keeps MongoDB busy for close to a minute, so recounting
+ * every few minutes kept it near a full core even when the platform was idle.
+ */
+const STORE_STATS_TTL_MS = 60 * 60_000;
 
 /** One branch's home page totals, as saved in STORE_STATS_COLLECTION. */
 type StoreStats = {
@@ -884,10 +890,20 @@ export class ConversationsService implements OnModuleInit {
     const owner = {
       $cond: [unassigned, 'none', filters.agentId ? { $cond: [{ $eq: ['$agentId', filters.agentId] }, 'match', 'other'] } : 'match'],
     };
-    const rows = await this.conversationModel.aggregate<{ _id: { status?: unknown; owner?: string } | null; n: number }>([
-      { $match: match },
-      { $group: { _id: { status: '$status', owner }, n: { $sum: 1 } } },
-    ]).exec();
+    // STATUS_OWNER_INDEX holds both grouped fields, so with no extra filter the branch is counted from the
+    // index alone instead of loading every thread (with its messages) from disk.
+    // Right after a deploy the index may still be building; until it exists the hint is refused, so count without it.
+    const group = (hinted: boolean) => {
+      const pipeline = this.conversationModel.aggregate<{ _id: { status?: unknown; owner?: string } | null; n: number }>([
+        { $match: match },
+        { $group: { _id: { status: '$status', owner }, n: { $sum: 1 } } },
+      ]);
+      return (hinted ? pipeline.hint(STATUS_OWNER_INDEX) : pipeline).exec();
+    };
+    const rows = await group(true).catch((error) => {
+      if (!/hint/i.test(String(error?.message))) throw error;
+      return group(false);
+    });
     // A search finds a conversation whoever handles it.
     const anyOwner = Boolean(filters.search?.trim());
     const sum = (keep: (status: unknown, owner: string) => boolean) =>
