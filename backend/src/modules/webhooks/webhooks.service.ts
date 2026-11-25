@@ -469,6 +469,19 @@ export class WebhooksService {
 
     let releasedFlowId: string | null = null;
     if (!restart && conversation.currentFlowId && conversation.currentFlowNodeId) {
+      // A keyword wins over a flow in progress: a customer stopped at a menu who taps a campaign button
+      // (or types its words) gets that campaign's flow, not "please choose an option". A tap on the current
+      // flow's own buttons (replyId) still answers that flow.
+      if (!replyId) {
+        const keywordFlow = await this.flowsService.findKeywordFlow(storeId, store?.organizationId, text);
+        if (keywordFlow && keywordFlow.id !== conversation.currentFlowId) {
+          this.logger.log(`Keyword flow ${keywordFlow.id} interrupts flow ${conversation.currentFlowId} for ${from}`);
+          await this.conversationsService.updateFlowState(conversation._id, null, null);
+          await this.runFlowStep(startFlow(keywordFlow), keywordFlow, from, storeId, platform, conversation);
+          await this.conversationsService.markReadByBot(String(conversation._id));
+          return true;
+        }
+      }
       const flow = await this.flowsService.findLive(conversation.currentFlowId, storeId, store?.organizationId);
       if (flow) {
         const step = continueFlow(flow, { nodeId: conversation.currentFlowNodeId, invalidReplies: conversation.flowInvalidReplies || 0 }, text, replyId);

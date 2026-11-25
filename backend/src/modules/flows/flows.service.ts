@@ -152,6 +152,18 @@ export class FlowsService {
     return byType('any_message')[0] || null;
   }
 
+  /** The live keyword flow this message matches, if any (used to let a keyword interrupt a flow in progress). */
+  async findKeywordFlow(storeId: string, organizationId: string | null | undefined, input: string) {
+    const flows = (await this.flowRepository.find({
+      where: { ...this.scope(storeId, organizationId), isActive: true },
+      relations: { store: true },
+      order: { updatedAt: 'DESC' },
+    }))
+      .filter((flow) => FlowsService.isLive(flow) && triggerOf(flow).type === 'keyword')
+      .sort((a, b) => Number(b.store?.id === storeId) - Number(a.store?.id === storeId));
+    return flows.find((flow) => keywordMatches(triggerOf(flow), input)) || null;
+  }
+
   async findLive(id: string, storeId: string, organizationId?: string | null) {
     const flow = await this.flowRepository.findOne({ where: { id, ...this.scope(storeId, organizationId) } });
     return flow && FlowsService.isLive(flow) ? flow : null;
