@@ -4,7 +4,9 @@ import {
   ArrowLeft,
   ArrowRight,
   BadgeCheck,
+  Camera,
   CheckCheck,
+  CheckCircle2,
   ChevronDown,
   Database,
   FileText,
@@ -13,8 +15,10 @@ import {
   LayoutDashboard,
   Link2,
   Lock,
+  Loader2,
   LogIn,
   Mail,
+  MapPin,
   MessageCircle,
   MessagesSquare,
   Moon,
@@ -22,9 +26,12 @@ import {
   Send,
   ShieldCheck,
   Sun,
+  Sparkles,
   Trash2,
   Users,
+  Zap,
 } from 'lucide-react';
+import { trialRequestsApi } from '../lib/trial-requests';
 import { useTheme } from '../context/ThemeContext';
 import LogoImage from '../assets/logos/tael-bot-glyph-white.svg';
 import LogoAltImage from '../assets/logos/tael-bot-glyph-purple.svg';
@@ -38,7 +45,7 @@ const content = {
   ar: {
     brand: 'تيل بوت',
     tagline: 'نظام الرد والتواصل الذكي',
-    nav: { about: 'ما هو تيل بوت؟', whatsapp: 'WhatsApp Business', features: 'المميزات', data: 'استخدام البيانات', faq: 'الأسئلة الشائعة' },
+    nav: { about: 'ما هو تيل بوت؟', channels: 'القنوات', features: 'المميزات', faq: 'الأسئلة الشائعة', trial: 'اطلب تجربة' },
     login: 'تسجيل الدخول',
     switchLang: 'English',
     themeToLight: 'الوضع الفاتح',
@@ -48,6 +55,20 @@ const content = {
       title: 'تيل بوت - نظام الرد والتواصل الذكي',
       text: 'منصة تساعد المنشآت على إدارة محادثات العملاء عبر WhatsApp Business وتنظيم التواصل وخدمة العملاء من مكان واحد.',
       secondary: 'تعرّف على تيل بوت',
+      primary: 'اطلب تجربة',
+      note: 'نجهّز لك الحساب ونربط رقمك معك خطوة بخطوة.',
+    },
+    channels: {
+      title: 'كل قنواتك في صندوق واحد',
+      text: 'رسائل واتساب وإنستغرام وماسنجر وتقييمات فروعك تصل لفريقك في مكان واحد، فلا تفوتك رسالة ولا يضيع عميل.',
+      hub: 'صندوق موحد لفريقك',
+      list: [
+        { name: 'WhatsApp Business', text: 'المحادثات والحملات والردود الآلية' },
+        { name: 'Instagram', text: 'رسائل الدايركت في نفس الصندوق' },
+        { name: 'Messenger', text: 'رسائل صفحتك على فيسبوك' },
+        { name: 'Google Maps', text: 'تقييمات فروعك والرد عليها' },
+      ],
+      capabilities: ['ردود آلية على مدار الساعة', 'تدفقات محادثة بدون برمجة', 'حملات واتساب جماعية', 'توزيع المحادثات على الفريق', 'تقييم رضا العملاء', 'تقارير أداء الموظفين', 'إغلاق تلقائي للمحادثات', 'متابعة حالة كل رسالة'],
     },
     mock: {
       title: 'صندوق المحادثات',
@@ -114,9 +135,22 @@ const content = {
         },
       ],
     },
-    cta: {
-      title: 'جاهز لإدارة محادثات عملائك من مكان واحد؟',
-      text: 'سجّل الدخول إلى لوحة التحكم وابدأ بمتابعة محادثاتك.',
+    trial: {
+      title: 'جرّب تيل بوت على عملائك',
+      text: 'اترك بياناتك ويتواصل معك فريقنا خلال يوم عمل، يجهّز حسابك ويربط رقمك ويريك كيف يرد تيل بوت عنك.',
+      perks: ['تجهيز الحساب وربط الرقم معك', 'تدفق ترحيبي جاهز لعملائك', 'دعم مباشر من فريقنا بالعربي'],
+      name: 'الاسم',
+      phone: 'رقم الجوال',
+      company: 'اسم المنشأة',
+      message: 'ملاحظة (اختياري)',
+      messageHint: 'مثلًا: عدد الفروع أو القنوات التي تستخدمها',
+      submit: 'أرسل الطلب',
+      sending: 'جارٍ الإرسال...',
+      doneTitle: 'وصلنا طلبك، شكرًا لك!',
+      doneText: 'سيتواصل معك فريقنا قريبًا على رقم جوالك.',
+      again: 'إرسال طلب آخر',
+      error: 'تعذر إرسال الطلب، حاول مرة أخرى.',
+      privacy: 'نستخدم بياناتك للتواصل معك بخصوص الطلب فقط.',
     },
     footer: {
       about: 'منصة لإدارة محادثات العملاء والتواصل عبر WhatsApp Business.',
@@ -136,7 +170,7 @@ const content = {
   en: {
     brand: 'Tael Bot',
     tagline: 'Smart reply & communication system',
-    nav: { about: 'About', whatsapp: 'WhatsApp Business', features: 'Features', data: 'Data use', faq: 'FAQ' },
+    nav: { about: 'About', channels: 'Channels', features: 'Features', faq: 'FAQ', trial: 'Request a trial' },
     login: 'Log in',
     switchLang: 'العربية',
     themeToLight: 'Light mode',
@@ -146,6 +180,20 @@ const content = {
       title: 'Tael Bot — Smart Reply & Communication System',
       text: 'A platform that helps businesses manage customer conversations over WhatsApp Business and organize communication and customer service from one place.',
       secondary: 'Learn more',
+      primary: 'Request a trial',
+      note: 'We set up your account and connect your number with you, step by step.',
+    },
+    channels: {
+      title: 'All your channels in one inbox',
+      text: 'WhatsApp, Instagram, Messenger and your branch reviews reach your team in one place, so no message or customer slips through.',
+      hub: 'One inbox for your team',
+      list: [
+        { name: 'WhatsApp Business', text: 'Chats, campaigns and auto-replies' },
+        { name: 'Instagram', text: 'Direct messages in the same inbox' },
+        { name: 'Messenger', text: 'Messages to your Facebook page' },
+        { name: 'Google Maps', text: 'Your branch reviews, answered' },
+      ],
+      capabilities: ['24/7 auto-replies', 'No-code conversation flows', 'WhatsApp broadcast campaigns', 'Team assignment', 'Customer satisfaction ratings', 'Agent performance reports', 'Auto-closing conversations', 'Per-message delivery status'],
     },
     mock: {
       title: 'Inbox',
@@ -212,9 +260,22 @@ const content = {
         },
       ],
     },
-    cta: {
-      title: 'Ready to manage your customer conversations from one place?',
-      text: 'Log in to your dashboard and start following up on your conversations.',
+    trial: {
+      title: 'Try Tael Bot with your customers',
+      text: 'Leave your details and our team will reach out within a business day to set up your account, connect your number and show you Tael Bot replying for you.',
+      perks: ['Account setup and number connection with you', 'A ready welcome flow for your customers', 'Direct support from our team'],
+      name: 'Name',
+      phone: 'Mobile number',
+      company: 'Business name',
+      message: 'Note (optional)',
+      messageHint: 'e.g. number of branches or channels you use',
+      submit: 'Send request',
+      sending: 'Sending...',
+      doneTitle: 'Request received, thank you!',
+      doneText: 'Our team will contact you soon on your mobile number.',
+      again: 'Send another request',
+      error: 'Could not send the request, please try again.',
+      privacy: 'We use your details only to contact you about this request.',
     },
     footer: {
       about: 'A platform for managing customer conversations and communication via WhatsApp Business.',
@@ -254,6 +315,204 @@ function SectionHeading({ title, center = false }: { title: string; center?: boo
   );
 }
 
+type ChannelsCopy = (typeof content)[Lang]['channels'];
+type TrialCopy = (typeof content)[Lang]['trial'];
+
+/** Brand-coloured tiles (generic glyphs, not the brands' logos), in the order of `channels.list`. */
+const channelLooks = [
+  { Icon: MessageCircle, tile: 'bg-[#25D366]', signal: 'bg-[#25D366]' },
+  { Icon: Camera, tile: 'bg-gradient-to-br from-[#f58529] via-[#dd2a7b] to-[#8134af]', signal: 'bg-[#dd2a7b]' },
+  { Icon: Send, tile: 'bg-[#0866FF]', signal: 'bg-[#0866FF]' },
+  { Icon: MapPin, tile: 'bg-[#EA4335]', signal: 'bg-[#EA4335]' },
+];
+
+function ChannelCard({ index, item, towards }: { index: number; item: ChannelsCopy['list'][number]; towards: 'end' | 'start' }) {
+  const { Icon, tile, signal } = channelLooks[index];
+  // The connector sits on the hub's side of the card; its signal travels into the hub.
+  const connector = (
+    <div aria-hidden="true" className="hidden lg:block relative h-px w-14 xl:w-20 shrink-0 bg-gradient-to-r from-labbaik-border via-labbaik-blue/30 to-labbaik-border">
+      <span className={`landing-signal ${signal} ${towards === 'end' ? 'landing-signal-to-end' : 'landing-signal-to-start'} shadow-[0_0_10px_2px_rgba(100,59,137,0.25)]`} style={{ animationDelay: `${index * 0.6}s` }} />
+    </div>
+  );
+  return (
+    <div className="flex items-center">
+      {towards === 'start' && connector}
+      <div
+        className="landing-float flex-1 flex items-center gap-3.5 rounded-2xl border border-labbaik-border bg-labbaik-surface p-4 shadow-[0_18px_40px_-28px_rgba(15,10,30,0.45)]"
+        style={{ animationDelay: `${index * 0.8}s` }}
+      >
+        <span className={`grid h-12 w-12 shrink-0 place-items-center rounded-xl text-white ${tile}`}>
+          <Icon size={24} />
+        </span>
+        <span className="min-w-0">
+          <span className="block font-black" dir="ltr">{item.name}</span>
+          <span className="block text-sm text-labbaik-text-muted leading-snug">{item.text}</span>
+        </span>
+      </div>
+      {towards === 'end' && connector}
+    </div>
+  );
+}
+
+function ChannelsSection({ t, isAr, logo }: { t: ChannelsCopy; isAr: boolean; logo: string }) {
+  const half = Math.ceil(t.list.length / 2);
+  return (
+    <section id="channels" className="scroll-mt-24 border-y border-labbaik-border bg-labbaik-surface/60">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-16 sm:py-20">
+        <div className="max-w-2xl mx-auto text-center">
+          <SectionHeading title={t.title} center />
+          <p className="mt-4 text-base sm:text-lg leading-relaxed text-labbaik-text-muted">{t.text}</p>
+        </div>
+
+        <div className="mt-12 grid gap-4 lg:gap-0 lg:grid-cols-[1fr_auto_1fr] lg:items-center">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-1 lg:gap-6">
+            {t.list.slice(0, half).map((item, i) => <ChannelCard key={item.name} index={i} item={item} towards="end" />)}
+          </div>
+
+          {/* The hub every channel flows into */}
+          <div className="order-first lg:order-none flex flex-col items-center justify-center py-4 lg:py-0">
+            <div className="relative grid h-32 w-32 sm:h-36 sm:w-36 place-items-center">
+              <span aria-hidden="true" className="landing-ring absolute inset-0 rounded-full bg-labbaik-blue/25" />
+              <span aria-hidden="true" className="landing-ring absolute inset-0 rounded-full bg-labbaik-blue/20" style={{ animationDelay: '1.4s' }} />
+              <span className="relative grid h-full w-full place-items-center rounded-full bg-labbaik-blue shadow-[0_20px_50px_-20px_rgba(100,59,137,0.8)]">
+                <img src={logo} alt="" className="h-14 sm:h-16 w-auto" />
+              </span>
+            </div>
+            <p className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-labbaik-blue/10 px-3 py-1 text-sm font-black text-labbaik-blue dark:text-purple-200">
+              <Inbox size={15} /> {t.hub}
+            </p>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-1 lg:gap-6">
+            {t.list.slice(half).map((item, i) => <ChannelCard key={item.name} index={half + i} item={item} towards="start" />)}
+          </div>
+        </div>
+
+        {/* Capabilities strip: always scrolls the same way, whatever the page direction. */}
+        <div dir="ltr" className="landing-marquee-wrap mt-14 overflow-hidden [mask-image:linear-gradient(to_right,transparent,black_12%,black_88%,transparent)]">
+          <ul className="landing-marquee flex w-max gap-3">
+            {[...t.capabilities, ...t.capabilities].map((item, i) => (
+              <li
+                key={`${item}-${i}`}
+                aria-hidden={i >= t.capabilities.length}
+                dir={isAr ? 'rtl' : 'ltr'}
+                className="inline-flex items-center gap-2 whitespace-nowrap rounded-full border border-labbaik-border bg-labbaik-surface px-4 py-2 text-sm font-bold"
+              >
+                <Zap size={14} className="text-labbaik-blue dark:text-purple-300" />
+                {item}
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+const fieldClass =
+  'w-full h-12 rounded-xl border border-labbaik-border bg-labbaik-page px-4 text-sm font-medium text-neutral-900 dark:text-white placeholder:text-labbaik-text-muted focus:outline-none focus:ring-2 focus:ring-labbaik-blue/30 focus:border-labbaik-blue transition-colors';
+
+function TrialSection({ t }: { t: TrialCopy }) {
+  const [form, setForm] = useState({ name: '', phone: '', company: '', message: '', website: '' });
+  const [state, setState] = useState<'idle' | 'sending' | 'done'>('idle');
+  const [error, setError] = useState('');
+  const set = (key: keyof typeof form) => (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+    setForm((current) => ({ ...current, [key]: event.target.value }));
+
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setState('sending');
+    setError('');
+    try {
+      await trialRequestsApi.submit(form);
+      setState('done');
+      setForm({ name: '', phone: '', company: '', message: '', website: '' });
+    } catch (err) {
+      setState('idle');
+      setError((err as { response?: { data?: { message?: string } } })?.response?.data?.message || t.error);
+    }
+  };
+
+  return (
+    <section id="trial" className="scroll-mt-24 max-w-6xl mx-auto px-4 sm:px-6 py-16 sm:py-24">
+      <div className="grid lg:grid-cols-2 overflow-hidden rounded-3xl border border-labbaik-border bg-labbaik-surface shadow-[0_30px_60px_-40px_rgba(15,10,30,0.5)]">
+        <div className="relative isolate bg-labbaik-blue px-6 py-10 sm:px-10 sm:py-14 text-white">
+          <div aria-hidden="true" className="absolute inset-0 -z-10 bg-[radial-gradient(rgba(255,255,255,0.12)_1px,transparent_1px)] [background-size:20px_20px] [mask-image:linear-gradient(to_bottom,black,transparent)]" />
+          <h2 className="text-2xl sm:text-4xl font-black leading-tight text-balance">{t.title}</h2>
+          <p className="mt-4 text-[#efe6f8] leading-relaxed sm:text-lg">{t.text}</p>
+          <ul className="mt-8 space-y-3">
+            {t.perks.map((perk) => (
+              <li key={perk} className="flex items-center gap-3 font-bold">
+                <CheckCircle2 size={20} className="shrink-0 text-emerald-300" />
+                {perk}
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        <div className="px-6 py-10 sm:px-10 sm:py-14">
+          {state === 'done' ? (
+            <div className="h-full flex flex-col items-center justify-center text-center" role="status">
+              <span className="grid h-16 w-16 place-items-center rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-300">
+                <CheckCircle2 size={34} />
+              </span>
+              <p className="mt-5 text-xl font-black">{t.doneTitle}</p>
+              <p className="mt-2 text-labbaik-text-muted">{t.doneText}</p>
+              <button type="button" onClick={() => setState('idle')} className="mt-6 text-sm font-bold text-labbaik-blue dark:text-purple-200 hover:underline cursor-pointer">
+                {t.again}
+              </button>
+            </div>
+          ) : (
+            <form onSubmit={submit} className="space-y-4" noValidate={false}>
+              <label className="block">
+                <span className="mb-1.5 block text-sm font-bold">{t.name}</span>
+                <input required minLength={2} maxLength={120} autoComplete="name" value={form.name} onChange={set('name')} className={fieldClass} />
+              </label>
+              <label className="block">
+                <span className="mb-1.5 block text-sm font-bold">{t.phone}</span>
+                <input
+                  required
+                  type="tel"
+                  inputMode="tel"
+                  dir="ltr"
+                  autoComplete="tel"
+                  placeholder="05XXXXXXXX"
+                  pattern="[+0-9\s\-]{9,20}"
+                  value={form.phone}
+                  onChange={set('phone')}
+                  className={`${fieldClass} text-start`}
+                />
+              </label>
+              <label className="block">
+                <span className="mb-1.5 block text-sm font-bold">{t.company}</span>
+                <input required minLength={2} maxLength={160} autoComplete="organization" value={form.company} onChange={set('company')} className={fieldClass} />
+              </label>
+              <label className="block">
+                <span className="mb-1.5 block text-sm font-bold">{t.message}</span>
+                <textarea maxLength={500} rows={3} placeholder={t.messageHint} value={form.message} onChange={set('message')} className={`${fieldClass} h-auto py-3 resize-none`} />
+              </label>
+              {/* Left empty by people; bots that fill every field are dropped by the server. */}
+              <input type="text" name="website" tabIndex={-1} autoComplete="off" aria-hidden="true" value={form.website} onChange={set('website')} className="absolute -left-[9999px] h-0 w-0 opacity-0" />
+              {error && <p role="alert" className="text-sm font-bold text-red-600 dark:text-red-400">{error}</p>}
+              <button
+                type="submit"
+                disabled={state === 'sending'}
+                className="w-full inline-flex items-center justify-center gap-2 h-12 rounded-xl bg-labbaik-blue text-white text-base font-black hover:bg-[#553174] disabled:opacity-70 transition-colors cursor-pointer"
+              >
+                {state === 'sending' ? <Loader2 size={18} className="animate-spin" /> : <Send size={17} />}
+                {state === 'sending' ? t.sending : t.submit}
+              </button>
+              <p className="text-center text-xs text-labbaik-text-muted inline-flex w-full items-center justify-center gap-1.5">
+                <Lock size={12} /> {t.privacy}
+              </p>
+            </form>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 export default function LandingPage() {
   const { theme, toggleTheme } = useTheme();
   const [lang, setLang] = useState<Lang>(readStoredLang);
@@ -278,10 +537,10 @@ export default function LandingPage() {
 
   const navItems = [
     { href: '#about', label: t.nav.about },
-    { href: '#whatsapp', label: t.nav.whatsapp },
+    { href: '#channels', label: t.nav.channels },
     { href: '#features', label: t.nav.features },
-    { href: '#data', label: t.nav.data },
     { href: '#faq', label: t.nav.faq },
+    { href: '#trial', label: t.nav.trial },
   ];
 
   return (
@@ -360,13 +619,14 @@ export default function LandingPage() {
                 {t.hero.text}
               </p>
               <div className="mt-8 flex flex-col sm:flex-row items-center justify-center lg:justify-start gap-3">
-                <Link
-                  to="/login"
+                <a
+                  href="#trial"
                   className="w-full sm:w-auto inline-flex items-center justify-center gap-2 h-12 px-7 rounded-2xl bg-labbaik-blue text-white text-base font-black hover:bg-[#553174] transition-colors"
                 >
-                  {t.login}
+                  <Sparkles size={18} />
+                  {t.hero.primary}
                   <Arrow size={18} />
-                </Link>
+                </a>
                 <a
                   href="#about"
                   className="w-full sm:w-auto inline-flex items-center justify-center gap-2 h-12 px-7 rounded-2xl border border-labbaik-border bg-labbaik-surface text-neutral-800 dark:text-neutral-100 text-base font-bold hover:border-labbaik-blue/40 transition-colors"
@@ -374,7 +634,8 @@ export default function LandingPage() {
                   {t.hero.secondary}
                 </a>
               </div>
-              <p className="mt-6 inline-flex items-center gap-2 text-sm font-bold text-emerald-700 dark:text-emerald-300">
+              <p className="mt-4 text-sm text-labbaik-text-muted">{t.hero.note}</p>
+              <p className="mt-4 inline-flex items-center gap-2 text-sm font-bold text-emerald-700 dark:text-emerald-300">
                 <BadgeCheck size={16} />
                 {t.hero.badge}
               </p>
@@ -441,6 +702,8 @@ export default function LandingPage() {
             </div>
           </div>
         </section>
+
+        <ChannelsSection t={t.channels} isAr={isAr} logo={LogoImage} />
 
         {/* About */}
         <section id="about" className="scroll-mt-24 max-w-6xl mx-auto px-4 sm:px-6 py-16 sm:py-20">
@@ -569,20 +832,7 @@ export default function LandingPage() {
           </div>
         </section>
 
-        {/* CTA */}
-        <section className="max-w-6xl mx-auto px-4 sm:px-6 pb-16 sm:pb-24">
-          <div className="rounded-2xl bg-labbaik-blue px-6 py-12 sm:px-12 sm:py-16 text-center text-white">
-            <h2 className="text-2xl sm:text-4xl font-black leading-tight text-balance">{t.cta.title}</h2>
-            <p className="mt-4 text-[#efe6f8] sm:text-lg">{t.cta.text}</p>
-            <Link
-              to="/login"
-              className="mt-8 inline-flex items-center justify-center gap-2 h-12 px-8 rounded-2xl bg-white text-labbaik-blue text-base font-black hover:bg-[#f3ecfa] transition-colors"
-            >
-              {t.login}
-              <Arrow size={18} />
-            </Link>
-          </div>
-        </section>
+        <TrialSection t={t.trial} />
       </main>
 
       {/* Footer */}

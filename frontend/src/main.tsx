@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
 
-const initialTheme = (localStorage.getItem('theme') as 'light' | 'dark') || 'dark';
+const initialTheme = (localStorage.getItem('theme') as 'light' | 'dark') || 'light';
 document.documentElement.dataset.theme = initialTheme;
 document.documentElement.setAttribute('data-theme', initialTheme);
 document.documentElement.classList.toggle('dark', initialTheme === 'dark');

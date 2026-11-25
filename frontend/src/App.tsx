@@ -23,6 +23,7 @@ import AccountDeletionPage from './pages/AccountDeletionPage';
 import AccountDeletionAdminPage from './pages/AccountDeletionAdminPage';
 import AnalyticsPage from './pages/AnalyticsPage';
 import StoreChatsPage from './pages/StoreChatsPage';
+import TrialRequestsPage from './pages/TrialRequestsPage';
 import { ToastProvider } from './components/Toast';
 import { ThemeProvider } from './context/ThemeContext';
 import './index.css';
@@ -85,6 +86,7 @@ function App() {
                     <Route index element={<DashboardHome />} />
                     <Route path="conversations" element={<ConversationsPage />} />
                     <Route path="store-chats" element={<StoreChatsPage />} />
+                    <Route path="trial-requests" element={<TrialRequestsPage />} />
                     <Route path="customers" element={<CustomersPage />} />
                     <Route path="flows" element={<FlowsPage />} />
                     <Route path="flows/:id" element={<FlowEditorPage />} />

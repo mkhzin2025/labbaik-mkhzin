@@ -26,6 +26,7 @@ import {
   UserCog,
   Loader2,
   Store,
+  UserPlus,
 } from 'lucide-react';
 
 import LogoImage from '../assets/logos/tael-bot-glyph-white.svg';
@@ -41,6 +42,7 @@ import UnfinishedConversationsDialog from './UnfinishedConversations';
 import { fetchUnfinished, holdsSignOut } from '../lib/unfinished';
 import type { UnfinishedConversation } from '../lib/unfinished';
 import { STORE_CHAT_CHANGED, storeChatApi } from '../lib/store-chat';
+import { TRIAL_REQUESTS_CHANGED, trialRequestsApi } from '../lib/trial-requests';
 import ProductSearchDialog from './ProductSearchDialog';
 
 interface NavItem {
@@ -190,6 +192,28 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     };
   }, [storeChatEnabled]);
 
+  // Website trial / subscription requests: only the platform owner's organization (شركة مخازن) gets the item.
+  const [trialRequests, setTrialRequests] = useState({ enabled: false, newCount: 0 });
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = () => {
+      if (document.visibilityState !== 'visible') return;
+      trialRequestsApi.summary().then((s) => { if (!cancelled) setTrialRequests(s); }).catch(() => { /* keep the last state */ });
+    };
+    refresh();
+    const id = window.setInterval(refresh, 60_000);
+    window.addEventListener(TRIAL_REQUESTS_CHANGED, refresh);
+    document.addEventListener('visibilitychange', refresh);
+    socket?.on('trial_request', refresh);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+      window.removeEventListener(TRIAL_REQUESTS_CHANGED, refresh);
+      document.removeEventListener('visibilitychange', refresh);
+      socket?.off('trial_request', refresh);
+    };
+  }, [access?.organization.id, socket]);
+
   // Ctrl/⌘+K opens the product search from any page.
   useEffect(() => {
     if (!productSearchEnabled) return;
@@ -229,6 +253,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         { icon: <MessageSquare size={18} />, label: 'المحادثات', path: '/dashboard/conversations', section: 'conversations' },
         ...(storeChatEnabled
           ? [{ icon: <Store size={18} />, label: 'محادثات المتجر', path: '/dashboard/store-chats', section: 'conversations' as Section, badge: storeChatPending }]
+          : []),
+        ...(trialRequests.enabled
+          ? [{ icon: <UserPlus size={18} />, label: 'طلبات الاشتراك', path: '/dashboard/trial-requests', badge: trialRequests.newCount }]
           : []),
         { icon: <Users size={18} />, label: 'العملاء', path: '/dashboard/customers', section: 'customers' },
         { icon: <Star size={18} />, label: 'التقييمات', path: '/dashboard/reviews', section: 'reviews' },

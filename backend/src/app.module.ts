@@ -6,6 +6,8 @@ import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
 import { StoresModule } from './modules/stores/stores.module';
 import { EventsModule } from './modules/events/events.module';
+import { TrialRequestsModule } from './modules/trial-requests/trial-requests.module';
+import { TrialRequest } from './modules/trial-requests/trial-request.entity';
 import { ChannelsModule } from './modules/channels/channels.module';
 import { WebhooksModule } from './modules/webhooks/webhooks.module';
 import { ConversationsModule } from './modules/conversations/conversations.module';
@@ -59,7 +61,7 @@ import { StoreChatModule } from './modules/store-chat/store-chat.module';
         username: configService.get<string>('POSTGRES_USER'),
         password: configService.get<string>('POSTGRES_PASSWORD'),
         database: configService.get<string>('POSTGRES_DB'),
-        entities: [User, Store, Channel, Review, Notification, Customer, CustomerCategory, CustomerTag, CompetitionSyncState, Flow, Organization, OrganizationMember, StoreMember, MetaWhatsAppConnection, WhatsAppTemplate, WhatsAppCampaign, WhatsAppCampaignRecipient, BillingPlan, Subscription, Wallet, WalletTransaction, PaymentMethod, BillingPayment, PricingRule, AccountDeletionRequest],
+        entities: [User, Store, Channel, Review, Notification, Customer, CustomerCategory, CustomerTag, CompetitionSyncState, Flow, Organization, OrganizationMember, StoreMember, MetaWhatsAppConnection, WhatsAppTemplate, WhatsAppCampaign, WhatsAppCampaignRecipient, BillingPlan, Subscription, Wallet, WalletTransaction, PaymentMethod, BillingPayment, PricingRule, AccountDeletionRequest, TrialRequest],
         synchronize: configService.get<string>('TYPEORM_SYNCHRONIZE') === 'true',
         // node-postgres defaults to 10 connections; a running campaign alone keeps more than that busy
         // (each wallet debit holds one while it waits for the wallet row lock), starving webhooks and the UI.
@@ -90,6 +92,7 @@ import { StoreChatModule } from './modules/store-chat/store-chat.module';
     FlowsModule,
     AccountDeletionModule,
     StoreChatModule,
+    TrialRequestsModule,
   ],
 })
 export class AppModule {}

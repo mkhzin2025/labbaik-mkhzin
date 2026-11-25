@@ -289,8 +289,24 @@ textarea {
 .landing-bubble-2 { animation-delay: 0.9s; }
 .landing-bubble-3 { animation-delay: 1.3s; }
 
+/* Landing channels: cards float, signals travel along the connectors into the hub, the hub breathes,
+   and the capabilities strip scrolls. inset-inline-start keeps the signal heading to the hub in RTL and LTR. */
+@keyframes landing-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
+@keyframes landing-signal-to-end { from { inset-inline-start: 0%; opacity: 0; } 15% { opacity: 1; } 85% { opacity: 1; } to { inset-inline-start: 100%; opacity: 0; } }
+@keyframes landing-signal-to-start { from { inset-inline-start: 100%; opacity: 0; } 15% { opacity: 1; } 85% { opacity: 1; } to { inset-inline-start: 0%; opacity: 0; } }
+@keyframes landing-ring { from { transform: scale(0.85); opacity: 0.55; } to { transform: scale(1.6); opacity: 0; } }
+@keyframes landing-marquee { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+.landing-float { animation: landing-float 5s ease-in-out infinite; }
+.landing-signal { position: absolute; top: 50%; width: 8px; height: 8px; margin-top: -4px; margin-inline-start: -4px; border-radius: 9999px; }
+.landing-signal-to-end { animation: landing-signal-to-end 2.4s ease-in-out infinite; }
+.landing-signal-to-start { animation: landing-signal-to-start 2.4s ease-in-out infinite; }
+.landing-ring { animation: landing-ring 2.8s cubic-bezier(0.22, 1, 0.36, 1) infinite; }
+.landing-marquee { animation: landing-marquee 32s linear infinite; }
+.landing-marquee-wrap:hover .landing-marquee { animation-play-state: paused; }
+
 @media (prefers-reduced-motion: reduce) {
-  .landing-rise, .landing-bubble { animation: none; }
+  .landing-rise, .landing-bubble, .landing-float, .landing-ring, .landing-marquee { animation: none; }
+  .landing-signal { display: none; }
 }
 
 /* Landing: tint secondary text from the brand hue instead of slate, theme browser surfaces */
