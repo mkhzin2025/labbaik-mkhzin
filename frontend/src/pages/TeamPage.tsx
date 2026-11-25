@@ -343,8 +343,9 @@ export default function TeamPage() {
     let cancelled = false;
     const refresh = () => {
       if (document.visibilityState !== 'visible') return;
-      api.get<Presence>('/presence')
-        .then(({ data }) => { if (!cancelled) setPresence({ online: data?.online || [], lastSeen: data?.lastSeen || {} }); })
+      api.get<Presence>('/organizations/me/presence')
+        // Anything but the real answer (e.g. a proxy serving the app page) hides the dots rather than showing everyone offline.
+        .then(({ data }) => { if (!cancelled) setPresence(Array.isArray(data?.online) ? { online: data.online, lastSeen: data.lastSeen || {} } : null); })
         .catch(() => { /* the dots just stay as they were */ });
     };
     refresh();

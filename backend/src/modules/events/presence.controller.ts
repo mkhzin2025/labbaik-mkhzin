@@ -7,7 +7,8 @@ import { EventsGateway } from './events.gateway';
 @ApiTags('Team')
 @ApiBearerAuth()
 @Access('team')
-@Controller('presence')
+// Under /organizations: the production proxy only forwards known path prefixes to the backend.
+@Controller('organizations/me/presence')
 export class PresenceController {
   constructor(private readonly events: EventsGateway, private readonly organizations: OrganizationsService) {}
 
