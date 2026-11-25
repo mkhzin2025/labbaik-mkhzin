@@ -1,4 +1,5 @@
 import { Injectable, Logger, NotFoundException, InternalServerErrorException, OnModuleInit, BadRequestException } from '@nestjs/common';
+import { runsPlatformJobs } from '../../common/app-role';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { CONVERSATION_RATINGS, Conversation, ConversationRating, ConversationStatus } from './schemas/conversation.schema';
@@ -178,6 +179,8 @@ export class ConversationsService implements OnModuleInit {
   onModuleInit() {
     // Each of these scans the whole collection. They used to be awaited here, which held the app (and every
     // webhook) until they finished; now they run once the API is up.
+    // Once per deployment: a campaign worker (APP_ROLE=worker) leaves these to the API process.
+    if (!runsPlatformJobs()) return;
     setTimeout(() => void this.runStartupMaintenance(), STARTUP_MAINTENANCE_DELAY_MS).unref?.();
     if (autoCloseMinutes() > 0) setInterval(() => void this.closeUnansweredConversations(), AUTO_CLOSE_POLL_MS).unref?.();
   }

@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnApplicationBootstrap, OnApplicationShutdown } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { BillingService } from './billing.service';
+import { runsPlatformJobs } from '../../common/app-role';
 
 @Injectable()
 export class BillingRenewalService implements OnApplicationBootstrap, OnApplicationShutdown {
@@ -11,7 +12,8 @@ export class BillingRenewalService implements OnApplicationBootstrap, OnApplicat
 
   onApplicationBootstrap() {
     const enabled = String(this.config.get<string>('BILLING_RENEWAL_WORKER_ENABLED') || 'true').toLowerCase() !== 'false';
-    if (!enabled) return;
+    // A campaign worker (APP_ROLE=worker) never renews, so a renewal cannot run twice.
+    if (!enabled || !runsPlatformJobs()) return;
     const run = () => this.billing.processDueRenewals().catch((error) => this.logger.error(`Billing renewals failed: ${error.message}`));
     this.timer = setInterval(run, 60 * 60 * 1000);
     this.timer.unref?.();

@@ -1,4 +1,5 @@
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException, OnApplicationBootstrap, OnModuleDestroy } from '@nestjs/common';
+import { runsCampaigns } from '../../common/app-role';
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, Repository } from 'typeorm';
 import { normalizePhoneNumber } from '../../common/utils/phone.util';
@@ -22,7 +23,8 @@ const SEND_CONCURRENCY_PER_MPS = 2;
 const CLAIM_BATCH = 40;
 const DEFAULT_SPEED = 20;
 /** How often due scheduled campaigns are picked up. */
-const SCHEDULE_POLL_MS = 30_000;
+/** How soon the sending process notices a campaign started from the API (and a scheduled one coming due). */
+const QUEUE_POLL_MS = 5_000;
 const MAX_SCHEDULE_DAYS = 30;
 /** A campaign stops once this many sends in a row fail (empty wallet, revoked token, paused template...). */
 const MAX_CONSECUTIVE_FAILURES = 25;
@@ -157,10 +159,33 @@ export class WhatsAppCampaignsService implements OnApplicationBootstrap, OnModul
     private readonly templatePayloadBuilder: MetaTemplatePayloadBuilder,
   ) {}
 
-  /** Resumes campaigns interrupted by a restart. Messages that were mid-send are failed rather than risk a double send. */
+  /**
+   * Resumes campaigns interrupted by a restart (messages that were mid-send are failed rather than risk a double
+   * send), then keeps starting scheduled and queued ones. Only in the process that sends campaigns: an API-only
+   * process restarting must not fail the numbers a running worker is sending.
+   */
   onApplicationBootstrap() {
+    if (!runsCampaigns()) {
+      this.logger.log('Campaign sending is left to the worker (APP_ROLE=api)');
+      return;
+    }
     setTimeout(() => void this.resumeInterrupted(), 5000);
-    this.scheduleTimer = setInterval(() => void this.startDue(), SCHEDULE_POLL_MS);
+    this.scheduleTimer = setInterval(() => { void this.startDue(); void this.startQueued(); }, QUEUE_POLL_MS);
+  }
+
+  /** Starts a campaign right away when this process sends campaigns; otherwise the worker picks it up from the queue. */
+  private kick(campaignId: string) {
+    if (runsCampaigns()) void this.run(campaignId);
+  }
+
+  /** Queued campaigns not yet running here: those started from an API-only process. */
+  private async startQueued() {
+    try {
+      const rows = await this.campaignRepository.find({ where: { status: WhatsAppCampaignStatus.QUEUED }, select: ['id'] });
+      for (const { id } of rows) if (!this.running.has(id)) void this.run(id);
+    } catch (error: any) {
+      this.logger.warn(`Could not start queued WhatsApp campaigns: ${error.message}`);
+    }
   }
 
   onModuleDestroy() {
@@ -287,7 +312,7 @@ export class WhatsAppCampaignsService implements OnApplicationBootstrap, OnModul
       return saved;
     });
 
-    if (!scheduledAt) void this.run(campaign.id);
+    if (!scheduledAt) this.kick(campaign.id);
     return { ...this.toPublic(campaign), stats: toStats({ total: campaign.totalRecipients, pending: campaign.totalRecipients }) };
   }
 
@@ -339,7 +364,7 @@ export class WhatsAppCampaignsService implements OnApplicationBootstrap, OnModul
     );
     if (!retried) throw new BadRequestException('لا توجد أرقام قابلة لإعادة المحاولة.');
     await this.campaignRepository.update(id, { status: WhatsAppCampaignStatus.QUEUED, lastError: null, completedAt: null });
-    void this.run(id);
+    this.kick(id);
     return this.getForUser(userId, organizationId, id);
   }
 
@@ -360,7 +385,7 @@ export class WhatsAppCampaignsService implements OnApplicationBootstrap, OnModul
     if (campaign.status !== WhatsAppCampaignStatus.SENDING && campaign.status !== WhatsAppCampaignStatus.QUEUED) {
       await this.campaignRepository.update(id, { status: WhatsAppCampaignStatus.QUEUED, lastError: null, completedAt: null });
     }
-    void this.run(id);
+    this.kick(id);
     return this.getForUser(userId, organizationId, id);
   }
 

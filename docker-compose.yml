@@ -29,7 +29,10 @@ services:
     logging: *default-logging
     ports:
       - "127.0.0.1:3000:3000"
-    environment:
+    environment: &backend-env
+      # api: the platform (HTTP, webhooks, sockets, timers); campaigns are sent by campaign-worker.
+      # Set BACKEND_APP_ROLE=all (and stop campaign-worker) to run everything in this one container again.
+      APP_ROLE: ${BACKEND_APP_ROLE:-api}
       NODE_ENV: production
       NODE_OPTIONS: --max-old-space-size=${BACKEND_HEAP_MB:-1024}
       PORT: 3000
@@ -67,6 +70,33 @@ services:
       PUBLIC_WEBHOOK_URL: ${PUBLIC_WEBHOOK_URL:-https://${APP_DOMAIN:-taelbot.com}}
       COMPETITION_API_URL: ${COMPETITION_API_URL:-https://competition.mkhzin.com/api/integrations/participants}
       COMPETITION_API_KEY: ${COMPETITION_API_KEY:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      # So the usual `up -d --build backend frontend` also builds and starts the campaign sender.
+      campaign-worker:
+        condition: service_started
+    volumes:
+      - backend_uploads:/app/uploads
+
+  # Sends WhatsApp campaigns on its own CPU core (same image as backend), so a large campaign
+  # cannot slow the platform down. No ports: nothing reaches it from outside.
+  campaign-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    container_name: labbaik-campaign-worker
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      <<: *backend-env
+      APP_ROLE: worker
+      # The backend container keeps the database schema in step; two processes must not both sync it.
+      TYPEORM_SYNCHRONIZE: "false"
     depends_on:
       postgres:
         condition: service_healthy
