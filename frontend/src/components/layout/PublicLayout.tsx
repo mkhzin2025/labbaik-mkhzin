@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { Sun, Moon, ShieldCheck, Mail, ArrowRight } from 'lucide-react';
+import { Sun, Moon, ShieldCheck, Mail, LogIn } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
 import LogoImage from '../../assets/logos/tael-bot-glyph-white.svg';
 import LogoAltImage from '../../assets/logos/tael-bot-glyph-purple.svg';
@@ -13,59 +13,48 @@ export default function PublicLayout({ children }: PublicLayoutProps) {
   const { theme, toggleTheme } = useTheme();
 
   return (
-    <div className="min-h-screen flex flex-col bg-neutral-50 dark:bg-[#0c0d12] text-neutral-900 dark:text-white transition-colors duration-300" dir="rtl">
-      {/* Top Navigation Bar */}
-      <header className="sticky top-0 z-30 bg-white/80 dark:bg-[#0c0d12]/80 backdrop-blur-md border-b border-neutral-200 dark:border-white/10">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 h-16 sm:h-20 flex items-center justify-between gap-4">
-          <Link to="/" className="flex items-center gap-3 group">
-            <img
-              src={theme === 'dark' ? LogoImage : LogoAltImage}
-              alt="Tael Bot"
-              className="h-9 sm:h-11 w-auto object-contain transition-transform group-hover:scale-105"
-            />
-            <div className="flex flex-col">
-              <span className="text-lg sm:text-xl font-black text-labbaik-blue tracking-tight">لَبَّيْك</span>
-              <span className="text-[10px] text-neutral-500 font-bold -mt-1">نظام الرد والتواصل الذكي</span>
+    <div className="landing min-h-screen flex flex-col bg-labbaik-page text-neutral-900 dark:text-white transition-colors duration-300" dir="rtl">
+      {/* Same header as the home page: brand, the legal links, theme, and log in. */}
+      <header className="sticky top-0 z-30 bg-white/75 dark:bg-[#0a192f]/75 backdrop-blur-xl border-b border-labbaik-border">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 h-16 sm:h-20 flex items-center justify-between gap-3">
+          <Link to="/" className="flex items-center gap-2.5 shrink-0" aria-label="تيل بوت">
+            <img src={theme === 'dark' ? LogoImage : LogoAltImage} alt="" className="h-9 sm:h-11 w-auto object-contain" />
+            <div className="flex flex-col leading-none">
+              <span className="text-lg sm:text-xl font-black text-labbaik-blue dark:text-white">تيل بوت</span>
+              <span className="hidden sm:block text-[11px] text-labbaik-text-muted font-bold mt-1">نظام الرد والتواصل الذكي</span>
             </div>
           </Link>
 
-          <nav className="flex items-center gap-2 sm:gap-4">
-            <Link
-              to="/privacy"
-              className="text-xs font-bold text-neutral-600 dark:text-neutral-300 hover:text-labbaik-blue dark:hover:text-labbaik-blue transition-colors px-2.5 py-1.5 rounded-xl hover:bg-neutral-100 dark:hover:bg-white/5"
-            >
-              الخصوصية
-            </Link>
-            <Link
-              to="/terms"
-              className="text-xs font-bold text-neutral-600 dark:text-neutral-300 hover:text-labbaik-blue dark:hover:text-labbaik-blue transition-colors px-2.5 py-1.5 rounded-xl hover:bg-neutral-100 dark:hover:bg-white/5"
-            >
-              شروط الخدمة
-            </Link>
-            <Link
-              to="/account-deletion"
-              className="text-xs font-bold text-neutral-600 dark:text-neutral-300 hover:text-labbaik-blue dark:hover:text-labbaik-blue transition-colors px-2.5 py-1.5 rounded-xl hover:bg-neutral-100 dark:hover:bg-white/5"
-            >
-              حذف البيانات
-            </Link>
+          <nav className="hidden md:flex items-center gap-1" aria-label="روابط قانونية">
+            {[['/privacy', 'الخصوصية'], ['/terms', 'شروط الخدمة'], ['/account-deletion', 'حذف البيانات']].map(([to, label]) => (
+              <Link
+                key={to}
+                to={to}
+                className="text-sm font-bold text-neutral-600 dark:text-neutral-300 hover:text-labbaik-blue dark:hover:text-white px-3 py-2 rounded-xl hover:bg-labbaik-blue/5 dark:hover:bg-white/5 transition-colors"
+              >
+                {label}
+              </Link>
+            ))}
+          </nav>
 
+          <div className="flex items-center gap-1.5 sm:gap-2">
             <button
-              onClick={toggleTheme}
               type="button"
-              className="p-2 rounded-xl bg-neutral-100 dark:bg-white/5 border border-neutral-200 dark:border-white/10 text-neutral-600 dark:text-neutral-300 hover:text-labbaik-blue transition-colors cursor-pointer"
-              title={theme === 'dark' ? 'الوضع النهاري' : 'الوضع الليلي'}
+              onClick={toggleTheme}
+              className="inline-flex items-center justify-center h-10 w-10 rounded-xl border border-labbaik-border bg-labbaik-surface text-neutral-700 dark:text-neutral-200 hover:text-labbaik-blue transition-colors cursor-pointer"
+              aria-label={theme === 'dark' ? 'الوضع الفاتح' : 'الوضع الداكن'}
+              title={theme === 'dark' ? 'الوضع الفاتح' : 'الوضع الداكن'}
             >
-              {theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}
+              {theme === 'dark' ? <Sun size={17} className="text-amber-400" /> : <Moon size={17} className="text-labbaik-blue" />}
             </button>
-
             <Link
               to="/login"
-              className="inline-flex items-center gap-1.5 text-xs font-black bg-labbaik-blue text-white px-4 py-2 rounded-xl hover:bg-labbaik-blue/90 shadow-sm transition-all cursor-pointer"
+              className="inline-flex items-center gap-1.5 h-10 px-3.5 sm:px-5 rounded-xl bg-labbaik-blue text-white text-sm font-black hover:bg-[#553174] transition-colors"
             >
-              <span>دخول المنصة</span>
-              <ArrowRight size={14} className="rotate-180" />
+              <LogIn size={16} className="-scale-x-100" />
+              <span>تسجيل الدخول</span>
             </Link>
-          </nav>
+          </div>
         </div>
       </header>
 
