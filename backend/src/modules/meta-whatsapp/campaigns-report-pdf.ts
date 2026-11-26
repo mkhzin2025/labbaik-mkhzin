@@ -1,5 +1,6 @@
 import type { Response } from 'express';
 import { PAGE_MARGIN, REPORT_COLORS as C, createTaelReport, formatNumber as format, formatPercent as percent } from '../../common/pdf/tael-report-kit';
+import { groupErrors } from './campaign-errors';
 
 type Stats = { total: number; accepted: number; delivered: number; read: number; replied: number; interactions: number; failed: number; skipped: number };
 type Label = { name: string };
@@ -30,23 +31,6 @@ export type CampaignsReport = {
   /** Viewer's offset from UTC in minutes (east positive), for the dates printed in the report. */
   tzOffsetMinutes: number;
   campaigns: CampaignReportItem[];
-};
-
-/** Meta's delivery errors in plain Arabic; variants of the same error (trace ids, codes) fold into one reason. */
-const ERROR_REASONS: { match: RegExp; label: string }[] = [
-  { match: /healthy ecosystem|131049/i, label: 'حدّ Meta لعدد الرسائل التسويقية التي يستقبلها الشخص' },
-  { match: /undeliverable|131026/i, label: 'تعذّر التسليم: الرقم غير مسجّل في واتساب أو غير متاح' },
-  { match: /experiment|130472/i, label: 'الرقم ضمن تجربة Meta لتقليل الرسائل التسويقية' },
-  { match: /stop receiving marketing|131050/i, label: 'العميل أوقف استقبال الرسائل التسويقية' },
-  { match: /payment|unsettled|131042/i, label: 'مستحقات حساب واتساب غير مسدّدة' },
-  { match: /re-engagement|24 hours|131047/i, label: 'انتهت نافذة الـ24 ساعة' },
-  { match: /something went wrong|131000/i, label: 'خطأ عام من Meta' },
-];
-const reasonOf = (error: string) => ERROR_REASONS.find((r) => r.match.test(error))?.label || error.trim() || 'سبب غير محدد';
-const groupErrors = (errors: { error: string; count: number }[]) => {
-  const map = new Map<string, number>();
-  for (const e of errors) map.set(reasonOf(e.error), (map.get(reasonOf(e.error)) || 0) + e.count);
-  return [...map.entries()].map(([reason, count]) => ({ reason, count })).sort((a, b) => b.count - a.count);
 };
 
 /** Replies plus Meta's button clicks, as a share of readers (capped: clicks are counted per press, not per person). */
@@ -227,7 +211,7 @@ export function writeCampaignsReportPdf(response: Response, report: CampaignsRep
       const labelWidth = 330;
       const barX = PAGE_MARGIN + 16 + 130;
       const barWidth = contentWidth - 32 - labelWidth - 140;
-      text(item.reason, right - 16 - labelWidth, rowY + 2, labelWidth, { size: 8.5, color: C.ink });
+      text(item.error, right - 16 - labelWidth, rowY + 2, labelWidth, { size: 8.5, color: C.ink });
       doc.roundedRect(barX, rowY + 4, barWidth, 9, 3).fill(C.soft);
       const filled = (item.count / maxReason) * barWidth;
       doc.roundedRect(barX + barWidth - filled, rowY + 4, Math.max(filled, 2), 9, 3).fill(C.red);
@@ -331,7 +315,7 @@ export function writeCampaignsReportPdf(response: Response, report: CampaignsRep
     if (!errors.length) text('وصلت كل الرسائل المقبولة.', leftX + 16, inner + 20, columnW - 32, { size: 9, color: C.muted, align: 'center' });
     errors.forEach((e, errorIndex) => {
       const rowY = inner + errorIndex * buttonRow;
-      text(e.reason, leftX + 16 + 100, rowY + 2, columnW - 132, { size: 8, color: C.ink });
+      text(e.error, leftX + 16 + 100, rowY + 2, columnW - 132, { size: 8, color: C.ink });
       text(format(e.count), leftX + 16 + 40, rowY + 2, 56, { size: 8.5, color: C.ink, bold: true, align: 'left' });
       text(percent(e.count, failed), leftX + 16, rowY + 2, 36, { size: 7.5, color: C.muted, align: 'left' });
     });

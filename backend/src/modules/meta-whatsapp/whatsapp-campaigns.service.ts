@@ -14,6 +14,7 @@ import { CampaignRecipientStatus, WhatsAppCampaignRecipient } from './entities/w
 import { MetaWhatsAppService } from './meta-whatsapp.service';
 import { MetaTemplatePayloadBuilder } from './services/meta-template-payload.builder';
 import { writeCampaignsReportPdf } from './campaigns-report-pdf';
+import { groupErrors } from './campaign-errors';
 import type { Response } from 'express';
 
 /** Upper bound on parallel sends per campaign; the chosen messages/second paces them. */
@@ -709,10 +710,11 @@ export class WhatsAppCampaignsService implements OnApplicationBootstrap, OnModul
         [id],
       ),
       this.recipientRepository.query(
-        `SELECT COALESCE(r.error, '') AS error, COUNT(*)::int AS count
+        // Meta's trace id differs on every failure; drop it so one error is one row before the limit.
+        `SELECT regexp_replace(COALESCE(r.error, ''), $2, '', 'gi') AS error, COUNT(*)::int AS count
            FROM whatsapp_campaign_recipients r WHERE r."campaignId" = $1 AND r.status IN ('failed', 'skipped')
-          GROUP BY 1 ORDER BY 2 DESC LIMIT 8`,
-        [id],
+          GROUP BY 1 ORDER BY 2 DESC LIMIT 50`,
+        [id, String.raw`\s*\[fbtrace_id:[^\]]*\]?`],
       ),
       // Hourly activity for the first week, so the user sees when the audience actually opened and answered.
       this.recipientRepository.query(
@@ -748,7 +750,7 @@ export class WhatsAppCampaignsService implements OnApplicationBootstrap, OnModul
       byBranch: byBranch.map((row: any) => ({ storeId: row.storeId, storeName: row.storeName, stats: branchStats(row) })),
       buttons: buttons.map((row: any) => ({ text: row.text, count: Number(row.count) })),
       metaButtons,
-      errors: errors.map((row: any) => ({ error: row.error, count: Number(row.count) })),
+      errors: groupErrors(errors.map((row: any) => ({ error: row.error, count: Number(row.count) }))).slice(0, 8),
       paymentFailed: Number(payment?.count || 0),
       timeline: timeline.map((row: any) => ({ kind: row.kind, bucket: new Date(row.bucket).toISOString(), count: Number(row.count) })),
     };
