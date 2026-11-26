@@ -98,4 +98,9 @@ export class WhatsAppCampaignsController {
   retryPaymentFailed(@Request() req: any, @Param('id', ParseUUIDPipe) id: string) {
     return this.campaigns.retryPaymentFailedForUser(req.user.id, req.user.organizationId, id);
   }
+
+  @Post(':id/retry-meta-limit')
+  retryMetaLimit(@Request() req: any, @Param('id', ParseUUIDPipe) id: string) {
+    return this.campaigns.retryMetaLimitForUser(req.user.id, req.user.organizationId, id);
+  }
 }

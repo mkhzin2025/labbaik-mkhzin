@@ -82,6 +82,13 @@ describe('WhatsAppCampaignsService.run', () => {
     expect(campaign.status).toBe(WhatsAppCampaignStatus.FAILED);
   });
 
+  it('finishes the campaign when only malformed numbers fail', async () => {
+    const malformed = 'Meta: تنسيق رقم الهاتف غير صحيح: يرجى استخدام التنسيق: +1234567890. (code 131009) [fbtrace_id: X]';
+    const { service, campaign } = setup({ total: 200, send: async () => { throw new Error(malformed); } });
+    await (service as any).run('c1');
+    expect(campaign.status).toBe(WhatsAppCampaignStatus.COMPLETED);
+  });
+
   it('sends test campaigns without recording customers or conversations', async () => {
     const { service, metaWhatsAppService } = setup({ total: 3, test: true });
     await (service as any).run('c1');

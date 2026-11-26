@@ -32,3 +32,16 @@ export function formatNumber(value: number | string | null | undefined): string 
   if (isNaN(num)) return toEnglishDigits(value);
   return num.toLocaleString('en-US');
 }
+
+/**
+ * Whether a stored phone number matches what was typed in a search box, in any format: 05..., 5..., +966 5...,
+ * 00966..., with spaces or dashes, or in Arabic digits. Fewer than 3 digits never match.
+ */
+export function phoneMatches(phone: string | null | undefined, query: string): boolean {
+  // Both sides without the Saudi country code or leading zeros, so local and international forms meet.
+  const core = (value: string | null | undefined) =>
+    toEnglishDigits(value).replace(/[^0-9]/g, '').replace(/^0+/, '').replace(/^966(?=0*5)/, '').replace(/^0+/, '');
+  const typed = core(query);
+  if (typed.length < 3) return false;
+  return core(phone).includes(typed);
+}

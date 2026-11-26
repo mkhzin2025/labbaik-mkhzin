@@ -32,3 +32,12 @@ describe('inboxSearchClause', () => {
     expect(clause.$or[0].customerName.test('أحمد ياسين')).toBe(true);
   });
 });
+
+describe('phoneSearch elsewhere', () => {
+  it('treats short or non-number input as text', () => {
+    const { phoneSearch } = jest.requireActual('../../common/utils/phone.util');
+    expect(phoneSearch('12')).toBeNull();
+    expect(phoneSearch('أحمد 050')).toBeNull();
+    expect(phoneSearch('00971501234567')).toEqual({ exact: '971501234567' });
+  });
+});

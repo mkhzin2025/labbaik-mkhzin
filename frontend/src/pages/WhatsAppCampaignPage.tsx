@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { AlertTriangle, ArrowRight, Ban, CalendarClock, CreditCard, Loader2, MessageSquareReply, MousePointerClick, RotateCcw, Search, Workflow } from 'lucide-react';
+import { AlertTriangle, ArrowRight, Ban, CalendarClock, ChevronDown, CreditCard, Gauge, Loader2, MessageSquareReply, MousePointerClick, RotateCcw, Search, Workflow } from 'lucide-react';
 import { Link, useParams } from 'react-router-dom';
 import api from '../api/client';
 import { useToast } from '../components/Toast';
@@ -56,7 +56,7 @@ export default function WhatsAppCampaignPage() {
   const [campaign, setCampaign] = useState<CampaignDetails | null>(null);
   const [template, setTemplate] = useState<Template | null>(null);
   const [failed, setFailed] = useState(false);
-  const [acting, setActing] = useState<'cancel' | 'retry' | 'payment' | 'flows' | 'replies' | null>(null);
+  const [acting, setActing] = useState<'cancel' | RetryKind | 'flows' | 'replies' | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -148,16 +148,27 @@ export default function WhatsAppCampaignPage() {
     }
   };
 
-  const act = async (kind: 'cancel' | 'retry' | 'payment') => {
+  const act = async (kind: 'cancel' | RetryKind) => {
     if (kind === 'payment' && !window.confirm(`تأكد أولًا أن مستحقات واتساب في Meta مسدّدة، وإلا ستفشل الرسائل مرة أخرى.
 
 إعادة إرسال ${num(campaign?.paymentFailed || 0)} رسالة فشلت بسبب الدفع؟`)) return;
+    if (kind === 'limit' && !window.confirm(`إعادة إرسال ${num(campaign?.metaLimitFailed || 0)} رسالة حجبتها Meta لأن العميل وصل حدّ الرسائل التسويقية.
+${campaign?.metaLimitFailedAt ? `
+آخر فشل كان قبل ${since(campaign.metaLimitFailedAt)}.` : ''}
+إن لم يمضِ وقت كافٍ (يُفضّل 24 ساعة على الأقل) قد تحجبها Meta مرة أخرى.
+
+متابعة؟`)) return;
     setActing(kind);
     try {
-      const path = kind === 'cancel' ? 'cancel' : kind === 'payment' ? 'retry-payment-failed' : 'retry-failed';
+      const path = { cancel: 'cancel', retry: 'retry-failed', limit: 'retry-meta-limit', payment: 'retry-payment-failed' }[kind];
       const { data } = await api.post(`/integrations/meta/whatsapp/campaigns/${id}/${path}`);
       setCampaign(data);
-      showToast(kind === 'cancel' ? 'أُوقفت الحملة.' : kind === 'payment' ? 'أُعيدت رسائل الدفع الفاشلة للإرسال.' : 'أُعيدت الأرقام الفاشلة للإرسال.', 'success');
+      showToast({
+        cancel: 'أُوقفت الحملة.',
+        retry: 'أُعيدت الأرقام الفاشلة للإرسال.',
+        limit: 'أُعيدت الرسائل المحجوبة بحدّ Meta للإرسال.',
+        payment: 'أُعيدت رسائل الدفع الفاشلة للإرسال.',
+      }[kind], 'success');
     } catch (error) {
       showToast(errorMessage(error, 'تعذر تنفيذ العملية.'), 'error');
     } finally {
@@ -223,17 +234,20 @@ export default function WhatsAppCampaignPage() {
                 {acting === 'cancel' ? <Loader2 size={15} className="animate-spin" /> : <Ban size={15} />} إيقاف الحملة
               </button>
             )}
-            {retryable && (
-              <button type="button" onClick={() => void act('retry')} disabled={acting !== null} className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border border-labbaik-border text-sm font-bold text-neutral-800 dark:text-neutral-100 hover:border-labbaik-blue/40 hover:text-labbaik-blue disabled:opacity-50 cursor-pointer">
-                {acting === 'retry' ? <Loader2 size={15} className="animate-spin" /> : <RotateCcw size={15} />} إعادة إرسال غير المُرسلة
-              </button>
-            )}
-            {campaign.paymentFailed > 0 && campaign.status !== 'scheduled' && (
-              <button type="button" onClick={() => void act('payment')} disabled={acting !== null} title="رسائل رفضتها Meta لأن حساب واتساب عليه مستحقات غير مسدّدة"
-                className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border border-amber-500/50 text-sm font-bold text-amber-800 dark:text-amber-300 hover:bg-amber-500/10 disabled:opacity-50 cursor-pointer">
-                {acting === 'payment' ? <Loader2 size={15} className="animate-spin" /> : <CreditCard size={15} />} إعادة إرسال فاشلة الدفع (<span className="tabular-nums">{num(campaign.paymentFailed)}</span>)
-              </button>
-            )}
+            <ResendMenu
+              acting={acting}
+              options={[
+                retryable && { kind: 'retry' as const, icon: <RotateCcw size={15} />, label: 'غير المُرسلة', hint: 'أرقام لم تقبلها Meta وقت الإرسال (خطأ مؤقت أو انقطاع)' },
+                campaign.metaLimitFailed > 0 && campaign.status !== 'scheduled' && {
+                  kind: 'limit' as const, icon: <Gauge size={15} />, label: 'المحجوبة بحدّ Meta', count: campaign.metaLimitFailed,
+                  hint: `وصل العميل حدّ الرسائل التسويقية${campaign.metaLimitFailedAt ? ` · آخر فشل قبل ${since(campaign.metaLimitFailedAt)}` : ''}`,
+                },
+                campaign.paymentFailed > 0 && campaign.status !== 'scheduled' && {
+                  kind: 'payment' as const, icon: <CreditCard size={15} />, label: 'فاشلة الدفع', count: campaign.paymentFailed, hint: 'بعد سداد مستحقات واتساب في Meta',
+                },
+              ]}
+              onPick={(kind) => void act(kind)}
+            />
             {campaign.paymentFailed > 0 && stats.replied > 0 && (
               <button type="button" onClick={() => void retryFlows()} disabled={acting !== null} title="ردود التدفقات التي رفضتها Meta بسبب الدفع، لعملاء راسلونا خلال آخر 20 ساعة"
                 className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border border-amber-500/50 text-sm font-bold text-amber-800 dark:text-amber-300 hover:bg-amber-500/10 disabled:opacity-50 cursor-pointer">
@@ -530,6 +544,61 @@ function Param({ label, value }: { label: string; value: string }) {
     <div className="flex gap-2">
       <dt dir="ltr" className="shrink-0 text-labbaik-text-muted">{label}</dt>
       <dd className="text-neutral-800 dark:text-neutral-100 wrap-break-word">{describeTokens(value)}</dd>
+    </div>
+  );
+}
+
+type RetryKind = 'retry' | 'limit' | 'payment';
+type ResendOption = { kind: RetryKind; icon: ReactNode; label: string; hint: string; count?: number };
+
+/** "1 ساعة / 3 أيام": how long ago, for judging whether to try Meta's limit again. */
+function since(iso: string) {
+  const minutes = Math.max(1, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+  if (minutes < 60) return `${num(minutes)} دقيقة`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) return `${num(hours)} ساعة`;
+  return `${num(Math.round(hours / 24))} يوم`;
+}
+
+/** One "إعادة إرسال" button that opens the kinds of failed messages that can be sent again. */
+function ResendMenu({ options, acting, onPick }: { options: (ResendOption | false)[]; acting: string | null; onPick: (kind: RetryKind) => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const available = options.filter(Boolean) as ResendOption[];
+  useEffect(() => {
+    if (!open) return;
+    const close = (event: MouseEvent | KeyboardEvent) => {
+      if (event instanceof KeyboardEvent ? event.key === 'Escape' : !ref.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', close);
+    document.addEventListener('keydown', close);
+    return () => { document.removeEventListener('mousedown', close); document.removeEventListener('keydown', close); };
+  }, [open]);
+  if (!available.length) return null;
+  const busy = available.some((o) => o.kind === acting);
+  return (
+    <div ref={ref} className="relative">
+      <button type="button" onClick={() => setOpen((v) => !v)} disabled={acting !== null} aria-haspopup="menu" aria-expanded={open}
+        className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border border-labbaik-border text-sm font-bold text-neutral-800 dark:text-neutral-100 hover:border-labbaik-blue/40 hover:text-labbaik-blue disabled:opacity-50 cursor-pointer">
+        {busy ? <Loader2 size={15} className="animate-spin" /> : <RotateCcw size={15} />} إعادة إرسال <ChevronDown size={14} className={open ? 'rotate-180' : ''} />
+      </button>
+      {open && (
+        <div role="menu" className="absolute z-20 mt-1 left-0 sm:left-auto sm:right-0 w-72 max-w-[calc(100vw-2rem)] rounded-lg border border-labbaik-border bg-labbaik-surface shadow-lg p-1">
+          {available.map((o) => (
+            <button key={o.kind} type="button" role="menuitem" onClick={() => { setOpen(false); onPick(o.kind); }}
+              className="w-full flex items-start gap-2 rounded-md px-3 py-2 text-right hover:bg-labbaik-page cursor-pointer">
+              <span className="mt-0.5 shrink-0 text-labbaik-text-muted">{o.icon}</span>
+              <span className="min-w-0 flex-1">
+                <span className="flex items-center gap-2 text-sm font-bold text-neutral-900 dark:text-white">
+                  {o.label}
+                  {o.count !== undefined && <span className="tabular-nums text-xs font-bold text-labbaik-text-muted">{num(o.count)}</span>}
+                </span>
+                <span className="block text-xs text-labbaik-text-muted">{o.hint}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

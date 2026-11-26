@@ -24,7 +24,7 @@ import CustomerAvatar from '../components/CustomerAvatar';
 import Composer from '../components/conversations/Composer';
 import { ReturnDetailsDialog, ShipmentDetailsDialog } from '../components/store-chat/StoreDetailsDialogs';
 import { useToast } from '../components/Toast';
-import { formatNumber } from '@/lib/utils';
+import { formatNumber, phoneMatches } from '@/lib/utils';
 import {
   chatState,
   customerName,
@@ -169,7 +169,7 @@ export default function StoreChatsPage() {
     return (customers || []).filter((c) => {
       if (filter !== 'all' && chatState(c) !== filter) return false;
       if (!q) return true;
-      return customerName(c).toLowerCase().includes(q) || String(c.customer?.phone || '').includes(q);
+      return customerName(c).toLowerCase().includes(q) || phoneMatches(c.customer?.phone, q);
     });
   }, [customers, search, filter]);
 

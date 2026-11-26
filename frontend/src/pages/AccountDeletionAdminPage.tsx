@@ -4,6 +4,7 @@ import { Button } from '../components/ui/Button';
 import { useToast } from '../components/Toast';
 import { Trash2, CheckCircle2, RefreshCw, Loader2, Search } from 'lucide-react';
 import api from '../api/client';
+import { phoneMatches } from '../lib/utils';
 
 type DeletionRequest = {
   id: string;
@@ -76,7 +77,7 @@ export default function AccountDeletionAdminPage() {
       return (
         r.email.toLowerCase().includes(q) ||
         (r.organizationName || '').toLowerCase().includes(q) ||
-        (r.phone || '').includes(q)
+        phoneMatches(r.phone, q)
       );
     }
     return true;

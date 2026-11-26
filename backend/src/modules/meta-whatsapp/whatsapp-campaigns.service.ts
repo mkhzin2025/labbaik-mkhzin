@@ -2,7 +2,7 @@ import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundEx
 import { runsCampaigns } from '../../common/app-role';
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, Repository } from 'typeorm';
-import { normalizePhoneNumber } from '../../common/utils/phone.util';
+import { normalizePhoneNumber, phoneSearch } from '../../common/utils/phone.util';
 import { AUDIENCE_LIMIT, CustomersService, audienceToFilters } from '../customers/customers.service';
 import { CustomerAudienceDto } from '../customers/dto/customer.dto';
 import { OrganizationsService } from '../organizations/organizations.service';
@@ -86,7 +86,21 @@ export type MetaButtonClicks = {
   buttons: { type: string; text: string; count: number }[];
 };
 
+/**
+ * A number Meta refuses as malformed (code 131009 with a phone-format message). Only that number is at fault,
+ * so it does not count toward stopping the campaign, and retrying it can never succeed.
+ * (131009 alone also covers bad template parameters, which fail every send, so the phone wording is required.)
+ */
+const BAD_NUMBER_ERROR = /تنسيق رقم الهاتف|phone number format/i;
+const BAD_NUMBER_SQL = `(error ILIKE '%تنسيق رقم الهاتف%' OR error ILIKE '%phone number format%')`;
+
 const PAYMENT_FAILURE_SQL = `r.status = 'failed' AND (r.error ILIKE '%unsettled payment%' OR r.error ILIKE '%payment method%' OR r.error ILIKE '%131042%')`;
+/**
+ * Messages Meta held back because the person already got their share of marketing messages (code 131049,
+ * "to maintain a healthy ecosystem engagement"). Accepted by Meta, so the plain retry skips them; they may get
+ * through on a later day, and the user decides when to try again.
+ */
+const META_LIMIT_FAILURE_SQL = `r.status = 'failed' AND (r.error ILIKE '%healthy ecosystem%' OR r.error ILIKE '%131049%')`;
 
 export type CampaignStats = {
   total: number;
@@ -360,7 +374,7 @@ export class WhatsAppCampaignsService implements OnApplicationBootstrap, OnModul
     }
     const [, retried] = await this.recipientRepository.query(
       `UPDATE whatsapp_campaign_recipients SET status = 'pending', error = NULL, "failedAt" = NULL
-        WHERE "campaignId" = $1 AND "whatsappMessageId" IS NULL AND status IN ('failed', 'skipped')`,
+        WHERE "campaignId" = $1 AND "whatsappMessageId" IS NULL AND status IN ('failed', 'skipped') AND NOT ${BAD_NUMBER_SQL}`,
       [id],
     );
     if (!retried) throw new BadRequestException('لا توجد أرقام قابلة لإعادة المحاولة.');
@@ -374,15 +388,28 @@ export class WhatsAppCampaignsService implements OnApplicationBootstrap, OnModul
    * WhatsApp account is paid up. Works while the campaign is still sending: the running loop picks them up.
    */
   async retryPaymentFailedForUser(userId: string, organizationId: string | undefined, id: string) {
+    return this.requeueAccepted(userId, organizationId, id, PAYMENT_FAILURE_SQL, 'لا توجد رسائل فشلت بسبب الدفع.');
+  }
+
+  /** Re-queues the messages Meta held back under its per-person marketing limit (see META_LIMIT_FAILURE_SQL). */
+  async retryMetaLimitForUser(userId: string, organizationId: string | undefined, id: string) {
+    return this.requeueAccepted(userId, organizationId, id, META_LIMIT_FAILURE_SQL, 'لا توجد رسائل محجوبة بحدّ Meta.');
+  }
+
+  /**
+   * Sends again numbers Meta accepted and then failed (`failure` picks which), as fresh messages. Works while the
+   * campaign is still sending: the running loop picks them up.
+   */
+  private async requeueAccepted(userId: string, organizationId: string | undefined, id: string, failure: string, none: string) {
     const campaign = await this.findAccessible(userId, organizationId, id);
     if (campaign.status === WhatsAppCampaignStatus.SCHEDULED) throw new BadRequestException('الحملة لم تبدأ بعد.');
     const [, retried] = await this.recipientRepository.query(
       `UPDATE whatsapp_campaign_recipients r
           SET status = 'pending', error = NULL, "failedAt" = NULL, "whatsappMessageId" = NULL, "sentAt" = NULL, "deliveredAt" = NULL
-        WHERE r."campaignId" = $1 AND ${PAYMENT_FAILURE_SQL}`,
+        WHERE r."campaignId" = $1 AND ${failure}`,
       [id],
     );
-    if (!retried) throw new BadRequestException('لا توجد رسائل فشلت بسبب الدفع.');
+    if (!retried) throw new BadRequestException(none);
     if (campaign.status !== WhatsAppCampaignStatus.SENDING && campaign.status !== WhatsAppCampaignStatus.QUEUED) {
       await this.campaignRepository.update(id, { status: WhatsAppCampaignStatus.QUEUED, lastError: null, completedAt: null });
     }
@@ -482,7 +509,7 @@ export class WhatsAppCampaignsService implements OnApplicationBootstrap, OnModul
             consecutiveFailures = 0;
           } catch (error: any) {
             lastError = errorText(error);
-            consecutiveFailures += 1;
+            if (!BAD_NUMBER_ERROR.test(lastError)) consecutiveFailures += 1;
             await this.recipientRepository.update(recipient.id, { status: CampaignRecipientStatus.FAILED, error: lastError, failedAt: new Date() });
           }
         }
@@ -695,7 +722,7 @@ export class WhatsAppCampaignsService implements OnApplicationBootstrap, OnModul
 
   async getForUser(userId: string, organizationId: string | undefined, id: string) {
     const campaign = await this.findAccessible(userId, organizationId, id);
-    const [stats, byBranch, buttons, errors, timeline, [payment], metaButtons] = await Promise.all([
+    const [stats, byBranch, buttons, errors, timeline, [failures], metaButtons] = await Promise.all([
       this.statsFor([id]).then((map) => map.get(id) || toStats()),
       this.recipientRepository.query(
         `SELECT r."storeId", MAX(r."storeName") AS "storeName", ${STATS_SELECT}
@@ -728,7 +755,10 @@ export class WhatsAppCampaignsService implements OnApplicationBootstrap, OnModul
         [id, campaign.startedAt || campaign.createdAt],
       ),
       this.recipientRepository.query(
-        `SELECT COUNT(*)::int AS count FROM whatsapp_campaign_recipients r WHERE r."campaignId" = $1 AND ${PAYMENT_FAILURE_SQL}`,
+        `SELECT COUNT(*) FILTER (WHERE ${PAYMENT_FAILURE_SQL})::int AS payment,
+                COUNT(*) FILTER (WHERE ${META_LIMIT_FAILURE_SQL})::int AS "metaLimit",
+                MAX(r."failedAt") FILTER (WHERE ${META_LIMIT_FAILURE_SQL}) AS "metaLimitAt"
+           FROM whatsapp_campaign_recipients r WHERE r."campaignId" = $1 AND r.status = 'failed'`,
         [id],
       ),
       this.metaButtonClicks(campaign),
@@ -751,7 +781,9 @@ export class WhatsAppCampaignsService implements OnApplicationBootstrap, OnModul
       buttons: buttons.map((row: any) => ({ text: row.text, count: Number(row.count) })),
       metaButtons,
       errors: groupErrors(errors.map((row: any) => ({ error: row.error, count: Number(row.count) }))).slice(0, 8),
-      paymentFailed: Number(payment?.count || 0),
+      paymentFailed: Number(failures?.payment || 0),
+      metaLimitFailed: Number(failures?.metaLimit || 0),
+      metaLimitFailedAt: failures?.metaLimitAt ? new Date(failures.metaLimitAt).toISOString() : null,
       timeline: timeline.map((row: any) => ({ kind: row.kind, bucket: new Date(row.bucket).toISOString(), count: Number(row.count) })),
     };
   }
@@ -784,13 +816,18 @@ export class WhatsAppCampaignsService implements OnApplicationBootstrap, OnModul
     if (query.filter !== 'all' && RECIPIENT_FILTERS[query.filter]) where.push(RECIPIENT_FILTERS[query.filter]);
     const term = query.search?.trim();
     if (term) {
-      const digits = term.replace(/[^0-9]/g, '').replace(/^0+/, '');
-      params.push(`%${term}%`);
-      const nameClause = `r."customerName" ILIKE $${params.length}`;
-      if (digits) {
-        params.push(`%${digits}%`);
-        where.push(`(${nameClause} OR r.phone LIKE $${params.length})`);
-      } else where.push(nameClause);
+      // A number matches the phone only, in any format (see phoneSearch); text matches the name.
+      const phone = phoneSearch(term);
+      if (phone && 'exact' in phone) {
+        params.push(phone.exact);
+        where.push(`r.phone = $${params.length}`);
+      } else if (phone) {
+        params.push('prefix' in phone ? `${phone.prefix}%` : `%${phone.contains}%`);
+        where.push(`r.phone LIKE $${params.length}`);
+      } else {
+        params.push(`%${term}%`);
+        where.push(`r."customerName" ILIKE $${params.length}`);
+      }
     }
     const clause = where.join(' AND ');
     const [{ total }] = await this.recipientRepository.query(`SELECT COUNT(*)::int AS total FROM whatsapp_campaign_recipients r WHERE ${clause}`, params);

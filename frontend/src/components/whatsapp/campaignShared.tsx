@@ -67,6 +67,10 @@ export type CampaignDetails = Campaign & {
   errors: { error: string; count: number }[];
   /** Numbers Meta rejected over unpaid WhatsApp billing; can be re-sent once the account is paid up. */
   paymentFailed: number;
+  /** Messages Meta held back under its per-person marketing limit (131049); can be re-sent whenever the user chooses. */
+  metaLimitFailed: number;
+  /** When the latest of those failed, so the user can judge whether enough time has passed. */
+  metaLimitFailedAt: string | null;
   timeline: { kind: 'sent' | 'read' | 'replied'; bucket: string; count: number }[];
 };
 

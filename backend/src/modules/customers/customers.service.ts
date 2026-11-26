@@ -1,4 +1,4 @@
-import { normalizePhoneNumber } from '../../common/utils/phone.util';
+import { normalizePhoneNumber, phoneSearch } from '../../common/utils/phone.util';
 import { drawPdfText } from '../../common/utils/pdf-text.util';
 import { SourceStatisticsReport, SourceStatisticsRow, StatisticsSource, writeSourceStatisticsPdf } from './customers-statistics-pdf';
 import { AGE_TAG_PREFIX, COMPETITION_CATEGORY, COMPETITION_ONLINE_CATEGORY } from './competition-sync.plan';
@@ -1214,13 +1214,19 @@ export class CustomersService implements OnModuleInit {
 
     const term = filters.search?.trim();
     if (term) {
-      // Local numbers (05…) should match stored international ones (+9665…), so leading zeros are ignored.
-      const digits = term.replace(/[^0-9]/g, '').replace(/^0+/, '');
-      query.andWhere(new Brackets((qb) => {
-        qb.where('LOWER(COALESCE(customer.fullName, \'\')) LIKE :search', { search: `%${term.toLowerCase()}%` })
-          .orWhere('LOWER(COALESCE(customer.email, \'\')) LIKE :search');
-        if (digits) qb.orWhere('COALESCE(customer.phoneNumber, \'\') LIKE :phoneSearch', { phoneSearch: `%${digits}%` });
-      }));
+      // A number matches the phone only, in any format (see phoneSearch): a whole one from the digits index,
+      // part of one from the phone trigram index. Text matches the name or email.
+      const phone = phoneSearch(term);
+      if (phone && 'exact' in phone) {
+        query.andWhere("REGEXP_REPLACE(COALESCE(customer.phoneNumber, customer.whatsappId, ''), '[^0-9]', '', 'g') = :phoneExact", { phoneExact: phone.exact });
+      } else if (phone) {
+        query.andWhere('COALESCE(customer.phoneNumber, \'\') LIKE :phoneSearch', { phoneSearch: `%${'prefix' in phone ? phone.prefix : phone.contains}%` });
+      } else {
+        query.andWhere(new Brackets((qb) => {
+          qb.where('LOWER(COALESCE(customer.fullName, \'\')) LIKE :search', { search: `%${term.toLowerCase()}%` })
+            .orWhere('LOWER(COALESCE(customer.email, \'\')) LIKE :search');
+        }));
+      }
     }
 
     if (filters.categoryIds?.length) {
