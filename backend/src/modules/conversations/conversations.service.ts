@@ -12,6 +12,7 @@ import { EventsGateway } from '../events/events.gateway';
 import { BillingService } from '../billing/billing.service';
 import { MetaUsageType } from '../billing/entities/pricing-rule.entity';
 import { normalizePhoneNumber } from '../../common/utils/phone.util';
+import { inboxSearchClause } from './inbox-search';
 import { WHATSAPP_MEDIA_TYPES, WHATSAPP_MEDIA_UNSUPPORTED } from '../../common/utils/whatsapp-media-types';
 import { WhatsAppMediaService } from '../channels/whatsapp-media.service';
 import { TtlCache, concurrencyLimit } from '../../common/utils/ttl-cache';
@@ -131,7 +132,6 @@ type StoreStats = {
 const clampLimit = (value: number | undefined, fallback: number, max: number) =>
   Number.isFinite(value) && (value as number) > 0 ? Math.min(Math.floor(value as number), max) : fallback;
 
-const escapeRegex = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 // Opaque keyset cursor: the (lastMessageAt, _id) of the last row on the previous page.
 const encodeCursor = (lastMessageAt: Date | null | undefined, id: string) =>
@@ -948,7 +948,8 @@ export class ConversationsService implements OnModuleInit {
       ]);
       return (hinted ? pipeline.hint(STATUS_OWNER_INDEX) : pipeline).exec();
     };
-    const rows = await group(true).catch((error) => {
+    // A search narrows the branch to a few threads through the phone index; the hint would make it read the whole branch.
+    const rows = await group(!filters.search?.trim()).catch((error) => {
       if (!/hint/i.test(String(error?.message))) throw error;
       return group(false);
     });
@@ -1003,8 +1004,7 @@ export class ConversationsService implements OnModuleInit {
     else if (filters.tab === 'needs_reply') Object.assign(query, ConversationsService.needsTeamReplyQuery());
     else if (filters.tab === 'pending') query.status = 'pending'; // pages opened before pending became a view
     if (search) {
-      const pattern = new RegExp(escapeRegex(search), 'i');
-      and.push({ $or: [{ customerName: pattern }, { customerPhone: pattern }, { lastMessage: pattern }] });
+      and.push(inboxSearchClause(search));
     }
     if (and.length) query.$and = and;
     return query;
