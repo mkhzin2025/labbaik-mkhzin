@@ -126,6 +126,9 @@ services:
     image: postgres:15-alpine
     container_name: labbaik-postgres
     restart: unless-stopped
+    # Docker's default 64MB /dev/shm is too small for parallel queries over large campaigns
+    # ("could not resize shared memory segment ... No space left on device").
+    shm_size: ${POSTGRES_SHM_SIZE:-1gb}
     logging: *default-logging
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-labbaik_admin}

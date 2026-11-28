@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { AlertTriangle, ArrowRight, Ban, CalendarClock, ChevronDown, CreditCard, Gauge, Loader2, MessageSquareReply, MousePointerClick, RotateCcw, Search, Workflow } from 'lucide-react';
+import { AlertTriangle, ArrowRight, Ban, BellOff, CalendarClock, ChevronDown, CreditCard, Gauge, Loader2, MessageSquareReply, MousePointerClick, RotateCcw, Search, Tag, Workflow } from 'lucide-react';
 import { Link, useParams } from 'react-router-dom';
 import api from '../api/client';
 import { useToast } from '../components/Toast';
@@ -15,6 +15,7 @@ import {
   RecipientStatusBadge,
   type ActivityPoint,
   type CampaignDetails,
+  type FailureKind,
 } from '../components/whatsapp/campaignShared';
 import { dateTime, engagement, interactionsOf, isActive, num, pct } from '../components/whatsapp/campaignFormat';
 import { toEnglishDigits } from '@/lib/utils';
@@ -56,7 +57,7 @@ export default function WhatsAppCampaignPage() {
   const [campaign, setCampaign] = useState<CampaignDetails | null>(null);
   const [template, setTemplate] = useState<Template | null>(null);
   const [failed, setFailed] = useState(false);
-  const [acting, setActing] = useState<'cancel' | RetryKind | 'flows' | 'replies' | null>(null);
+  const [acting, setActing] = useState<'cancel' | RetryKind | FailureKind | 'flows' | 'replies' | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -169,6 +170,29 @@ ${campaign?.metaLimitFailedAt ? `
         limit: 'أُعيدت الرسائل المحجوبة بحدّ Meta للإرسال.',
         payment: 'أُعيدت رسائل الدفع الفاشلة للإرسال.',
       }[kind], 'success');
+    } catch (error) {
+      showToast(errorMessage(error, 'تعذر تنفيذ العملية.'), 'error');
+    } finally {
+      setActing(null);
+    }
+  };
+
+  // Leaves these customers out of later campaigns: a tag to exclude, or (for opt-outs) the marketing opt-out every audience skips.
+  const markFailed = async (kind: FailureKind, count: number) => {
+    const action = MARK_FAILED[kind];
+    if (!window.confirm(`${action.confirm}
+
+يشمل ${num(count)} رقم، وكل سجلات العميل بنفس الرقم في كل الفروع.
+
+متابعة؟`)) return;
+    setActing(kind);
+    try {
+      const { data } = await api.post<{ numbers: number; customers: number; tag?: { name: string } }>(
+        `/integrations/meta/whatsapp/campaigns/${id}/mark-failed-customers`, { kind },
+      );
+      showToast(data.tag
+        ? `أُضيف وسم «${data.tag.name}» إلى ${num(data.customers)} سجل عميل. استثنِه من جمهور الحملات القادمة.`
+        : `أُلغي الاشتراك التسويقي لـ ${num(data.customers)} سجل عميل، ولن يُضافوا لأي حملة قادمة.`, 'success');
     } catch (error) {
       showToast(errorMessage(error, 'تعذر تنفيذ العملية.'), 'error');
     } finally {
@@ -419,7 +443,14 @@ ${campaign?.metaLimitFailedAt ? `
                 {campaign.errors.map((e) => (
                   <li key={e.error} className="flex items-start gap-2 text-xs">
                     <b className="tabular-nums text-red-700 dark:text-red-300 shrink-0">{num(e.count)}</b>
-                    <span className="min-w-0 text-neutral-700 dark:text-neutral-200 wrap-anywhere" dir="auto">{e.error || 'غير معروف'}</span>
+                    <span className="min-w-0 flex-1 text-neutral-700 dark:text-neutral-200 wrap-anywhere" dir="auto">{e.error || 'غير معروف'}</span>
+                    {e.kind && (
+                      <button type="button" onClick={() => void markFailed(e.kind!, e.count)} disabled={acting !== null} title={MARK_FAILED[e.kind].confirm}
+                        className="shrink-0 inline-flex items-center gap-1 h-7 px-2 rounded-md border border-labbaik-border font-bold text-neutral-800 dark:text-neutral-100 hover:border-labbaik-blue/40 hover:text-labbaik-blue disabled:opacity-50 cursor-pointer">
+                        {acting === e.kind ? <Loader2 size={12} className="animate-spin" /> : e.kind === 'opted_out' ? <BellOff size={12} /> : <Tag size={12} />}
+                        {MARK_FAILED[e.kind].label}
+                      </button>
+                    )}
                   </li>
                 ))}
               </ul>
@@ -602,3 +633,9 @@ function ResendMenu({ options, acting, onPick }: { options: (ResendOption | fals
     </div>
   );
 }
+
+const MARK_FAILED: Record<FailureKind, { label: string; confirm: string }> = {
+  undeliverable: { label: 'وسم «غير مسجّل في واتساب»', confirm: 'إضافة وسم «غير مسجّل في واتساب» لهؤلاء العملاء، لتستثنيهم من الحملات القادمة.' },
+  bad_number: { label: 'وسم «رقم بصيغة خاطئة»', confirm: 'إضافة وسم «رقم بصيغة خاطئة» لهؤلاء العملاء، لتجدهم وتصحّح أرقامهم أو تستثنيهم.' },
+  opted_out: { label: 'إلغاء اشتراكهم التسويقي', confirm: 'إلغاء الاشتراك التسويقي لهؤلاء العملاء، فلا يُضافون لأي حملة تسويقية قادمة.' },
+};

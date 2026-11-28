@@ -7,6 +7,8 @@ import { AUDIENCE_LIMIT, CustomersService, audienceToFilters } from '../customer
 import { CustomerAudienceDto } from '../customers/dto/customer.dto';
 import { OrganizationsService } from '../organizations/organizations.service';
 import { Store } from '../stores/entities/store.entity';
+import { CustomerTag } from '../customers/entities/customer-tag.entity';
+import { CustomerTaxonomyScope } from '../customers/entities/customer-category.entity';
 import { SendWhatsAppTemplateBulkDto } from './dto/meta-whatsapp.dto';
 import { MetaConnectionScope, MetaWhatsAppConnection } from './entities/meta-whatsapp-connection.entity';
 import { WhatsAppCampaign, WhatsAppCampaignAudience, WhatsAppCampaignParameters, WhatsAppCampaignStatus } from './entities/whatsapp-campaign.entity';
@@ -14,7 +16,7 @@ import { CampaignRecipientStatus, WhatsAppCampaignRecipient } from './entities/w
 import { MetaWhatsAppService } from './meta-whatsapp.service';
 import { MetaTemplatePayloadBuilder } from './services/meta-template-payload.builder';
 import { writeCampaignsReportPdf } from './campaigns-report-pdf';
-import { groupErrors } from './campaign-errors';
+import { FAILURE_KIND_SQL, groupErrors, type FailureKind } from './campaign-errors';
 import type { Response } from 'express';
 
 /** Upper bound on parallel sends per campaign; the chosen messages/second paces them. */
@@ -91,6 +93,17 @@ export type MetaButtonClicks = {
  * so it does not count toward stopping the campaign, and retrying it can never succeed.
  * (131009 alone also covers bad template parameters, which fail every send, so the phone wording is required.)
  */
+const FAILURE_TAGS: Record<Exclude<FailureKind, 'opted_out'>, { name: string; color: string }> = {
+  undeliverable: { name: 'غير مسجّل في واتساب', color: '#64748b' },
+  bad_number: { name: 'رقم بصيغة خاطئة', color: '#dc2626' },
+};
+/**
+ * People who replied, plus the clicks Meta counted beyond our own button replies (URL buttons we never see).
+ * Meta's quick-reply counts include our button replies, so they never stand in for them: a smaller Meta count
+ * (it rounds and attributes per day) no longer pulls real replies out of the total.
+ */
+export const withMetaClicks = (replied: number, buttonReplies: number, metaClicks: number) => replied + Math.max(0, metaClicks - buttonReplies);
+
 const BAD_NUMBER_ERROR = /تنسيق رقم الهاتف|phone number format/i;
 const BAD_NUMBER_SQL = `(error ILIKE '%تنسيق رقم الهاتف%' OR error ILIKE '%phone number format%')`;
 
@@ -374,7 +387,7 @@ export class WhatsAppCampaignsService implements OnApplicationBootstrap, OnModul
     }
     const [, retried] = await this.recipientRepository.query(
       `UPDATE whatsapp_campaign_recipients SET status = 'pending', error = NULL, "failedAt" = NULL
-        WHERE "campaignId" = $1 AND "whatsappMessageId" IS NULL AND status IN ('failed', 'skipped') AND NOT ${BAD_NUMBER_SQL}`,
+        WHERE "campaignId" = $1 AND "whatsappMessageId" IS NULL AND status IN ('failed', 'skipped') AND NOT COALESCE(${BAD_NUMBER_SQL}, false)`,
       [id],
     );
     if (!retried) throw new BadRequestException('لا توجد أرقام قابلة لإعادة المحاولة.');
@@ -394,6 +407,55 @@ export class WhatsAppCampaignsService implements OnApplicationBootstrap, OnModul
   /** Re-queues the messages Meta held back under its per-person marketing limit (see META_LIMIT_FAILURE_SQL). */
   async retryMetaLimitForUser(userId: string, organizationId: string | undefined, id: string) {
     return this.requeueAccepted(userId, organizationId, id, META_LIMIT_FAILURE_SQL, 'لا توجد رسائل محجوبة بحدّ Meta.');
+  }
+
+  /**
+   * Marks the customers behind one kind of failure so later campaigns can leave them out: opted-out customers are
+   * opted out of marketing (every audience skips them), the others get an organization tag to exclude.
+   * Every customer record with the number is marked, in any branch, since an audience picks one record per number.
+   */
+  async markFailedCustomersForUser(userId: string, organizationId: string | undefined, id: string, kind: FailureKind) {
+    const campaign = await this.findAccessible(userId, organizationId, id);
+    const failure = FAILURE_KIND_SQL[kind];
+    if (!failure) throw new BadRequestException('Unknown failure kind');
+    const phones: string[] = (await this.recipientRepository.query(
+      `SELECT DISTINCT r.phone FROM whatsapp_campaign_recipients r WHERE r."campaignId" = $1 AND r.status = 'failed' AND ${failure}`,
+      [id],
+    )).map((row: { phone: string }) => row.phone).filter(Boolean);
+    if (!phones.length) throw new BadRequestException('لا توجد أرقام لهذا السبب في الحملة.');
+    const customers = `SELECT c.id FROM customers c JOIN stores s ON s.id = c."storeId"
+      WHERE s."organizationId" = $1 AND REGEXP_REPLACE(COALESCE(c."phoneNumber", c."whatsappId", ''), '[^0-9]', '', 'g') = ANY($2::text[])`;
+    if (kind === 'opted_out') {
+      const [, marked] = await this.recipientRepository.query(
+        `UPDATE customers SET "marketingOptOut" = true, "marketingOptOutAt" = COALESCE("marketingOptOutAt", now())
+          WHERE id IN (${customers}) AND "marketingOptOut" = false`,
+        [campaign.organizationId, phones],
+      );
+      return { numbers: phones.length, customers: Number(marked) || 0, optedOut: true };
+    }
+    const tag = await this.failureTag(campaign.organizationId, kind);
+    const linked: unknown[] = await this.recipientRepository.query(
+      `INSERT INTO customer_tag_links ("customerId", "tagId") SELECT id, $3 FROM (${customers}) matched
+       ON CONFLICT DO NOTHING RETURNING "customerId"`,
+      [campaign.organizationId, phones, tag.id],
+    );
+    return { numbers: phones.length, customers: linked.length, tag };
+  }
+
+  /** The organization tag for a failure kind, created on first use (or reactivated if it was turned off). */
+  private async failureTag(organizationId: string, kind: Exclude<FailureKind, 'opted_out'>) {
+    const { name, color } = FAILURE_TAGS[kind];
+    const [existing] = await this.recipientRepository.query(
+      `SELECT id, name, color FROM customer_tags WHERE "organizationId" = $1 AND scope = 'organization' AND name = $2 ORDER BY "createdAt" LIMIT 1`,
+      [organizationId, name],
+    );
+    if (existing) {
+      await this.recipientRepository.query('UPDATE customer_tags SET "isActive" = true WHERE id = $1 AND "isActive" = false', [existing.id]);
+      return existing as { id: string; name: string; color: string };
+    }
+    const tags = this.recipientRepository.manager.getRepository(CustomerTag);
+    const created = await tags.save(tags.create({ organizationId, scope: CustomerTaxonomyScope.ORGANIZATION, storeId: null, name, color, isActive: true }));
+    return { id: created.id, name: created.name, color: created.color };
   }
 
   /**
@@ -720,7 +782,8 @@ export class WhatsAppCampaignsService implements OnApplicationBootstrap, OnModul
     };
   }
 
-  async getForUser(userId: string, organizationId: string | undefined, id: string) {
+  /** `timeline: false` skips the hourly activity (the PDF report does not show it). */
+  async getForUser(userId: string, organizationId: string | undefined, id: string, options: { timeline?: boolean } = {}) {
     const campaign = await this.findAccessible(userId, organizationId, id);
     const [stats, byBranch, buttons, errors, timeline, [failures], metaButtons] = await Promise.all([
       this.statsFor([id]).then((map) => map.get(id) || toStats()),
@@ -744,7 +807,7 @@ export class WhatsAppCampaignsService implements OnApplicationBootstrap, OnModul
         [id, String.raw`\s*\[fbtrace_id:[^\]]*\]?`],
       ),
       // Hourly activity for the first week, so the user sees when the audience actually opened and answered.
-      this.recipientRepository.query(
+      options.timeline === false ? Promise.resolve([]) : this.recipientRepository.query(
         `SELECT kind, bucket, COUNT(*)::int AS count FROM (
            SELECT 'sent' AS kind, date_trunc('hour', r."sentAt") AS bucket FROM whatsapp_campaign_recipients r WHERE r."campaignId" = $1 AND r."sentAt" IS NOT NULL
            UNION ALL SELECT 'read', date_trunc('hour', r."readAt") FROM whatsapp_campaign_recipients r WHERE r."campaignId" = $1 AND r."readAt" IS NOT NULL
@@ -763,12 +826,12 @@ export class WhatsAppCampaignsService implements OnApplicationBootstrap, OnModul
       ),
       this.metaButtonClicks(campaign),
     ]);
-    if (metaButtons.available) stats.interactions = stats.replied - stats.clicked + metaButtons.total;
+    if (metaButtons.available) stats.interactions = withMetaClicks(stats.replied, stats.clicked, metaButtons.total);
     // Meta can't split clicks by branch, so each branch gets the share of its recipients (as the reports page does).
     const branchStats = (row: any) => {
       const branch = toStats(row);
       if (metaButtons.available && stats.total) {
-        branch.interactions = branch.replied - branch.clicked + Math.round(metaButtons.total * (branch.total / stats.total));
+        branch.interactions = withMetaClicks(branch.replied, branch.clicked, Math.round(metaButtons.total * (branch.total / stats.total)));
       }
       return branch;
     };
@@ -794,9 +857,10 @@ export class WhatsAppCampaignsService implements OnApplicationBootstrap, OnModul
     const queue = [...query.ids];
     const campaigns: Awaited<ReturnType<WhatsAppCampaignsService['getForUser']>>[] = [];
     const worker = async () => {
-      for (let id = queue.shift(); id; id = queue.shift()) campaigns.push(await this.getForUser(userId, organizationId, id));
+      for (let id = queue.shift(); id; id = queue.shift()) campaigns.push(await this.getForUser(userId, organizationId, id, { timeline: false }));
     };
-    await Promise.all(Array.from({ length: 4 }, worker));
+    // Two at a time: each campaign runs several scans over up to ~350k recipients.
+    await Promise.all(Array.from({ length: 2 }, worker));
     campaigns.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
     writeCampaignsReportPdf(response, {
       organizationName: organization.name,
@@ -1023,7 +1087,7 @@ export class WhatsAppCampaignsService implements OnApplicationBootstrap, OnModul
     let total = 0;
     for (const row of rows) {
       const meta = metaClicks.get(row.id);
-      const value = meta === undefined ? Number(row.replied) : Number(row.replied) - Number(row.clicked) + meta;
+      const value = meta === undefined ? Number(row.replied) : withMetaClicks(Number(row.replied), Number(row.clicked), meta);
       const key = `${row.templateName}::${row.templateLanguage}`;
       byCampaign.set(row.id, value);
       byTemplate.set(key, (byTemplate.get(key) || 0) + value);

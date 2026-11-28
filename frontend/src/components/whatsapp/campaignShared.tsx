@@ -57,6 +57,8 @@ export type Campaign = {
   stats: CampaignStats;
 };
 
+export type FailureKind = 'undeliverable' | 'bad_number' | 'opted_out';
+
 export type CampaignDetails = Campaign & {
   previewText: string | null;
   parameters: { body: string[]; header: string[]; buttons: { index: number; text: string }[]; otpCode?: string | null; nameFallback?: string | null; headerMedia?: HeaderMedia | null };
@@ -64,7 +66,8 @@ export type CampaignDetails = Campaign & {
   buttons: { text: string; count: number }[];
   /** Meta's click totals for every template button (URL buttons included), for the days this campaign owns. */
   metaButtons: { available: boolean; reason?: string; shared?: boolean; from?: string; to?: string; total: number; buttons: { type: string; text: string; count: number }[] };
-  errors: { error: string; count: number }[];
+  /** Grouped failure reasons; `kind` marks the ones whose customers can be tagged or opted out from the page. */
+  errors: { error: string; count: number; kind?: FailureKind }[];
   /** Numbers Meta rejected over unpaid WhatsApp billing; can be re-sent once the account is paid up. */
   paymentFailed: number;
   /** Messages Meta held back under its per-person marketing limit (131049); can be re-sent whenever the user chooses. */
