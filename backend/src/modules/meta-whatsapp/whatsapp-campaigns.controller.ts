@@ -1,4 +1,4 @@
-import { BadRequestException, Controller, Get, Param, ParseUUIDPipe, Post, Query, Request, Res, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Param, ParseUUIDPipe, Post, Query, Request, Res, UseGuards } from '@nestjs/common';
 import { isUUID } from 'class-validator';
 import type { Response } from 'express';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
@@ -102,5 +102,12 @@ export class WhatsAppCampaignsController {
   @Post(':id/retry-meta-limit')
   retryMetaLimit(@Request() req: any, @Param('id', ParseUUIDPipe) id: string) {
     return this.campaigns.retryMetaLimitForUser(req.user.id, req.user.organizationId, id);
+  }
+
+  /** Tags (or opts out of marketing) the customers behind one kind of failure, for leaving them out of later campaigns. */
+  @Post(':id/mark-failed-customers')
+  markFailedCustomers(@Request() req: any, @Param('id', ParseUUIDPipe) id: string, @Body('kind') kind: string) {
+    if (!['undeliverable', 'bad_number', 'opted_out'].includes(kind)) throw new BadRequestException('Unknown failure kind');
+    return this.campaigns.markFailedCustomersForUser(req.user.id, req.user.organizationId, id, kind as 'undeliverable' | 'bad_number' | 'opted_out');
   }
 }

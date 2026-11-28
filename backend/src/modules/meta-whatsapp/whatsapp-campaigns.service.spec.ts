@@ -1,5 +1,5 @@
 import { WhatsAppCampaignStatus } from './entities/whatsapp-campaign.entity';
-import { WhatsAppCampaignsService, parseTestPhones } from './whatsapp-campaigns.service';
+import { WhatsAppCampaignsService, parseTestPhones, withMetaClicks } from './whatsapp-campaigns.service';
 
 describe('WhatsAppCampaignsService.run', () => {
   function setup(opts: { total: number; status?: () => WhatsAppCampaignStatus; send?: (phone: string) => Promise<any>; test?: boolean }) {
@@ -141,5 +141,16 @@ describe('WhatsAppCampaignsService.retryPaymentFailedForUser', () => {
   it('says so when there is nothing to retry', async () => {
     const { service } = setup(WhatsAppCampaignStatus.COMPLETED, 0);
     await expect(service.retryPaymentFailedForUser('u1', 'o1', 'c1')).rejects.toThrow('لا توجد رسائل فشلت بسبب الدفع.');
+  });
+});
+
+describe('withMetaClicks', () => {
+  it('keeps every reply when Meta counts fewer quick-reply clicks than our own button replies', () => {
+    // riyadh26_11_20266: 24,857 replied (21,637 by button), Meta counted 20,379 clicks.
+    expect(withMetaClicks(24857, 21637, 20379)).toBe(24857);
+  });
+
+  it('adds the clicks Meta saw beyond our button replies (URL buttons)', () => {
+    expect(withMetaClicks(100, 60, 90)).toBe(130);
   });
 });
